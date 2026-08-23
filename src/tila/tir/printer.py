@@ -1,0 +1,127 @@
+"""TIR canonical dump（docs/ast.md §5）。输出是黄金测试的比对物，格式必须确定。
+
+规则：token 间以单个空格分隔；指令形如 `%id = opcode operand* : type [#src_name]`；
+语句级指令（store/return）无 id 无类型；layout 打印正规形式，相同正规形式按首次
+出现顺序命名 L0, L1, …，dump 首部列印 `L0 = identity(128)` 定义行。
+"""
+
+from __future__ import annotations
+
+from ..fmt import fmt_float
+from ..types import AddressType, TileType, type_str
+from ..types.layout import Identity, ProductL, BroadcastL
+from . import ops
+
+_ARITH_OPCODE = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
+_CMP_OPCODE = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne"}
+_LOGIC_OPCODE = {"&": "and", "|": "or"}
+
+
+class LayoutNamer:
+    """正规形式 layout → L0/L1/…（首次出现顺序；子项先于复合项命名）。"""
+
+    def __init__(self):
+        self._names = {}
+
+    def register_type(self, t) -> None:
+        if isinstance(t, (TileType, AddressType)):
+            self._register(t.layout)
+
+    def _register(self, term) -> None:
+        if term in self._names:
+            return
+        if isinstance(term, ProductL):
+            self._register(term.lhs)
+            self._register(term.rhs)
+        elif isinstance(term, BroadcastL):
+            self._register(term.of)
+        self._names.setdefault(term, f"L{len(self._names)}")
+
+    def name_of(self, term):
+        return self._names.get(term)
+
+    def definitions(self):
+        """按命名顺序返回 `L0 = identity(128)` 定义行（顶层项打印本体，子项打印名字）。"""
+        from ..types.layout import layout_str
+
+        lines = []
+        for term, name in self._names.items():
+            sub = lambda t: None if t is term else self.name_of(t)  # noqa: E731
+            lines.append(f"{name} = {layout_str(term, sub)}")
+        return lines
+
+
+def _params_str(kernel: ops.TKernel) -> str:
+    parts = []
+    for p in kernel.params:
+        if p.kind == "constexpr":
+            parts.append(f"{p.name}: Constexpr(i32)={p.default}")
+        else:
+            parts.append(f"{p.name}: {type_str(p.tila_type)}")
+    return ", ".join(parts)
+
+
+def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
+    toks = []
+    if op.id is not None:
+        toks.append(f"%{op.id} =")
+    if isinstance(op, ops.TConstInt):
+        toks += ["const", str(op.value)]
+    elif isinstance(op, ops.TConstFloat):
+        toks += ["const", fmt_float(op.value)]
+    elif isinstance(op, ops.TSymRef):
+        toks += ["sym_ref", op.name]
+    elif isinstance(op, ops.TConstParamRef):
+        toks += ["constexpr_ref", op.name]
+    elif isinstance(op, ops.TProgramId):
+        toks += ["program_id", str(op.axis)]
+    elif isinstance(op, ops.TArange):
+        toks += ["arange", str(op.start), ops.constexpr_str(op.end)]
+    elif isinstance(op, ops.TAddPtr):
+        toks += ["addptr", f"%{op.base}", f"%{op.offs}"]
+    elif isinstance(op, ops.TArith):
+        toks += [_ARITH_OPCODE[op.op], f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TCmp):
+        toks += [_CMP_OPCODE[op.op], f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TLogic):
+        toks += [_LOGIC_OPCODE[op.op], f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TLoad):
+        toks += ["load", f"%{op.ptr}"]
+        if op.mask is not None:
+            toks.append(f"mask=%{op.mask}")
+        if op.other is not None:
+            toks.append(f"other=%{op.other}")
+    elif isinstance(op, ops.TCast):
+        toks += ["cast", f"%{op.operand}", op.dtype]
+    elif isinstance(op, ops.TExpandDim):
+        toks += ["expand_dim", f"%{op.tile}", str(op.axis)]
+    elif isinstance(op, ops.TDot):
+        toks += ["dot", f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TStore):
+        toks += ["store", f"%{op.ptr}", f"%{op.value}"]
+        if op.mask is not None:
+            toks.append(f"mask=%{op.mask}")
+    elif isinstance(op, ops.TReturn):
+        toks.append("return")
+    else:  # pragma: no cover
+        raise AssertionError(f"unknown op {op!r}")
+
+    if op.id is not None and op.tila_type is not None:
+        toks += [":", type_str(op.tila_type, namer.name_of)]
+    if op.src_name is not None:
+        toks.append(f"[#{op.src_name}]")
+    return " ".join(toks)
+
+
+def dump(kernel: ops.TKernel) -> str:
+    """canonical dump（单空格分隔、LF、恰一个尾换行）。"""
+    namer = LayoutNamer()
+    for op in kernel.ops:
+        if op.tila_type is not None:
+            namer.register_type(op.tila_type)
+
+    lines = [f"func @{kernel.name}({_params_str(kernel)})"]
+    lines.extend(namer.definitions())
+    lines.append("")
+    lines.extend(_op_line(op, namer) for op in kernel.ops)
+    return "\n".join(lines) + "\n"

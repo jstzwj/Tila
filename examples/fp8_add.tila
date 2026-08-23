@@ -1,0 +1,41 @@
+# examples/fp8_add.tila — FP8 存储 dtype 的标准使用范式：load → cast → 计算 → cast → store
+#
+# FP8（fp8e4m3fn 等）是存储专用 dtype（docs/type-system.md §1.1）：
+#   只能 load / store / cast；算术与比较在编译期被 E16 拒绝。
+# 运行期可用性取决于目标架构（fp8e4m3fn 需 SM89+ 等），由后端校验层（B01）报告。
+
+import tila
+
+
+@tila.jit
+def fp8_add(
+    a: tila.Tensor[tila.float8e4m3fn, N],
+    b: tila.Tensor[tila.float8e4m3fn, N],
+    c: tila.Tensor[tila.float8e4m3fn, N],
+    BLOCK: tila.constexpr = 128,
+):
+    pid = tila.program_id(0)                     # : Scalar(i32)
+
+    offs = pid * BLOCK + tila.arange(0, BLOCK)   # : Tile[i32, (128,), L0]
+    mask = offs < N                              # : Tile[bool, (128,), L0]
+
+    x0 = tila.load(a + offs, mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
+    y0 = tila.load(b + offs, mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
+
+    x = tila.cast(x0, tila.float16)              # : Tile[f16, (128,), L0]   （R11，律 L3 保 layout）
+    y = tila.cast(y0, tila.float16)              # : Tile[f16, (128,), L0]
+
+    z = x + y                                    # : Tile[f16, (128,), L0]   （R5）
+
+    z0 = tila.cast(z, tila.float8e4m3fn)         # : Tile[fp8e4m3fn, (128,), L0]
+    tila.store(c + offs, z0, mask=mask)          # : ()   dtype 严格相等 ✓（R9）
+
+
+# 启动（由生成的 launcher 完成，N 从 a 的形状自动读取）：
+#
+#     fp8_add_launch(a, b, c, BLOCK=128)
+#
+# 等价于（Triton 式启动表达式）：
+#
+#     grid = (triton.cdiv(N, BLOCK),)
+#     fp8_add[grid](a, b, c, BLOCK=128)

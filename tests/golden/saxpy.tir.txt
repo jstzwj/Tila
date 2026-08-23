@@ -1,0 +1,20 @@
+func @saxpy(x: Buffer<f32, (N,)>, y: Buffer<f32, (N,)>, out: Buffer<f32, (N,)>, N: Scalar(i32), alpha: Scalar(i32), BLOCK: Constexpr(i32)=128)
+L0 = identity(128)
+
+%pid = program_id 0 : Scalar(i32) [#pid]
+%BLOCK = constexpr_ref BLOCK : Scalar(i32)
+%t0 = mul %pid %BLOCK : Scalar(i32)
+%r0 = arange 0 BLOCK : Tile<i32, (128,), L0>
+%offs = add %t0 %r0 : Tile<i32, (128,), L0> [#offs]
+%N = sym_ref N : Scalar(i32)
+%mask = lt %offs %N : Tile<bool, (128,), L0> [#mask]
+%p0 = addptr %x %offs : Address<f32, (128,), L0>
+%xv = load %p0 mask=%mask : Tile<f32, (128,), L0> [#xv]
+%p1 = addptr %y %offs : Address<f32, (128,), L0>
+%yv = load %p1 mask=%mask : Tile<f32, (128,), L0> [#yv]
+%a = cast %alpha f32 : Scalar(f32) [#a]
+%t = mul %xv %a : Tile<f32, (128,), L0> [#t]
+%z = add %t %yv : Tile<f32, (128,), L0> [#z]
+%p2 = addptr %out %offs : Address<f32, (128,), L0>
+store %p2 %z mask=%mask
+return

@@ -1,0 +1,37 @@
+# examples/add.tila — Tila v0.1 的第一个 kernel：C = A + B（向量加法）
+#
+# N 是符号维度：出现在 tila.Tensor 的 shape 里即自动成为运行时标量参数
+# BLOCK 是 constexpr：按调用点编译期特化
+# 完整类型推导见 docs/type-system.md §8
+
+import tila
+
+
+@tila.jit
+def add(
+    a: tila.Tensor[tila.float32, N],   # 全局缓冲，row-major（v0.1 唯一 MemoryLayout）
+    b: tila.Tensor[tila.float32, N],
+    c: tila.Tensor[tila.float32, N],   # 输出
+    BLOCK: tila.constexpr = 128,
+):
+    pid = tila.program_id(0)                     # : Scalar(i32)
+
+    offs = pid * BLOCK + tila.arange(0, BLOCK)   # : Tile[i32, (128,), L0]
+    mask = offs < N                              # : Tile[bool, (128,), L0]
+
+    x = tila.load(a + offs, mask=mask)           # : Tile[f32, (128,), L0]
+    y = tila.load(b + offs, mask=mask)           # : Tile[f32, (128,), L0]
+
+    z = x + y                                    # : Tile[f32, (128,), L0]
+
+    tila.store(c + offs, z, mask=mask)           # : ()
+
+
+# 启动（由生成的 launcher 完成，N 从 a 的形状自动读取）：
+#
+#     add_launch(a, b, c, BLOCK=128)
+#
+# 等价于（Triton 式启动表达式）：
+#
+#     grid = (triton.cdiv(N, BLOCK),)
+#     add[grid](a, b, c, BLOCK=128)

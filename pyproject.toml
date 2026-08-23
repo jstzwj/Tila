@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tila-lang"
+version = "0.1.0"
+description = "Tila: a strongly-typed, shape-safe, layout-aware tile-based GPU programming DSL that compiles to Triton"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "numpy"]
+interp = ["numpy", "ml_dtypes"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: requires triton + CUDA (and a working C compiler for the backend)"]

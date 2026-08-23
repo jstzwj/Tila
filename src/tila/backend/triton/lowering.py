@@ -1,0 +1,92 @@
+"""TIR → Triton 源码 lowering（docs/triton-lowering.md）。
+
+纯语法映射：不做任何 Tila 语义拒绝，对有效 TIR 全函数（total）且确定
+（黄金测试逐字节比对）。模块固定三段：imports、@triton.jit kernel、launcher。
+产物为 LF、无注释、无尾随空白、文件尾恰好一个换行。
+"""
+
+from __future__ import annotations
+
+from ... import tir
+from .printer import OpRenderer
+
+
+def _kernel_signature(kernel: tir.TKernel) -> str:
+    parts = []
+    for p in kernel.params:
+        if p.kind == "constexpr":
+            parts.append(f"{p.name}: tl.constexpr")
+        else:
+            parts.append(p.name)
+    return ", ".join(parts)
+
+
+def _launcher(kernel: tir.TKernel) -> list:
+    plan = kernel.launch_plan
+    buffers = [p.name for p in kernel.params if p.kind == "buffer"]
+    scalars = [p.name for p in kernel.params if p.kind == "scalar"]
+    constexprs = [p for p in kernel.params if p.kind == "constexpr"]
+    syms = [p.name for p in kernel.params if p.kind == "sym"]
+
+    sig = list(buffers) + list(scalars)
+    for p in constexprs:
+        sig.append(f"{p.name}: int = {p.default}" if p.default is not None else f"{p.name}: int")
+
+    lines = [f"def {kernel.name}_launch({', '.join(sig)}):"]
+
+    # rank 断言（每张量必发）
+    if plan.rank_asserts:
+        conds = " and ".join(f"{b}.dim() == {r}" for b, r in plan.rank_asserts)
+        lines.append(f"    assert {conds}")
+
+    # 静态维断言（仅注解含静态维时发射；与 rank 断言同样合并为一行）
+    if plan.static_dim_asserts:
+        conds = [f"{b}.shape[{i}] == {v}" for b, i, v in plan.static_dim_asserts]
+        lines.append(f"    assert {' and '.join(conds)}")
+
+    # 符号维取值 + 同符号运行时契约（按符号名比较）
+    first_binding = {}
+    extra = []
+    for b, i, s in plan.sym_dim_asserts:
+        if s not in first_binding:
+            first_binding[s] = (b, i)
+        else:
+            extra.append(f"{b}.shape[{i}] == {s}")
+    for s in syms:
+        if s in first_binding:
+            b, i = first_binding[s]
+            lines.append(f"    {s} = {b}.shape[{i}]")
+    if extra:
+        lines.append(f"    assert {' and '.join(extra)}")
+
+    # grid（来自 launch_plan；lowering 只发射不推导）
+    if plan.axes:
+        axis_exprs = [f"triton.cdiv({a.dim}, {a.tiling})" for a in plan.axes]
+        grid = "(" + ", ".join(axis_exprs) + ("," if len(axis_exprs) == 1 else "") + ")"
+    else:
+        grid = "(1,)"
+    lines.append(f"    grid = {grid}")
+
+    call_args = [p.name for p in kernel.params if p.kind != "constexpr"]
+    call_args += [f"{p.name}={p.name}" for p in constexprs]
+    lines.append(f"    {kernel.name}[grid]({', '.join(call_args)})")
+    return lines
+
+
+def emit(kernel: tir.TKernel) -> str:
+    """TKernel → Triton 模块源码字符串（total、确定）。"""
+    renderer = OpRenderer(kernel)
+    body = renderer.body_lines()
+
+    parts = [
+        "import triton",
+        "import triton.language as tl",
+        "",
+        "",
+        f"@triton.jit",
+        f"def {kernel.name}({_kernel_signature(kernel)}):",
+    ]
+    parts.extend(f"    {line}" for line in body)
+    parts.extend(["", ""])
+    parts.extend(_launcher(kernel))
+    return "\n".join(parts) + "\n"
