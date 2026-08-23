@@ -57,14 +57,12 @@ def test_mma_normal_form_untouched_by_erasure_laws():
 # ---------------------------------------------------------------------------
 
 def _dot_body(x_expr="x", y_expr="y"):
+    # v0.3 坐标寻址：线性化归编译器，测试体不再手工乘加
     return (PRELUDE + f"""
-    a_idx = rm2 * K + rk2
-    b_idx = rk3 * K + rn2
-    x = tila.load(a + a_idx, mask=(rm2 < M) & (rk2 < K), other=0.0)
-    y = tila.load(b + b_idx, mask=(rk3 < K) & (rn2 < N), other=0.0)
+    x = tila.load(a, (rm2, rk2), mask=(rm2 < M) & (rk2 < K), other=0.0)
+    y = tila.load(b, (rk3, rn2), mask=(rk3 < K) & (rn2 < N), other=0.0)
     acc = tila.dot({x_expr}, {y_expr})
-    c_idx = rm2 * N + rn2
-    tila.store(c + c_idx, acc, mask=(rm2 < M) & (rn2 < N))
+    tila.store(c, (rm2, rn2), acc, mask=(rm2 < M) & (rn2 < N))
 """)
 
 
@@ -87,7 +85,7 @@ def test_E18_f32_operands_not_mma_able():
 
 def test_E18_mixed_operand_dtypes():
     body = (_dot_body()
-            .replace("y = tila.load(b + b_idx", "yb = tila.load(b + b_idx")
+            .replace("y = tila.load(b, ", "yb = tila.load(b, ")
             .replace("acc = tila.dot(x, y)", "y = tila.cast(yb, tila.float32)\n"
                      "    acc = tila.dot(x, y)"))
     with pytest.raises(TilaError) as ei:
@@ -114,13 +112,10 @@ def test_E18_contraction_mismatch():
                            "rk = tila.arange(0, 32)") + """
     rk_b = tila.arange(0, 64)
     rk_b3 = tila.expand_dim(rk_b, 1)
-    a_idx = rm2 * K + rk2
-    b_idx = rk_b3 * N + rn2
-    x = tila.load(a + a_idx, mask=(rm2 < M) & (rk2 < K), other=0.0)
-    y = tila.load(b + b_idx, mask=(rk_b3 < K) & (rn2 < N), other=0.0)
+    x = tila.load(a, (rm2, rk2), mask=(rm2 < M) & (rk2 < K), other=0.0)
+    y = tila.load(b, (rk_b3, rn2), mask=(rk_b3 < K) & (rn2 < N), other=0.0)
     acc = tila.dot(x, y)
-    c_idx = rm2 * N + rn2
-    tila.store(c + c_idx, acc, mask=(rm2 < M) & (rn2 < N))
+    tila.store(c, (rm2, rn2), acc, mask=(rm2 < M) & (rn2 < N))
 """
     with pytest.raises(TilaError) as ei:
         _c(body)
@@ -150,11 +145,10 @@ def test_E13_dot_wrong_arity():
 
 def test_E05_mma_blocked_mixing_in_register():
     body = _dot_body().replace(
-        "    c_idx = rm2 * N + rn2",
-        """    c_idx = rm2 * N + rn2
-    bias = tila.load(c + c_idx, mask=(rm2 < M) & (rn2 < N), other=0.0)
-    acc2 = acc + bias""").replace(
-        "tila.store(c + c_idx, acc, mask=", "tila.store(c + c_idx, acc2, mask=")
+        "    tila.store(c, (rm2, rn2), acc, mask=",
+        """    bias = tila.load(c, (rm2, rn2), mask=(rm2 < M) & (rn2 < N), other=0.0)
+    acc2 = acc + bias
+    tila.store(c, (rm2, rn2), acc2, mask=""")
     assert "acc2 = acc + bias" in body  # 防字符串替换失配
     with pytest.raises(TilaError) as ei:
         _c(body)
@@ -165,8 +159,8 @@ def test_E05_mma_blocked_mixing_in_register():
 def test_mma_same_family_arith_ok():
     """同为 Mma 的值运算合法（JoinL 擦除回到 Mma）。"""
     body = _dot_body().replace(
-        "    tila.store(c + c_idx, acc, mask=",
-        "    acc2 = acc + acc\n    tila.store(c + c_idx, acc2, mask=")
+        "    tila.store(c, (rm2, rn2), acc, mask=",
+        "    acc2 = acc + acc\n    tila.store(c, (rm2, rn2), acc2, mask=")
     res = _c(body)
     assert "%acc2 = add %acc %acc : Tile<f32, (64,128)," in res.tir_dump
     assert "mma(64,128,64)" in res.tir_dump

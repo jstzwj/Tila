@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from ... import tir
+from ...types.layout import Strided
 from .printer import OpRenderer
 
 
@@ -58,6 +59,33 @@ def _launcher(kernel: tir.TKernel) -> list:
             lines.append(f"    {s} = {b}.shape[{i}]")
     if extra:
         lines.append(f"    assert {' and '.join(extra)}")
+
+    # 内存布局契约（v0.3-strides §4.2）：stride 绑定/断言 + RowMajor 连续性断言
+    assigned = set(first_binding)
+    mem_conds = []
+    for b, i, sv in plan.stride_bindings:
+        if isinstance(sv, int):
+            mem_conds.append(f"{b}.stride({i}) == {sv}")
+        elif sv not in assigned:
+            lines.append(f"    {sv} = {b}.stride({i})")
+            assigned.add(sv)
+        else:
+            mem_conds.append(f"{b}.stride({i}) == {sv}")
+    for p in kernel.params:
+        if p.kind != "buffer":
+            continue
+        if isinstance(p.tila_type.mem, Strided):
+            continue
+        r = len(p.tila_type.shape)
+        inner = [f"{p.name}.stride({r - 1}) == 1"]
+        for i in range(r - 1):
+            inner.append(f"{p.name}.stride({i}) == {p.name}.shape[{i + 1}]")
+        # size-0 数组的布局契约空真（v0.4-kloop §12）：torch 对空维报告的
+        # stride 无意义（如 (100,0).stride() == (1,1)），无元素可错读。
+        # 外层括号必须带：顶层以 and 连接，而 or 结合度更低
+        mem_conds.append(f"({p.name}.numel() == 0 or ({' and '.join(inner)}))")
+    if mem_conds:
+        lines.append(f"    assert {' and '.join(mem_conds)}")
 
     # grid（来自 launch_plan；lowering 只发射不推导）
     if plan.axes:

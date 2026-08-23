@@ -1,11 +1,9 @@
-# examples/batched_add.tila — 符号维（运行时可变的 batch/特征长度）+ 二维 tiling（v0.2 预览）
+# examples/batched_add.tila — 符号维 + 二维 tiling + 坐标寻址（v0.3 strides 版）
 #
-# M = batch 维，N = 特征维：都是运行时变量，出现在 tila.Tensor 的 shape 里，
-# 由 launcher 从张量形状读取并作为 i32 实参传入。
-# BM/BN 是 constexpr：tile 大小全静态，唯一决定线程分布（layout）。
+# M = batch 维，N = 特征维：运行时变量，由 launcher 从张量形状读取传入。
+# v0.3：寻址用一级坐标原语 tila.load(a, (rows2, cols2))，行主序线性化
+# （rows2 * N + cols2）由编译器发射——kernel 里不再有任何手工线性化（docs/v0.3-strides.md §1.2）。
 # 设计要点：变量在 shape 与 mask，不在分布 —— 见 docs/v0.2-preview-2d.md §1。
-# 无 meshgrid/bounds：二维索引由 expand_dim + size-1 广播拼出，
-# mask 由普通比较 + & 逐维写明（裁决理由见该文档 §0）。
 
 import tila
 
@@ -27,15 +25,14 @@ def batched_add(
     rows2 = tila.expand_dim(rows, 1)              # : Tile[i32, (64,1),  L0]   —— E14 禁重绑定，用新名
     cols2 = tila.expand_dim(cols, 0)              # : Tile[i32, (1,128), L1]
 
-    idx = rows2 * N + cols2                       # : Tile[i32, (64,128), L2 = product(L0,L1)]
-    mask = (rows2 < M) & (cols2 < N)              # : Tile[bool, (64,128), L2]  逐维谓词显式写明
+    mask = (rows2 < M) & (cols2 < N)              # : Tile[bool, (64,128), L2 = product(L0,L1)]
 
-    x = tila.load(a + idx, mask=mask)             # : Tile[f32, (64,128), L2]
-    y = tila.load(b + idx, mask=mask)             # : Tile[f32, (64,128), L2]
+    x = tila.load(a, (rows2, cols2), mask=mask)  # : Tile[f32, (64,128), L2]
+    y = tila.load(b, (rows2, cols2), mask=mask)  # : Tile[f32, (64,128), L2]
 
     z = x + y                                     # : Tile[f32, (64,128), L2]
 
-    tila.store(c + idx, z, mask=mask)             # : ()
+    tila.store(c, (rows2, cols2), z, mask=mask)  # : ()
 
 
 # 启动（launcher 从 a.shape 读取 M、N；grid 为二维）：
@@ -45,4 +42,4 @@ def batched_add(
 # 等价于（Triton 式启动表达式）：
 #
 #     grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))
-#     batched_add[grid](a, b, c, BM=64, BN=128)
+#     batched_add[grid](a, b, c, M, N, BM=64, BN=128)

@@ -21,11 +21,19 @@ _FP8_ARCH_HINT = (
 )
 
 
+def _iter_ops(ops_seq):
+    """递归展开循环体（v0.4）：后端约束作用于全部指令。"""
+    for op in ops_seq:
+        yield op
+        if isinstance(op, tir.TFor):
+            yield from _iter_ops(op.body)
+
+
 def validate(kernel: tir.TKernel) -> List[BackendError]:
     """静态后端校验（不依赖 triton 安装）。"""
     errors: List[BackendError] = []
     seen = set()
-    for op in kernel.ops:
+    for op in _iter_ops(kernel.ops):
         ty = op.tila_type
         if not isinstance(ty, (TileType, AddressType)):
             continue

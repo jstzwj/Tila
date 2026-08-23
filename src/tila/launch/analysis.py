@@ -37,7 +37,19 @@ def _unwrap_expand_dim(op_by_id, oid: str) -> str:
     return oid
 
 
+def _flatten(ops) -> list:
+    """拍平嵌套循环体（v0.4-kloop §6）：tiling 模式识别在指令全集上进行，
+    与指令所在循环层级无关。"""
+    out = []
+    for op in ops:
+        out.append(op)
+        if isinstance(op, tir.TFor):
+            out.extend(_flatten(op.body))
+    return out
+
+
 def plan_launch(ops: List[tir.TOp], env, loc: Loc) -> tir.LaunchPlan:
+    ops = _flatten(ops)
     op_by_id: Dict[str, tir.TOp] = {op.id: op for op in ops if op.id}
 
     pid_by_axis: Dict[int, tir.TProgramId] = {}
@@ -120,6 +132,7 @@ def plan_launch(ops: List[tir.TOp], env, loc: Loc) -> tir.LaunchPlan:
 
     # shape 契约三件套（semantic-model.md §7 的运行期断言来源）
     rank_asserts, static_dim_asserts, sym_dim_asserts = [], [], []
+    stride_bindings = []
     for name, bty in env.buffers.items():
         rank_asserts.append((name, len(bty.shape)))
         for i, d in enumerate(bty.shape):
@@ -127,10 +140,16 @@ def plan_launch(ops: List[tir.TOp], env, loc: Loc) -> tir.LaunchPlan:
                 static_dim_asserts.append((name, i, d.value))
             else:
                 sym_dim_asserts.append((name, i, d.name))
+        from ..types.layout import Strided
+        if isinstance(bty.mem, Strided):
+            for i, s in enumerate(bty.mem.strides):
+                stride_bindings.append(
+                    (name, i, s.value if isinstance(s, Const) else s.name))
 
     return tir.LaunchPlan(
         axes=tuple(axes),
         rank_asserts=tuple(rank_asserts),
         static_dim_asserts=tuple(static_dim_asserts),
         sym_dim_asserts=tuple(sym_dim_asserts),
+        stride_bindings=tuple(stride_bindings),
     )

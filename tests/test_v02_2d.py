@@ -29,12 +29,11 @@ def batched_add(
     cols = pid_n * BN + tila.arange(0, BN)
     rows2 = tila.expand_dim(rows, 1)
     cols2 = tila.expand_dim(cols, 0)
-    idx = rows2 * N + cols2
     mask = (rows2 < M) & (cols2 < N)
-    x = tila.load(a + idx, mask=mask)
-    y = tila.load(b + idx, mask=mask)
+    x = tila.load(a, (rows2, cols2), mask=mask)
+    y = tila.load(b, (rows2, cols2), mask=mask)
     z = x + y
-    tila.store(c + idx, z, mask=mask)
+    tila.store(c, (rows2, cols2), z, mask=mask)
 """
 
 
@@ -57,10 +56,10 @@ def test_batched_add_tir_matches_doc_walkthrough():
                           "L2 = product(L0,L1)"]
     assert "%rows2 = expand_dim %rows 1 : Tile<i32, (64,1), L0> [#rows2]" in lines
     assert "%cols2 = expand_dim %cols 0 : Tile<i32, (1,128), L1> [#cols2]" in lines
-    assert "%idx = add %t2 %cols2 : Tile<i32, (64,128), L2> [#idx]" in lines
     assert "%mask = and %m0 %m1 : Tile<bool, (64,128), L2> [#mask]" in lines
-    # 文档 dump 与本实现的唯一口径差：头部 shape 分隔符统一为无空格 (M,N)
-    # （文档 §4 头部写作 (M, N)，同文档的 Tile 类型均无空格——取后者统一）
+    # v0.3 坐标寻址：线性化不进 TIR，addptr 携带坐标元组（docs/v0.3-strides.md §3）
+    assert "%p0 = addptr %a [%rows2, %cols2] : Address<f32, (64,128), L2>" in lines
+    assert "%p2 = addptr %c [%rows2, %cols2] : Address<f32, (64,128), L2>" in lines
 
 
 def test_batched_add_triton_kernel_body_matches_doc():
@@ -72,8 +71,9 @@ def test_batched_add_triton_kernel_body_matches_doc():
         "rows = pid_m * BM + tl.arange(0, BM)",
         "rows2 = tl.expand_dims(rows, 1)",
         "cols2 = tl.expand_dims(cols, 0)",
-        "idx = rows2 * N + cols2",
         "mask = (rows2 < M) & (cols2 < N)",
+        "x = tl.load(a + (rows2 * N + cols2), mask=mask)",
+        "tl.store(c + (rows2 * N + cols2), z, mask=mask)",
     ):
         assert expected in src
 
@@ -83,6 +83,11 @@ def test_batched_add_launcher_2d_grid():
     src = res.triton_source
     assert "def batched_add_launch(a, b, c, BM: int = 64, BN: int = 128):" in src
     assert "M = a.shape[0]" in src and "N = a.shape[1]" in src
+    # v0.3：RowMajor 默认的连续性契约（docs/v0.3-strides.md §4.2）；
+    # v0.4：size-0 契约空真守卫（numel() == 0 or (…)，v0.4-kloop §12）
+    assert ("assert (a.numel() == 0 or (a.stride(1) == 1 and a.stride(0) == a.shape[1])) and "
+            "(b.numel() == 0 or (b.stride(1) == 1 and b.stride(0) == b.shape[1])) and "
+            "(c.numel() == 0 or (c.stride(1) == 1 and c.stride(0) == c.shape[1]))") in src
     assert "grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))" in src
     assert "batched_add[grid](a, b, c, M, N, BM=BM, BN=BN)" in src
 
@@ -212,9 +217,8 @@ def bad(a: tila.Tensor[tila.float32, M, N], c: tila.Tensor[tila.float32, M, N],
     cols = pid_n * BN + tila.arange(0, BN)
     rows2 = tila.expand_dim(rows, 1)
     cols2 = tila.expand_dim(cols, 0)
-    idx = rows2 * N + cols2
-    x = tila.load(a + idx)
-    tila.store(c + idx, x)
+    x = tila.load(a, (rows2, cols2))
+    tila.store(c, (rows2, cols2), x)
 """
     with pytest.raises(TilaError) as ei:
         compile_kernel(src)
@@ -222,8 +226,10 @@ def bad(a: tila.Tensor[tila.float32, M, N], c: tila.Tensor[tila.float32, M, N],
     assert "bound predicate" in ei.value.message or "tiling" in ei.value.message
 
 
-def test_r7_rank_mismatch_e04():
-    # rank(idx) = rank(buffer)（language-spec §10）：1D tile 索引 2D buffer → E04
+def test_address_arithmetic_rejected_e07():
+    """v0.3 定稿：地址算术整体退场——旧写法 `tila.load(a + offs)` 在实参数量
+    检查处即被拒（E13，消息含迁移提示）；独立出现的 `a + offs` 算术是 E07。
+    坐标只能写进 tila.load/store 的实参（docs/v0.3-strides.md §1.2）。"""
     src = """import tila
 
 
@@ -234,8 +240,30 @@ def bad(a: tila.Tensor[tila.float32, M, N], c: tila.Tensor[tila.float32, M, N],
     offs = pid * BM + tila.arange(0, BM)
     mask = offs < N
     x = tila.load(a + offs, mask=mask)
-    tila.store(c + offs, x, mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
 """
     with pytest.raises(TilaError) as ei:
         compile_kernel(src)
-    assert ei.value.code == "E04"
+    assert ei.value.code == "E13"
+    assert "was removed" in ei.value.message
+
+
+def test_e19_coord_arity_replaces_flat_check():
+    """rank-2 buffer 配 1 元坐标元组 → E19 CoordinateArity（元组长度必须等于
+    buffer rank；rank-1 的 `(offs,)` 单元素形态合法）。"""
+    src = """import tila
+
+
+@tila.jit
+def bad(a: tila.Tensor[tila.float32, M, N], c: tila.Tensor[tila.float32, M, N],
+        BM: tila.constexpr = 64):
+    pid = tila.program_id(0)
+    offs = pid * BM + tila.arange(0, BM)
+    mask = offs < N
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
+"""
+    with pytest.raises(TilaError) as ei:
+        compile_kernel(src)
+    assert ei.value.code == "E19"
+    assert ei.value.subcode == "CoordinateArity"

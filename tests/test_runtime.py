@@ -30,10 +30,10 @@ def add(
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 '''
 
 
@@ -103,7 +103,7 @@ def test_diagnostics_report_file_accurate_locations(tmp_path):
         "    r = tila.arange(0, 64)\n"
         "    s = tila.arange(0, 128)\n"
         "    z = r + s\n"
-        "    tila.store(a + r, z)\n"
+        "    tila.store(a, (r,), z)\n"
     )
     mod = _load_module(tmp_path, src, name="loc_kernels")
     with pytest.raises(TilaError) as ei:
@@ -166,12 +166,11 @@ def batched_add(
     cols = pid_n * BN + tila.arange(0, BN)
     rows2 = tila.expand_dim(rows, 1)
     cols2 = tila.expand_dim(cols, 0)
-    idx = rows2 * N + cols2
     mask = (rows2 < M) & (cols2 < N)
-    x = tila.load(a + idx, mask=mask)
-    y = tila.load(b + idx, mask=mask)
+    x = tila.load(a, (rows2, cols2), mask=mask)
+    y = tila.load(b, (rows2, cols2), mask=mask)
     z = x + y
-    tila.store(c + idx, z, mask=mask)
+    tila.store(c, (rows2, cols2), z, mask=mask)
 '''
     mod = _load_module(tmp_path, src, name="k2d")
     rng = np.random.default_rng(2)

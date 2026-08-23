@@ -150,3 +150,5 @@ tests/
 2. **解释器语义范围**：reference interpreter 覆盖到哪一层（masked load 的 other 语义、fp8 舍入模式对齐）才能与 Triton 严格对拍。
 3. **layout 成本的显式化**：`convert(L → L')` 与代价模型（shuffle / shared memory round-trip）何时进入（v0.2+）。
 4. **维度绑定索引**：索引 tile 记录其来源维，把"`idx` 里的 `N` 是否是 a 的 dim1"从用户责任变成编译期检查（v0.3 候选，`v0.2-preview-2d.md` §6）。
+5. **全运算 shape 代数（DimExpr）**：shape 表达式目标全集已定为 DimExpr——`+ − × floordiv ceildiv mod max min`，`/` 禁用（`type-system.md` §2.1，2026-08-24 两轮评审定案）。两层判定（确定性重写 + 约束感知证明）、must_equal 只认 ProvenEqual、SMT 仅可插拔 fallback 且不进主路径。分阶段启用：线性片段先行，非线性项（`N*M`、`//`、`%`、max/min）随后；首批消费者 `cat`（R-cat）、reshape（numel 守恒证明）与维度绑定索引（上条）。
+6. **shape 约束系统**：`tila.assume` 提案（编译期 shape 约束，非运行期断言）、维度正性（N ≥ 1）自动约束、`ProvenNotEqual` 的诊断利用（`type-system.md` §2.1，阶段二）。

@@ -1,9 +1,10 @@
-# examples/matmul.tila — matmul fragment（v0.2 片段二，docs/v0.2-matmul-fragment.md）
+# examples/matmul.tila — matmul fragment（v0.3 strides 版，docs/v0.3-strides.md）
 #
 # 单发 tila.dot：K 维整体装进一个 BK 块（正确性包络 K <= BK，masked 补零）。
-# dot 是第一个"外来"布局的构造点：结果驻留 Mma(BM,BN,BK) 分布（MMA 指令
-# 规定，不从 arange 推导）；store 侧按 R9' 的坐标语义直接写回 blocked 索引。
-# 完整 K 归约需要 K 循环（v0.2 主线）。
+# v0.3：b 声明全符号 strides (sb0, sb1)——转置、padding 等非连续布局一律合法；
+# 线性化（rk3 * sb0 + rn2 * sb1）由编译器发射，表面上不再出现任何 r*s+c。
+# a/c 省略 strides = 隐式 RowMajor（launcher 断言实际连续）。
+# 完整 K 归约需要 K 循环（下一步）。
 
 import tila
 
@@ -11,7 +12,7 @@ import tila
 @tila.jit
 def matmul(
     a: tila.Tensor[tila.float16, M, K],
-    b: tila.Tensor[tila.float16, K, N],
+    b: tila.Tensor[tila.float16, K, N, (sb0, sb1)],
     c: tila.Tensor[tila.float32, M, N],
     BM: tila.constexpr = 64,
     BN: tila.constexpr = 128,
@@ -25,26 +26,25 @@ def matmul(
     rk = tila.arange(0, BK)                       # : Tile[i32, (64,),   L2]
 
     rm2 = tila.expand_dim(rm, 1)                  # : Tile<i32, (64,1),  L0>
-    rk2 = tila.expand_dim(rk, 0)                  # : Tile<i32, (1,64),  L0]
-    rk3 = tila.expand_dim(rk, 1)                  # : Tile<i32, (64,1),  L0]
-    rn2 = tila.expand_dim(rn, 0)                  # : Tile[i32, (1,128), L1]
-
-    a_idx = rm2 * K + rk2                         # : Tile[i32, (64,64),  product(L0,L0)>
-    b_idx = rk3 * N + rn2                         # : Tile<i32, (64,128), product(L0,L1)>
-    c_idx = rm2 * N + rn2                         # : Tile<i32, (64,128), product(L0,L1)>
+    rk2 = tila.expand_dim(rk, 0)                  # : Tile<i32, (1,64),  L0>
+    rk3 = tila.expand_dim(rk, 1)                  # : Tile<i32, (64,1),  L0>
+    rn2 = tila.expand_dim(rn, 0)                  # : Tile<i32, (1,128), L1>
 
     a_m = (rm2 < M) & (rk2 < K)                   # : Tile[bool, (64,64)]
     b_m = (rk3 < K) & (rn2 < N)                   # : Tile[bool, (64,128)]
     c_m = (rm2 < M) & (rn2 < N)                   # : Tile[bool, (64,128)]
 
-    x = tila.load(a + a_idx, mask=a_m, other=0.0)   # : Tile<f16, (64,64)>
-    y = tila.load(b + b_idx, mask=b_m, other=0.0)   # : Tile<f16, (64,128)>
+    x = tila.load(a, (rm2, rk2), mask=a_m, other=0.0)   # : Tile<f16, (64,64)>
+    y = tila.load(b, (rk3, rn2), mask=b_m, other=0.0)   # : Tile<f16, (64,128)>
 
-    acc = tila.dot(x, y)                          # : Tile[f32, (64,128), Mma(64,128,64)>
+    acc = tila.dot(x, y)                          # : Tile<f32, (64,128), Mma(64,128,64)>
 
-    tila.store(c + c_idx, acc, mask=c_m)          # : ()   R9'：内存边界布局无关
+    tila.store(c, (rm2, rn2), acc, mask=c_m)     # : ()   R9'：内存边界布局无关
 
 
-# 启动（launcher 从 a.shape 读 M、K，从 b.shape 读 N；grid 为二维）：
+# 启动（launcher 从 a.shape 读 M、K，从 b.shape 读 N，从 b.stride 读 sb0、sb1；
+# grid 为二维）：
 #
 #     matmul_launch(a, b, c, BM=64, BN=128, BK=64)
+#
+# b 可以是任何 (K,N) 布局：连续张量（sb0=N, sb1=1）或转置视图（sb0=1, sb1=K）。

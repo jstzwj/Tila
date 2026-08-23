@@ -20,14 +20,14 @@ def saxpy(
     offs = pid * BLOCK + tila.arange(0, BLOCK)   # : Tile[i32, (128,), L0]
     mask = offs < N                              # : Tile[bool, (128,), L0]
 
-    xv = tila.load(x + offs, mask=mask)          # : Tile[f32, (128,), L0]
-    yv = tila.load(y + offs, mask=mask)          # : Tile[f32, (128,), L0]
+    xv = tila.load(x, (offs,), mask=mask)          # : Tile[f32, (128,), L0]
+    yv = tila.load(y, (offs,), mask=mask)          # : Tile[f32, (128,), L0]
 
     a = tila.cast(alpha, tila.float32)           # : Scalar(f32)   （R11）
     t = xv * a                                   # : Tile[f32, (128,), L0]   （R4，标量广播）
     z = t + yv                                   # : Tile[f32, (128,), L0]   （R5）
 
-    tila.store(out + offs, z, mask=mask)         # : ()
+    tila.store(out, (offs,), z, mask=mask)         # : ()
 
 
 # 启动（由生成的 launcher 完成，N 从 x 的形状自动读取）：

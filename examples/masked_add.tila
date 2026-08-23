@@ -18,9 +18,9 @@ def masked_add(
     offs = pid * BLOCK + tila.arange(0, BLOCK)   # : Tile[i32, (128,), L0]
     mask = offs < N                              # : Tile[bool, (128,), L0]
 
-    x = tila.load(a + offs, mask=mask, other=0.0)   # : Tile[f32, (128,), L0]
-    y = tila.load(b + offs, mask=mask, other=0.0)   # : Tile[f32, (128,), L0]
+    x = tila.load(a, (offs,), mask=mask, other=0.0)   # : Tile[f32, (128,), L0]
+    y = tila.load(b, (offs,), mask=mask, other=0.0)   # : Tile[f32, (128,), L0]
 
     z = x + y                                    # : Tile[f32, (128,), L0]
 
-    tila.store(c + offs, z, mask=mask)           # : ()
+    tila.store(c, (offs,), z, mask=mask)           # : ()

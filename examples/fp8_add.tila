@@ -19,8 +19,8 @@ def fp8_add(
     offs = pid * BLOCK + tila.arange(0, BLOCK)   # : Tile[i32, (128,), L0]
     mask = offs < N                              # : Tile[bool, (128,), L0]
 
-    x0 = tila.load(a + offs, mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
-    y0 = tila.load(b + offs, mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
+    x0 = tila.load(a, (offs,), mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
+    y0 = tila.load(b, (offs,), mask=mask)          # : Tile[fp8e4m3fn, (128,), L0]
 
     x = tila.cast(x0, tila.float16)              # : Tile[f16, (128,), L0]   （R11，律 L3 保 layout）
     y = tila.cast(y0, tila.float16)              # : Tile[f16, (128,), L0]
@@ -28,7 +28,7 @@ def fp8_add(
     z = x + y                                    # : Tile[f16, (128,), L0]   （R5）
 
     z0 = tila.cast(z, tila.float8e4m3fn)         # : Tile[fp8e4m3fn, (128,), L0]
-    tila.store(c + offs, z0, mask=mask)          # : ()   dtype 严格相等 ✓（R9）
+    tila.store(c, (offs,), z0, mask=mask)          # : ()   dtype 严格相等 ✓（R9）
 
 
 # 启动（由生成的 launcher 完成，N 从 a 的形状自动读取）：

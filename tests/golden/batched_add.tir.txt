@@ -15,18 +15,16 @@ L2 = product(L0,L1)
 %cols = add %t1 %r1 : Tile<i32, (128,), L1> [#cols]
 %rows2 = expand_dim %rows 1 : Tile<i32, (64,1), L0> [#rows2]
 %cols2 = expand_dim %cols 0 : Tile<i32, (1,128), L1> [#cols2]
-%N = sym_ref N : Scalar(i32)
-%t2 = mul %rows2 %N : Tile<i32, (64,1), L0>
-%idx = add %t2 %cols2 : Tile<i32, (64,128), L2> [#idx]
 %M = sym_ref M : Scalar(i32)
 %m0 = lt %rows2 %M : Tile<bool, (64,1), L0>
+%N = sym_ref N : Scalar(i32)
 %m1 = lt %cols2 %N : Tile<bool, (1,128), L1>
 %mask = and %m0 %m1 : Tile<bool, (64,128), L2> [#mask]
-%p0 = addptr %a %idx : Address<f32, (64,128), L2>
+%p0 = addptr %a [%rows2, %cols2] : Address<f32, (64,128), L2>
 %x = load %p0 mask=%mask : Tile<f32, (64,128), L2> [#x]
-%p1 = addptr %b %idx : Address<f32, (64,128), L2>
+%p1 = addptr %b [%rows2, %cols2] : Address<f32, (64,128), L2>
 %y = load %p1 mask=%mask : Tile<f32, (64,128), L2> [#y]
 %z = add %x %y : Tile<f32, (64,128), L2> [#z]
-%p2 = addptr %c %idx : Address<f32, (64,128), L2>
+%p2 = addptr %c [%rows2, %cols2] : Address<f32, (64,128), L2>
 store %p2 %z mask=%mask
 return

@@ -12,7 +12,7 @@ from typing import Dict, Optional, Tuple
 
 from .. import tir
 from ..ast import nodes as t
-from ..diagnostics import Loc, err
+from ..diagnostics import Loc, TilaError, err
 from ..launch import analysis as launch
 from ..types import (
     ARITH_OPS,
@@ -35,7 +35,7 @@ from ..types import (
     type_str,
 )
 from ..types import dtype as dt
-from ..types.layout import CastL, layout_str
+from ..types.layout import CastL, Zeros, layout_str
 from . import arithmetic as arith
 from . import builtin
 from . import broadcast as bcast
@@ -55,20 +55,58 @@ def _surface(dt_name: str) -> str:
     return f"tila.{dt.TILA_SURFACE_NAME.get(dt_name, dt_name)}"
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Binding:
     tila_type: object
     loc: Loc
     id: str
 
 
+@dataclasses.dataclass(frozen=True)
+class SymBinding:
+    """符号表条目（v0.3 评审 §9/§11 采纳）：Dim 符号与 Memory(stride) 符号共享
+    同一 infrastructure——都是"运行期需物化的编译期符号"；kind 记录来源类别，
+    供诊断与将来的 assume/约束系统使用。stride = N（维符号复用）不产生新条目：
+    那是 symbol identity relation，不是两个符号。"""
+
+    kind: str        # "dim" | "stride"
+    buffer: str      # 首次绑定来源：buffer 名
+    axis: int        # 对应 shape[axis] 或 stride[axis]
+
+
 @dataclasses.dataclass
 class Env:
     buffers: Dict[str, BufferType]
-    syms: Dict[str, str]                       # 符号维名 → 名（值即名字）
-    constexprs: Dict[str, int]                 # 已特化的值
-    scalar_params: Dict[str, str]              # 未注解参数名 → "i32"
+    syms: Dict[str, SymBinding]              # 符号名 → 绑定（Dim / Memory 同表）
+    constexprs: Dict[str, int]               # 已特化的值
+    scalar_params: Dict[str, str]            # 未注解参数名 → "i32"
     locals: Dict[str, Binding]
+
+
+@dataclasses.dataclass
+class LoopCtx:
+    """单个 for 的检查语境（v0.4-kloop §2.4 三条围栏的载体）。
+
+    snapshot 是循环入口的 locals 快照（外层名只读 + 累加器种子判定）；
+    carried 记录被本循环 '+=' 的累加器的当前体内绑定（φ → next 链）；
+    phis 按 '+=' 首次出现序登记 (名, φ id, 入口 id)，循环收尾时构造 TPhi
+    前插到 body 顶部。"""
+
+    snapshot: Dict[str, Binding]
+    carried: Dict[str, Binding] = dataclasses.field(default_factory=dict)
+    phis: list = dataclasses.field(default_factory=list)
+
+
+def _collect_aug_targets(stmts) -> set:
+    """kernel 全体（含循环体）中 '+=' 目标名集合：累加器认定的第二条件
+    （zeros 播种 + 被累加）。预扫描让 AccumRead 禁令精确覆盖真正的累加器。"""
+    out = set()
+    for s in stmts:
+        if isinstance(s, t.AugAssign):
+            out.add(s.target)
+        elif isinstance(s, t.For):
+            out |= _collect_aug_targets(s.body)
+    return out
 
 
 class Checker:
@@ -82,6 +120,13 @@ class Checker:
         self._constexpr_ids: Dict[str, str] = {}
         self._param_locs: Dict[str, Loc] = {}
         self.explain: list = []
+        # v0.4 循环语境（docs/v0.4-kloop.md §2.3/§2.4）
+        self._loop_stack: list = []
+        self._aug_targets: set = set()
+        self._accumulators: set = set()      # zeros 播种且被 '+=' 的名字
+        self._accum_counters: Dict[str, int] = {}   # '{acc}.next{N}' 命名
+        self._loop_counters: Dict[str, int] = {}    # '{acc}.loop{N}' 命名
+        self._out_of_scope: Dict[str, Loc] = {}     # 循环局部出作用域记录
 
     # ------------------------------------------------------------------
     # 基础设施
@@ -98,9 +143,18 @@ class Checker:
         return f"#{prefix}{i}"
 
     def _finalize_ids(self) -> None:
-        """把 '#' 临时 id 重写为最终 id，并同步重写全部操作数引用。"""
+        """把 '#' 临时 id 重写为最终 id，并同步重写全部操作数引用
+        （v0.4 起递归进入 TFor.body；# 命名的匿名空间跨层唯一）。"""
         taken = {p.name for p in self.kernel.params}
-        taken |= {op.src_name for op in self.ops if op.src_name is not None}
+
+        def collect_names(ops_seq) -> None:
+            for op in ops_seq:
+                if op.src_name is not None:
+                    taken.add(op.src_name)
+                if isinstance(op, tir.TFor):
+                    collect_names(op.body)
+
+        collect_names(self.ops)
         counters = {"t": 0, "r": 0, "m": 0, "p": 0}
         remap: Dict[str, str] = {}
 
@@ -116,8 +170,7 @@ class Checker:
         def r(oid):
             return remap.get(oid, oid)
 
-        new_ops = []
-        for op in self.ops:
+        def rewrite(op):
             if op.id is not None and op.id.startswith("#"):
                 prefix = anon_prefix(op)
                 nid = f"{prefix}{counters[prefix]}"
@@ -130,7 +183,7 @@ class Checker:
             if isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
                 op = dataclasses.replace(op, lhs=r(op.lhs), rhs=r(op.rhs))
             elif isinstance(op, tir.TAddPtr):
-                op = dataclasses.replace(op, offs=r(op.offs))
+                op = dataclasses.replace(op, coords=tuple(r(c) for c in op.coords))
             elif isinstance(op, tir.TLoad):
                 op = dataclasses.replace(
                     op, ptr=r(op.ptr),
@@ -146,8 +199,14 @@ class Checker:
                 op = dataclasses.replace(op, tile=r(op.tile))
             elif isinstance(op, tir.TDot):
                 op = dataclasses.replace(op, lhs=r(op.lhs), rhs=r(op.rhs))
-            new_ops.append(op)
-        self.ops = new_ops
+            elif isinstance(op, tir.TPhi):
+                op = dataclasses.replace(op, pre=r(op.pre), back=r(op.back))
+            elif isinstance(op, tir.TFor):
+                op = dataclasses.replace(op, end=r(op.end),
+                                         body=tuple(rewrite(b) for b in op.body))
+            return op
+
+        self.ops = [rewrite(op) for op in self.ops]
         for b in self.env.locals.values():
             if b.id in remap:
                 b.id = remap[b.id]
@@ -200,21 +259,34 @@ class Checker:
                 Const(d.value) if isinstance(d, t.StaticDim) else Symbol(d.name)
                 for d in ann.dims
             )
-            self.env.buffers[p.name] = BufferType(ann.dtype, shape, ROW_MAJOR)
+            mem = ROW_MAJOR
+            if ann.strides is not None:
+                from ..types.layout import Strided
+                mem = Strided(tuple(
+                    Const(d.value) if isinstance(d, t.StaticDim) else Symbol(d.name)
+                    for d in ann.strides
+                ))
+            self.env.buffers[p.name] = BufferType(ann.dtype, shape, mem)
             buffer_order.append(p)
-            for d in ann.dims:
+            for axis, d in enumerate(ann.dims):
                 if isinstance(d, t.SymDim) and d.name not in self.env.syms:
-                    self.env.syms[d.name] = d.name
+                    self.env.syms[d.name] = SymBinding("dim", p.name, axis)
+                    sym_order.append(d.name)
+                    self._param_locs.setdefault(d.name, d.loc)
+            for axis, d in enumerate(ann.strides or ()):
+                if isinstance(d, t.SymDim) and d.name not in self.env.syms:
+                    self.env.syms[d.name] = SymBinding("stride", p.name, axis)
                     sym_order.append(d.name)
                     self._param_locs.setdefault(d.name, d.loc)
 
         all_param_names = [p.name for p in k.params]
-        for s in self.env.syms:
+        for s, sb in self.env.syms.items():
             if s in all_param_names:
-                raise err(k.loc, "E12", f"symbol dim '{s}' conflicts with a parameter name "
+                raise err(k.loc, "E12", f"symbol '{s}' ({sb.kind}) conflicts with a "
+                                        f"parameter name "
                                         f"(it is auto-bound as a runtime scalar parameter)")
             if s in RESERVED_NAMES:
-                raise err(k.loc, "E12", f"symbol dim '{s}' is a reserved name "
+                raise err(k.loc, "E12", f"symbol '{s}' ({sb.kind}) is a reserved name "
                                         f"(tila/tl/triton would shadow generated imports)")
 
         params = [tir.TParam(p.name, "buffer", self.env.buffers[p.name], None)
@@ -235,6 +307,10 @@ class Checker:
     def check_stmt(self, stmt: t.Stmt) -> None:
         if isinstance(stmt, t.Assign):
             self.check_assign(stmt)
+        elif isinstance(stmt, t.AugAssign):
+            self.check_augassign(stmt)
+        elif isinstance(stmt, t.For):
+            self.check_for(stmt)
         else:
             self.check_expr_stmt(stmt)
 
@@ -258,6 +334,146 @@ class Checker:
             self.ops[-1] = dataclasses.replace(root, id=stmt.target, src_name=stmt.target)
             oid = stmt.target
         self.env.locals[stmt.target] = Binding(ty, stmt.loc, oid)
+        # v0.4：zeros 播种 + 预扫描确认被 '+=' → 认定为累加器（R19 前提）
+        if isinstance(stmt.value, t.Call) and stmt.value.intrinsic == "zeros" \
+                and stmt.target in self._aug_targets:
+            self._accumulators.add(stmt.target)
+
+    # ------------------------------------------------------------------
+    # v0.4 循环与累加器（docs/v0.4-kloop.md §2.2–§2.4）
+    # ------------------------------------------------------------------
+
+    def check_augassign(self, stmt: t.AugAssign) -> None:
+        if not self._loop_stack:
+            raise err(stmt.loc, "E20",
+                      "'+=' is only legal inside a loop body, on a "
+                      "tila.zeros-seeded accumulator", subcode="AccumForm")
+        ctx = self._loop_stack[-1]
+        name = stmt.target
+        entry = ctx.snapshot.get(name)
+        if entry is None or name not in self._accumulators:
+            why = ("it is not bound before the loop" if entry is None else
+                   f"it was not seeded by tila.zeros ({type_str(entry.tila_type)})")
+            raise err(stmt.loc, "E20",
+                      f"'{name}' cannot be updated with '+=' ({why}); only "
+                      f"accumulators seeded with acc = tila.zeros(...) before the "
+                      f"loop may be updated inside it", subcode="AccumForm")
+        ty, val_id = self.infer(stmt.value)
+        if not isinstance(ty, TileType):
+            raise err(stmt.loc, "E07", "an accumulator update needs a Tile on the "
+                                      "right of '+='", _note("value", ty))
+        cur = ctx.carried.get(name, entry)
+        cur_ty = cur.tila_type
+        if ty.dtype != cur_ty.dtype:
+            raise err(stmt.loc, "E02",
+                      f"cannot accumulate Tile<{ty.dtype}> into accumulator "
+                      f"'{name}' of dtype {cur_ty.dtype}",
+                      _note("value", ty), _note("accumulator", cur_ty),
+                      f"expected: same dtype; hint: use "
+                      f"tila.cast(value, {_surface(cur_ty.dtype)})")
+        # 能力门与普通 R5 同款（评审 §8：fp8 累加器 = storage-only 算术 → E16）
+        self._capability_arith(stmt, "+", cur_ty.dtype)
+        bcast.require_same_shape(ty.shape, cur_ty.shape, stmt.loc, f"'+=' on '{name}'")
+        acc_l = normalize(cur_ty.layout)
+        if isinstance(acc_l, Zeros):
+            # L7：常量分布是 join 单位元——首次累加采纳被加项的分布
+            origin = JoinL(cur_ty.layout, ty.layout)
+            result_l = normalize(origin)
+        else:
+            lay.require_equiv(cur_ty.layout, ty.layout, stmt.loc, f"'+=' on '{name}'")
+            origin = JoinL(cur_ty.layout, ty.layout)
+            result_l = acc_l
+        result_ty = TileType(cur_ty.dtype, cur_ty.shape, result_l)
+        self._accum_counters[name] = self._accum_counters.get(name, 0) + 1
+        n = self._accum_counters[name]
+        nid = f"{name}.next" if n == 1 else f"{name}.next{n}"
+        if name not in ctx.carried:
+            self._loop_counters[name] = self._loop_counters.get(name, 0) + 1
+            m = self._loop_counters[name]
+            phi_id = f"{name}.loop" if m == 1 else f"{name}.loop{m}"
+            ctx.phis.append((name, phi_id, entry.id))
+            lhs_id = phi_id
+        else:
+            lhs_id = ctx.carried[name].id
+        self.emit(tir.TArith(nid, result_ty, name, origin, "+", lhs_id, val_id))
+        b = Binding(result_ty, stmt.loc, nid)
+        self.env.locals[name] = b
+        ctx.carried[name] = b
+
+    def check_for(self, stmt: t.For) -> None:
+        if self._loop_stack:
+            raise err(stmt.loc, "E20", "nested loops are not supported in v0.4 "
+                                      "(one level of tila.range loops only)",
+                      subcode="NestedLoop")
+        if stmt.target in RESERVED_NAMES:
+            raise err(stmt.loc, "E12", f"loop variable '{stmt.target}' is reserved "
+                                       f"(tila/tl/triton would shadow generated module imports)")
+        if self._is_bound(stmt.target):
+            where = self.env.locals.get(stmt.target)
+            defined = f"  (defined at line {where.loc.line})" if where else ""
+            raise err(stmt.loc, "E14",
+                      f"name '{stmt.target}' is already bound{defined}; "
+                      f"Tila is single-assignment — bind a new name instead")
+        call = stmt.iter
+        if call.intrinsic != "range":  # 防御：转换期已保证（E20 NotRange）
+            raise err(call.loc, "E20",
+                      "the only iterable is tila.range(0, end, step)",
+                      subcode="NotRange")
+        if len(call.args) != 3 or call.kwargs:
+            raise err(call.loc, "E20",
+                      "tila.range takes exactly three positional arguments: "
+                      "tila.range(0, end, step) — the literal 0, a runtime i32 "
+                      "scalar end, and a compile-time constant step >= 1",
+                      subcode="RangeForm")
+        start, end_expr, step_expr = call.args
+        if not isinstance(start, t.IntLit) or start.value != 0:
+            raise err(start.loc, "E20", "tila.range start must be the literal 0 "
+                                        "(Tila requires tila.range(0, end, step))",
+                      subcode="RangeForm")
+        end_ty, end_id = self.infer(end_expr)
+        if not (isinstance(end_ty, ScalarType) and end_ty.dtype == "i32"):
+            raise err(end_expr.loc, "E20",
+                      "tila.range end must be a runtime i32 scalar (a symbol dim, "
+                      "scalar arithmetic, or an integer literal)",
+                      _note("end", end_ty), subcode="RangeForm")
+        try:
+            step_tree, step_value = self.eval_constexpr(step_expr)
+        except TilaError:
+            raise err(step_expr.loc, "E20",
+                      "tila.range step must be a compile-time constant >= 1 "
+                      "(an integer literal or a constexpr name)",
+                      subcode="RangeForm") from None
+        if step_value < 1:
+            raise err(step_expr.loc, "E20",
+                      f"tila.range step must be a compile-time constant >= 1 "
+                      f"(got {step_value})", subcode="RangeForm")
+
+        outer_ops = self.ops
+        self.ops = []
+        snapshot = dict(self.env.locals)
+        ctx = LoopCtx(snapshot=snapshot)
+        self._loop_stack.append(ctx)
+        self.env.locals[stmt.target] = Binding(ScalarType("i32"), stmt.loc, stmt.target)
+        for s in stmt.body:
+            self.check_stmt(s)
+        self._loop_stack.pop()
+        body_ops = self.ops
+        self.ops = outer_ops
+
+        # 作用域收尾：循环局部（含归纳变量）出作用域；累加器出口绑定回写。
+        # 零迭代的出口值由 φ 语义覆盖（interpreter 回填种子；Triton loop-carried 同款）。
+        exit_bindings = {name: self.env.locals[name] for name in ctx.carried}
+        added = [k for k in self.env.locals if k not in snapshot]
+        self.env.locals = dict(snapshot)
+        self.env.locals.update(exit_bindings)
+        for k in added:
+            self._out_of_scope.setdefault(k, stmt.loc)
+        phi_ops = []
+        for name, phi_id, pre_id in ctx.phis:
+            b = ctx.carried[name]
+            phi_ops.append(tir.TPhi(phi_id, b.tila_type, name, None, pre_id, b.id))
+        self.emit(tir.TFor(stmt.target, ScalarType("i32"), stmt.target, None,
+                           end_id, step_tree, tuple(phi_ops) + tuple(body_ops)))
 
     def check_expr_stmt(self, stmt: t.ExprStmt) -> None:
         if stmt.call.intrinsic != "store":
@@ -283,6 +499,13 @@ class Checker:
 
     def check_name(self, e: t.NameRef):
         env = self.env
+        if self._loop_stack and e.name in self._accumulators:
+            raise err(e.loc, "E20",
+                      f"accumulator '{e.name}' may not be used as an ordinary "
+                      f"expression value inside the loop; the only permitted "
+                      f"use is the left-hand target of '+=' "
+                      f"(read it after the loop)",
+                      subcode="AccumRead")
         if e.name in env.locals:
             b = env.locals[e.name]
             return b.tila_type, b.id
@@ -294,6 +517,11 @@ class Checker:
             return ScalarType("i32"), self._constexpr_ref(e)
         if e.name in env.scalar_params:
             return ScalarType(env.scalar_params[e.name]), e.name
+        if e.name in self._out_of_scope:
+            raise err(e.loc, "E20",
+                      f"name '{e.name}' was defined inside a loop body; loop-local "
+                      f"names (including the loop variable) are not visible after "
+                      f"the loop", subcode="LoopScope")
         raise err(e.loc, "E01", f"name '{e.name}' is not bound (define before use)")
 
     def _sym_ref(self, e: t.NameRef) -> str:
@@ -328,6 +556,12 @@ class Checker:
             return builtin.check_expand_dim(self, e)
         if e.intrinsic == "dot":
             return builtin.check_dot(self, e)
+        if e.intrinsic == "zeros":
+            return builtin.check_zeros(self, e)
+        if e.intrinsic == "range":
+            raise err(e.loc, "E20", "tila.range may only appear as the iterable of "
+                                    "a for loop: for k0 in tila.range(0, end, step)",
+                      subcode="RangePosition")
         raise AssertionError(f"unknown intrinsic {e.intrinsic}")  # pragma: no cover
 
     def check_cast(self, e: t.Cast):
@@ -342,32 +576,15 @@ class Checker:
         rt, rid = self.infer(e.rhs)
         op = e.op
 
-        # R7：Buffer + Tile[i32] → Address（表面语言中指针出现的唯一形式）
-        if op == "+" and isinstance(lt, BufferType):
-            if not isinstance(rt, TileType):
-                raise err(e.loc, "E07", "the right operand of `buffer + ...` must be an "
-                                        "i32 index tile (e.g. pid * BLOCK + tila.arange(...))",
-                          _note("rhs", rt))
-            if rt.dtype != "i32":
-                raise err(e.loc, "E02", "the index tile of `buffer + index` must have "
-                                        "dtype i32",
-                          _note("rhs", rt))
-            if len(lt.shape) != len(rt.shape):
-                raise err(e.loc, "E04",
-                          f"rank mismatch in `buffer + index`: buffer rank "
-                          f"{len(lt.shape)} vs index tile rank {len(rt.shape)} "
-                          f"(rank(idx) must equal rank(buffer))",
-                          _note("buffer", lt), _note("index", rt))
-            ty = AddressType(lt.dtype, rt.shape, normalize(rt.layout))
-            return ty, self.emit(
-                tir.TAddPtr(self.next_id("p"), ty, None, rt.layout, lid, rid)).id
-
+        # v0.3 定稿：表面语言没有地址算术——Address 完全 compiler-internal，
+        # 只由 checker 在 load/store 内部构造（buffer_address）。
         for side, ty in (("lhs", lt), ("rhs", rt)):
             if isinstance(ty, (BufferType, AddressType)):
                 raise err(e.loc, "E07",
-                          f"invalid operand for '{op}': a buffer may only appear as the "
-                          f"left operand of `buffer + index_tile`; an address is only "
-                          f"consumed by tila.load / tila.store",
+                          f"invalid operand for '{op}': buffers are accessed with "
+                          f"tila.load(buffer, coords) / tila.store(buffer, coords, "
+                          f"value); address calculation is compiler-owned "
+                          f"(write tila.load(a, (offs,)) — one i32 tile per axis)",
                           _note(side, ty))
 
         if op in ARITH_OPS:
@@ -378,6 +595,70 @@ class Checker:
             return self._logic(e, op, lt, lid, rt, rid)
         raise err(e.loc, "E11", f"operator '{op}' is only legal inside compile-time "
                                 f"constant expressions (arange bounds)")  # pragma: no cover
+
+    def check_index_tuple(self, e: t.IndexTuple):
+        # 防御入口：转换期保证 IndexTuple 只出现在 load/store 的坐标实参位置
+        raise err(e.loc, "E19", "a coordinate tuple may only appear as the coordinates "
+                                "argument of tila.load(buffer, coords) / "
+                                "tila.store(buffer, coords, value)",
+                  subcode="CoordinatePosition")
+
+    def check_shape_lit(self, e: t.ShapeLit):
+        # 防御入口：转换期保证 ShapeLit 只出现在 zeros 的第 1 位置实参
+        raise err(e.loc, "E20", "a shape tuple may only appear as the first "
+                                "argument of tila.zeros((BM, BN), tila.float32)",
+                  subcode="ZerosForm")
+
+    def buffer_address(self, buf_expr, coords_expr):
+        """R8/R9 的寻址前提（v0.3 定稿）：buffer + 坐标元组 → 内部 Address。
+
+        表面语言没有地址算术——Address 由 checker 在 load/store 内部构造，
+        用户不可见（docs/v0.3-strides.md §1.2）。坐标逐轴给出，长度 = buffer
+        rank；Address shape/layout = 坐标广播积（broadcast_layout 的 Product
+        推导，与 R14 同款机制，无新布局规则）；线性化由 lowering 按 base 的
+        MemoryLayout 发射（§1.3 Address Function）。
+        """
+        bty, bid = self.infer(buf_expr)
+        if not isinstance(bty, BufferType):
+            raise err(buf_expr.loc, "E07",
+                      "the first argument of tila.load/tila.store must be a buffer",
+                      _note("operand", bty))
+        if not isinstance(coords_expr, t.IndexTuple):
+            raise err(coords_expr.loc, "E19",
+                      "coordinates must be a tuple literal with one i32 tile per "
+                      "axis: tila.load(a, (offs,)) / tila.load(a, (rows, cols))",
+                      subcode="CoordinateForm")
+        coords = coords_expr.items
+        if len(coords) != len(bty.shape):
+            name = getattr(buf_expr, "name", "buffer")
+            raise err(coords_expr.loc, "E19",
+                      f"coordinate tuple has {len(coords)} entries but buffer "
+                      f"'{name}' has rank {len(bty.shape)}",
+                      _note("buffer", bty), subcode="CoordinateArity")
+        coord_ids: list = []
+        shape = layout = None
+        for c in coords:
+            cty, cid = self.infer(c)
+            if not isinstance(cty, TileType):
+                raise err(c.loc, "E19", "each coordinate must be an i32 index tile "
+                                        "(scalar coordinates are not supported in v0.3)",
+                          _note("coordinate", cty), subcode="CoordinateKind")
+            if cty.dtype != "i32":
+                raise err(c.loc, "E02", "addressing coordinates must have dtype i32",
+                          _note("coordinate", cty))
+            coord_ids.append(cid)
+            if shape is None:
+                shape, layout = cty.shape, cty.layout
+            else:
+                new_shape = bcast.require_broadcast(shape, cty.shape, c.loc,
+                                                    "coordinates")
+                layout = lay.broadcast_layout(layout, shape, cty.layout, cty.shape,
+                                              c.loc, "coordinates")
+                shape = new_shape
+        ty = AddressType(bty.dtype, shape, normalize(layout))
+        return ty, self.emit(
+            tir.TAddPtr(self.next_id("p"), ty, None, layout, bid,
+                        tuple(coord_ids))).id
 
     # ---- R3 / R4 / R5 ----
     def _arith(self, e, op, lt, lid, rt, rid):
@@ -601,6 +882,8 @@ RULES = {
     t.Call: Checker.check_call,
     t.Cast: Checker.check_cast,
     t.DTypeRef: Checker.check_dtype_ref,
+    t.IndexTuple: Checker.check_index_tuple,
+    t.ShapeLit: Checker.check_shape_lit,
 }
 
 
@@ -614,6 +897,7 @@ def check_kernel_verbose(kernel_def: t.KernelDef,
                          constexpr_overrides: Optional[Dict[str, int]] = None):
     """同 check_kernel，但一并返回 (TKernel, explain 判定日志)。"""
     ck = Checker(kernel_def, constexpr_overrides or {})
+    ck._aug_targets = _collect_aug_targets(kernel_def.body)
     params = ck.check_signature()
     for stmt in kernel_def.body:
         ck.check_stmt(stmt)

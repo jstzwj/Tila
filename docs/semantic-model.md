@@ -24,14 +24,15 @@ Value
 | `Scalar[i32]` / `Scalar[f32]` | kernel 体 | 类型可见，值不可见 | `pid`、`N`、`2`、`0.0` |
 | `Tile[dt, Σ, L]` | kernel 体 | 类型（dtype/shape/layout）可见 | `offs`、`x`、`mask` |
 | `Buffer[dt, Σ]` | kernel 参数 | dtype 与 shape 可见（注解） | `a` |
-| `Address[dt, Σ, L]` | 内部（`a + offs` 的结果） | 全部可见 | — |
+| `Address[dt, Σ, L]` | 内部（load/store 检查中由坐标构造，v0.3 起不可命名） | 全部可见 | — |
 | `()` | 语句 | — | `store` 的返回 |
 
 要点：
 
 - **标量值域只有 `i32` / `f32`**：宽 dtype（f16、fp8…）只存在于 Tile/Buffer 元素层面，不给标量配 17 种类型。整数字面量默认 `Scalar(i32)`、浮点字面量默认 `Scalar(f32)`；在类别匹配的上下文中按该位置的 dtype 重新解释（规则 R12）。
-- **没有独立的 IndexTile 类别**：索引块就是 `Tile[i32, Σ, L]`。数据/索引的区分由**用法**建立（索引 tile 进入 `a + offs` 与 mask 谓词），不再由类型类别区分——这是相对初稿的简化。
+- **没有独立的 IndexTile 类别**：索引块就是 `Tile[i32, Σ, L]`。数据/索引的区分由**用法**建立（索引 tile 进入 load/store 的坐标实参与 mask 谓词），不再由类型类别区分——这是相对初稿的简化。
 - `Buffer` 只有 dtype 与 shape（注解给出），没有 layout：它不参与分布；layout 属于下一次 load 产生的 Tile。
+- **三个名字宇宙互不相交（结构保证，非约定）**：编译期常量（constexpr）、符号维（注解 shape 中的 `N`，以运行期 `Scalar(i32)` 参数的身份存在）、运行期值（局部标量与块）各有独立绑定表；签名检查拒绝符号维名与参数名、constexpr 名、保留名的一切重叠（E12）。"不要混淆 constexpr 与符号维"由该不变量直接满足——`N` 在 kernel 体内只能指符号维绑定，`BLOCK` 只能指 constexpr 绑定，无遮蔽可能。另注：shape 表达式（DimExpr，`type-system.md` §2.1 目标代数）是**类型层的项而非值**——只出现在注解与 shape 推导中，不属于任何值宇宙；kernel 体内写 `N` 取的仍是运行期标量绑定。
 
 ---
 
@@ -50,7 +51,7 @@ launch
 ```
 
 - 一次 launch 启动 `grid = (ceil_div(N, BLOCK),)` 个 program；`program_id(0)` 即 program 索引。
-- **Tila 是 tile-programming DSL，不是 CUDA-thread DSL**：用户永远不写 threadIdx / blockIdx / warp / lane / register。v0.1 的 kernel 是直线型（straight-line）：无循环、无分支、无自定义函数；每个 program 顺序执行函数体，单赋值保证每个名字恰好被求值一次。
+- **Tila 是 tile-programming DSL，不是 CUDA-thread DSL**：用户永远不写 threadIdx / blockIdx / warp / lane / register。v0.4 起 kernel 是"直线 + 受限迭代"：`for k0 in tila.range(0, end, step):` 循环合法，但**除编译器生成的归纳变量外，循环间唯一允许的用户可见 loop-carried state 是显式播种的累加器 φ**（zeros 播种、体内只 `+=`，`docs/v0.4-kloop.md`）；无分支、无自定义函数；直线部分单赋值不变——每个名字仍恰好被求值一次。
 - program 之间无通信、无共享内存、无同步（v0.1）。
 - 调用方契约：多个张量参数共享同一符号维（如 `a`、`b`、`c` 都是 `N`）时，launcher 在运行期断言这些张量的对应维长度相等（§7）。
 
@@ -58,7 +59,7 @@ launch
 
 ## 3. 内存模型
 
-- **全局内存，row-major，无 stride 注解**（v0.1 唯一 MemoryLayout；保留这一层的命名空间为将来 stride/swizzle/TMA 用）。
+- **全局内存，row-major 默认 + 显式 strides（v0.3 起）**：v0.1 唯一 MemoryLayout 是隐式 RowMajor；v0.3 引入尾随 strides 元组注解（`Tensor[f32, K, N, (sb0, sb1)]`）与坐标寻址，非连续张量（转置 / padding / 切片视图）由此合法，设计定稿见 `docs/v0.3-strides.md`。RowMajor 默认仍是**内存布局声明**：launcher 与 interpreter 断言张量实际连续，错配显式失败而非静默读错。
 - **随机访问是乱的（scatter/gather）与否由用户表达，编译器不做静态边界证明**：越界与否由 mask 表达（与 Triton 一致）。
 - **masked load**：mask 为假的通道跳过读；`other` 给出时该通道的值为 `other`，未给出时未定义。
 - **masked store**：mask 为假的通道跳过写。
@@ -68,18 +69,20 @@ launch
 
 ## 4. 指针模型（typed abstract memory）
 
-**指针语义上存在、语法上隐藏**：Tila 表面语言没有指针类型、没有 `ptr_add` 之类的指针内建；用户只写最自然的 `a + offs`。
+**指针语义上存在、语法上隐藏；地址算术自 v0.3 定稿起整体退场**：表面语言没有指针类型、没有 `ptr_add` 之类的指针内建、也没有 `a + offs` 寻址算术——内存访问只通过一级坐标原语：
 
 ```
-Buffer[dt, Σ]                        # kernel 参数（注解给出 dtype/shape）
-  +  Tile[i32, Σ', L]                # 索引块
+tila.load(Buffer[dt, Σ, M],  (i₀-tile, …, i_{r−1}-tile), mask=?, other=?)
+tila.store(Buffer[dt, Σ, M], (i₀-tile, …, i_{r−1}-tile), value, mask=?)
+
+Buffer[dt, Σ, M] + 坐标元组（长度 = rank）        # checker 内部构造（buffer_address）
   ↓
-Address[dt, Σ', L]                   # 内部类型：load/store 的消费对象
-  ↓ load
-Tile[dt, Σ', L]                      # 数据进寄存器，dtype 来自 Buffer
+Address[dt, Σ', L]                                # 内部类型：load/store 的消费对象
+  ↓ load（按 §1.3/v0.3-strides 的 Address Function 线性化）
+Tile[dt, Σ', L]                                   # 数据进寄存器，dtype 来自 Buffer
 ```
 
-检查器把 `a + offs` 判定为 `Address`（规则 R7），`tila.load(addr, ...)` / `tila.store(addr, value, ...)` 消费它；**指针算术只存在于生成的 Triton 代码**（`tl.load(a + offs)` 中的 `a + offs`），TIR 中的 `addptr` 指令是唯一显式指针构造点。
+检查器在 load/store 检查中把 `(buffer, coords)` 判定为内部 `Address`；**地址算术只存在于生成的 Triton 代码**（线性化 `i*s₀ + j*s₁` 由编译器按 Buffer 的 MemoryLayout 发射——用户侧不存在手工线性化），TIR 中的 `addptr` 指令是唯一显式指针构造点，坐标元组随其携带。
 
 ---
 
@@ -106,29 +109,58 @@ end   : Constexpr[int]，特化值 = 2^k（1 ≤ k ≤ 20）
 
 构造长度为 `end`（取 build 期特化值 `endᵛ`）的稠密索引块，元素为 `0, 1, …, end-1`。语义与 Triton `tl.arange` 一致；**约束（起点 0、2 的幂、≤ 2^20）是 Tila 的主动收紧（检查口径 E06），不随 Triton 版本摆动**。
 
-### 5.3 `tila.load(ptr, mask=?, other=?)`
+### 5.3 `tila.load(buf, coords, mask=?, other=?)`
 
 ```
-ptr   : Address[dt, Σ, L]
-mask  : Tile[bool, Σ', L']，Σ' ⊗ Σ 良式且 L' ~ L（v0.1：Σ' ≡ Σ）（可选）
+buf   : Buffer[dt, Σ_B, M]
+coords: (t₀, …, t_{r−1})，各 Tile[i32, Σᵢ, Lᵢ]，长度 = rank(Σ_B)（v0.3 坐标元组）
+        Σ = Σ₀ ⊗ ⋯ ⊗ Σ_{r−1} 良式 → 内部 Address[dt, Σ, 广播推导]
+mask  : Tile[bool, Σ', L']，Σ' ⊗ Σ 良式且 L' ~ L（可选）
 other : 与 dt 类别匹配的字面量（可选；给出时必须同时给出 mask，否则 E13）
-─── tila.load(ptr, mask=m, other=o) : Tile[dt, Σ, L]
+─── tila.load(buf, coords, mask=m, other=o) : Tile[dt, Σ, L]
 ```
 
-每个 program 从 `ptr`（= Buffer + 索引）读取 `Σ` 个元素进寄存器。mask 为假的通道按 §3 处理。v0.1 要求掩码形状与索引块相同（无广播收窄差异）；`other` 限定字面量是 v0.1 的表面语言边界——Triton 的 `other` 可为任意块并广播，将来放开时按 R5 的前提扩展即可。
+每个 program 按 buf 的 MemoryLayout（Address Function，`v0.3-strides.md` §1.3）从坐标读取 `Σ` 个元素进寄存器。mask 为假的通道按 §3 处理。`other` 限定字面量是表面语言边界——Triton 的 `other` 可为任意块并广播，将来放开时按 R5 的前提扩展即可。
 
-### 5.4 `tila.store(ptr, value, mask=?)`
+### 5.4 `tila.store(buf, coords, value, mask=?)`
 
 ```
-ptr   : Address[dt, Σ, L]
-value : Tile[dt', Σ', L']，dt' = dt（严格相等，无隐式转型），Σ' ⊗ Σ 良式且 L' ~ L（v0.1：Σ' ≡ Σ）
+buf   : Buffer[dt, Σ_B, M]
+coords: (t₀, …, t_{r−1})，同 5.3 → 内部 Address[dt, Σ, L]
+value : Tile[dt', Σ', L']，dt' = dt（严格相等，无隐式转型），Σ' ⊗ Σ 良式
 mask  : Tile[bool, Σ, L]（可选）
-─── tila.store(ptr, value, mask) : ()
+─── tila.store(buf, coords, value, mask) : ()
 ```
 
 逐元素写回。Triton 的 `tl.store` 允许 value 的隐式广播与类型转换；**Tila 刻意移除这两个隐式**（dtype 严格相等 E02、shape 严格 E03）——显式是卖点，不是缺口。store 的返回类型是 `()`，只能作为表达式语句出现（E08）。
 
-### 5.5 `tila.cast(x, dtype)`
+### 5.5 v0.4：循环与累加器（R17–R19，`docs/v0.4-kloop.md` §5）
+
+**Loop Semantics（四条定义；checker / TIR / interpreter / lowering 全部从它们派生）**：
+
+```
+Range(0, E, S)   = {0, S, 2S, … | k < E}        # 迭代域（trip count 动态）
+Acc₀             = zeros(shape, dtype)           # 种子（ZeroSeed，分布未定）
+Acc_{i+1}        = Acc_i ⊕ T_i                   # '+=' 是 primitive reduction
+                                                    # update，不是 read-modify-write
+Acc_out          = Acc_n    （n = |Range|）       # 出口 = 末次更新结果
+特别地             Loop(0, seed, F) = seed        # 零迭代恒等式：出口 = 种子
+```
+
+- **执行语义**：`for k in tila.range(0, e, s)` 取 `k = 0, s, 2s, …`（`k < e`，
+  trip count 动态）。体内指令按序执行；`+=` 的表面语义直接定义为
+  `acc⁺ = acc ⊕ t`——编译器隐式以累加器当前状态作 update 的 LHS state，
+  该内部状态读不属于表面层的累加器读（AccumRead 禁令针对表面层）。
+  迭代间的携带值：φ（用户侧）与归纳变量 k（compiler-generated）。
+- **零迭代**：`e ≤ 0` 时循环体不执行，出口值 = 种子（interpreter 显式回填；
+  Triton loop-carried 变量同款语义，双路径一致）。类型仍为
+  `Tile[dt, Σ, …]`——不是 unknown；K=0 的 matmul 因此输出 C = 0
+  （零迭代恒等式的 identity test）。
+- **循环后**：累加器绑定出口值（类型 = 体内最终类型，φ 类型化）；循环局部名
+  （含循环变量）出作用域（引用 → E20）。
+- 体内既有合同（load/store/dot/cast/掩码）原样成立——循环不引入新内存语义。
+
+### 5.6 `tila.cast(x, dtype)`
 
 ```
 x     : Tile[dt₁, Σ, L] 或 Scalar[dt₁]
@@ -156,7 +188,7 @@ dtype : tila.<dt₂>（DTypeRef）
 **翻译语义（translational semantics）**：Tila 的 v0.1 不独立给出执行语义——一个 Tila kernel 的含义 ≡ 它 lowering 出的 Triton kernel 的含义。由此得到两条硬性合约：
 
 1. **lowering 对有效 TIR 是 total 且确定的**：所有可判定的属性（dtype、shape、layout、capability）已被 checker 消耗；lowering 只查表发射，同一输入必得同一输出（黄金测试逐字节比对）。lowering 中的失败只可能来自 Triton 侧（§8 后端校验层），不算 lowering 的失败。
-2. **运行期契约由 launcher 的断言执行**：rank 断言（每张量注解 rank）、静态维断言（注解为字面量的维）、符号维相等断言（同一符号绑定多个张量时为其 shape 对应维）。
+2. **双层契约（命名定死）**：**Static type contract**（checker，编译期）+ **Runtime shape/memory contract**（launcher/interpreter 断言，运行期）。后者执行：rank 断言（每张量注解 rank）、静态维断言（注解为字面量的维）、符号维相等断言（同一符号绑定多个张量时为其 shape 对应维）、**内存布局断言（v0.3：静态 stride 等值、stride 符号跨张量一致、RowMajor buffer 实际连续——期望步长由声明/shape 推导，实际步长只做检查，绝不反推布局）**。将来 `assume` / dynamic shape / dynamic stride 都挂在这一层（`v0.3-strides.md` §11）。
 
 ## 8. 编译期 / 运行期分界
 

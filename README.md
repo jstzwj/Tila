@@ -17,11 +17,11 @@ Triton Source ──► Triton 编译器 ──► TTIR/TTGIR ──► PTX ─�
 
 核心思想：
 
-- **Triton-compatible programming model，stricter static semantics**。表面语法与 Triton 同层级：`import tila`、`@tila.jit`、`tila.program_id`、`tila.arange`、`tila.load(a + offs, mask=mask)`、`+`。Triton 留给运行期/JIT 的 dtype 提升、隐式广播、store 隐式转型，Tila 全部前移到编译期显式检查。Tila 不是 "prettier Triton"，而是"拥有自己静态语义、再编译到 Triton 的小型语言"。
+- **Triton-compatible programming model，stricter static semantics**。表面语法与 Triton 同层级：`import tila`、`@tila.jit`、`tila.program_id`、`tila.arange`、`tila.load(a, (offs,), mask=mask)`。Triton 留给运行期/JIT 的 dtype 提升、隐式广播、store 隐式转型，Tila 全部前移到编译期显式检查。Tila 不是 "prettier Triton"，而是"拥有自己静态语义、再编译到 Triton 的小型语言"。
 - **内建 = compiler intrinsic，不是 Python 函数**。`tila.load(...)` 由 frontend 识别为 `IntrinsicRef("load")` 并做编译期签名检查（`docs/language-spec.md` §2）；`tila` 模块对象在 Python 层只是 placeholder。
-- **类型分层**：`ScalarType(dtype)` / `TileType(dtype, shape, layout)`；`Buffer` / `Address` 是编译器内部类型——指针语义上存在、语法上隐藏（`a + offs` 被 check 为 `Address`）。layout 是**语义类型信息，不是用户语法**。
+- **类型分层**：`ScalarType(dtype)` / `TileType(dtype, shape, layout)`；`Buffer` / `Address` 是编译器内部类型——指针语义上存在、语法上隐藏（v0.3 起 Address 完全内部化：`tila.load(buf, coords)` / `tila.store(buf, coords, value)` 一级坐标原语，无地址算术）。layout 是**语义类型信息，不是用户语法**。
 - **dtype universe 与 Triton 对齐、运算语义刻意收紧**：bool、i8–i64、u8–u64、FP16/BF16/FP32/FP64、四种 FP8（存储 dtype：算术一律 E16）；无隐式提升与隐式转换，跨 dtype 必须显式 `tila.cast(x, tila.float32)`，否则 E02。
-- **shape 是迷你类型系统**：`Const` / `Symbol` / `Product`；广播规则收窄（相等或 size-1，其余 E03）；v0.1 无 shape 算术（引入即需要 Presburger 求解器，不做）。
+- **shape 是迷你类型系统**：`Const` / `Symbol` / `Product`；广播规则收窄（相等或 size-1，其余 E03）；v0.1 无 shape 算术，目标代数已定为全运算 DimExpr（`+ − × floordiv ceildiv mod max min`，`/` 禁用）——确定性重写为主路径、约束感知证明只认 ProvenEqual、SMT 仅可插拔 fallback（`docs/type-system.md` §2.1）。
 - **Layout Algebra 是编译器内部的语义系统**：layout term（identity / broadcast / product）+ 化简律 L1–L5，等价判定 = normalize 后结构相等。用户看不到 layout（"layout 是语义，不是语法"）。
 - **TIR 是项目真正的核心**：typed、SSA、canonical、layout-aware、backend-complete；TIR 不做类型推断（类型在 checker 已全部 resolve）。GPU codegen 全部交给 Triton：lowering 对有效 TIR 全函数（total）、确定、不做新的语义拒绝。
 - **两类错误严格分开**：E01–E17 是 Tila 语言错误（编译期拒绝）；B01–Bxx 是 Triton 后端兼容性错误（`docs/triton-lowering.md` §8）。
@@ -45,12 +45,12 @@ def add(
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
 
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
 
     z = x + y
 
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 ```
 
 启动（由生成的 launcher 完成，N 从 `a` 的形状自动读取，grid 由 launch analysis 推导）：
@@ -72,6 +72,8 @@ add[grid = (triton.cdiv(N, BLOCK),)](a, b, c, BLOCK=128)
 | `docs/v0.2-preview-2d.md` | 预览片段：符号维（batch 可变）+ 二维 tiling、`tila.expand_dim`/size-1 广播/`&`、`Product` 项与律 L5、batched_add 走查 |
 | `docs/v0.2-matmul-fragment.md` | matmul fragment：R16 dot、Mma layout term、R9' 内存边界、E18、桥接假说 H1 的检验结果 |
 | `docs/layout-oracle-notes.md` | Stage 0 oracle 实测笔记：单 encoding 不变量、encoding 参数规律、MMA 观测（H1 强形式证伪/家族分离成立） |
+| `docs/v0.3-strides.md` | v0.3 设计：stride 化 MemoryLayout、坐标寻址一级原语、Address Function、E19 |
+| `docs/v0.4-kloop.md` | v0.4 设计：K 循环与累加器（tila.range/zeros、受限累加 `+=`、TFor/TPhi、律 L7、E20） |
 | `docs/development-plan.md` | 开发路线 Stage 0–6（Triton oracle → minimal Tila → 强类型 → layout 代数 → 2D → 后端校验 → 差分测试）、测试体系、第一竖切清单 |
 
 ## 示例
@@ -84,6 +86,7 @@ examples/fp8_add.lowered.py  对应的期望 Triton 输出
 examples/saxpy.tila      标量参数 + 标量 cast（alpha 经 tila.cast 进入浮点运算）
 examples/masked_add.tila masked load 的 other 语义（other=0.0）
 examples/matmul.tila     matmul fragment：tila.dot + MMA 布局（v0.2 片段二）
+examples/matmul_loop.tila  完整 matmul：K 循环累加（v0.4，任意 K）
 examples/batched_add.tila     符号维（batch=M、特征=N 运行时可变）+ 二维 tiling（v0.2 预览）
 examples/batched_add.lowered.py  对应的期望 Triton 输出
 ```
@@ -102,10 +105,10 @@ def add(a: tila.Tensor[tila.float32, N], b: tila.Tensor[tila.float32, N],
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 
 add(a, b, c, BLOCK=64)   # torch.Tensor(cuda) → GPU；np.ndarray → CPU 解释器
 ```
@@ -192,6 +195,29 @@ size-1 广播（R14，逐轴 Product 推导）、`&` 合取（R15）、律 L5、
 `program_id(1)` 解禁、二维 grid launch analysis；`batched_add` 全链路走通
 （TIR dump 与文档 §4 走查逐行一致、GPU 与 torch 对拍通过）。
 
+**v0.3 strides（`docs/v0.3-strides.md`）已实现**：一级坐标原语
+`tila.load(buf, (i, j))` / `tila.store(buf, (i, j), v)`（坐标元组只此一处合法；
+`a + offs` 地址算术整体移除，Address 彻底内部化）、`Strided` MemoryLayout（注解尾随元组
+`Tensor[f16, K, N, (sb0, sb1)]`，全符号/维复用/静态三形态）、E19（rank ≥ 2
+禁止平面线性寻址——手工线性化盲区根除）、launcher stride 提取/共享断言 +
+RowMajor 连续性断言（非连续张量显式拒绝而非静默读错）、TIR `addptr` 携带坐标
+元组（线性化不进 TIR）。**非连续张量解锁并验收**：转置 / padded 的 b 在
+interpreter 与 GPU 双路径与 torch.matmul 对拍一致。
+
+**v0.4 K 循环与累加器（`docs/v0.4-kloop.md`）已实现（含同日评审修订 §13）**：
+`for k0 in tila.range(0, K, BK):`（R18；start 恒 0——定性为 syntactic
+restriction、end 运行期标量、step constexpr ≥ 1）、`tila.zeros` 播种（R17，
+distinguished 种子态 `Zeros`——分布未定，equiv 排除、join 单位元）、
+受限累加 `acc += tile`（R19：primitive reduction update，非 read-modify-write；
+单赋值不妥协，可变性围栏在显式累加器名单上）、律 L7（种子物化——φ 类型一行
+写完）、TIR 一层可嵌套（`TFor`/`TPhi`，φ 是唯一前向引用指令）、E20。
+评审修订：`+=` 定义为 primitive update（AccumRead 语义自洽）、维符号双重视图
+正式化（DimSymbol ↔ 运行期物化 Scalar(i32)）、归纳变量不计入用户 carried
+state、累加能力门（fp8 → E16）、零迭代恒等式 Loop(0, seed, F) = seed
+（size-0 数组布局契约空真，launcher 带 numel 守卫）。
+**完整 matmul 解锁并验收**：任意 K（含 0、非 BK 倍数与超大 K）在 interpreter
+与 GPU 双路径与 torch.matmul 对拍一致；TIR 黄金逐字节不变（纯增量）。
+
 **Stage 0 Triton oracle 已完成**（`docs/layout-oracle-notes.md`）：48 组
 BLOCK × num_warps × dtype 实测——1D/2D kernel 内全部张量值共享唯一 concrete
 encoding，`identity`/`Product` 抽象在实测范围内成立；encoding 参数是
@@ -200,14 +226,17 @@ encoding，`identity`/`Product` 抽象在实测范围内成立；encoding 参数
 验收状态：
 
 - **黄金测试**：`add.tila` → `add.tir.txt` / `add.triton.py` 与文档规范内容
-  **逐字节一致**；fp8_add / saxpy / masked_add / batched_add 同样纳入黄金。
+  **逐字节一致**；fp8_add / saxpy / masked_add / batched_add / matmul 同样纳入黄金
+  （v0.3 起 launcher 携带内存布局断言行；1D 的 TIR 与 kernel 体保持逐字节不变）。
 - **GPU 正确性**：生成的 Triton 源码经真实 Triton 编译器在 GPU 上运行——
   `add` 与 `torch.add` 在 N ∈ {1, 127, 128, 129, 1000} × BLOCK ∈ {32, 128}
   逐元素一致；`masked_add` / `batched_add` 通过同一 TIR 的 interpreter/GPU
-  双路径对拍；`fp8_add` 在 SM < 8.9 的卡上由 B01 正确拦截
-  （interpreter + ml_dtypes 覆盖语义）。
-- **测试**：190 用例——E01–E17 诊断矩阵、layout 律 L1–L5、R13–R15 与
-  Product 推导、typing 规则、lowering 单元（最小括号/匿名内联/dtype 表）、
-  interpreter 差分（1D/2D）、变异 fuzz（无原生异常泄漏）、GPU 集成。
+  双路径对拍；**v0.3：非连续张量（转置/padded）的 matmul 与 torch.matmul
+  对拍一致，RowMajor 声明收到非连续张量时正确拒绝**；
+  `fp8_add` 在 SM < 8.9 的卡上由 B01 正确拦截（interpreter + ml_dtypes 覆盖语义）。
+- **测试**：296+ 用例——E01–E20 诊断矩阵（E20 带 subcode）、layout 律 L1–L7、
+  R13–R19、strides/E19/E12 矩阵与非连续差分、K 循环差分（任意 K 含零迭代
+  恒等式 / 多段累加）、typing 规则、lowering 单元（最小括号/匿名内联/dtype 表）、
+  interpreter 差分（1D/2D/非连续）、变异 fuzz（无原生异常泄漏）、GPU 集成。
 
-下一步（按优先级）：**stride 化 MemoryLayout**（消灭手工线性化盲区——matmul 实现期间再次实证）→ **K 循环与累加**（打破单赋值，完整 matmul）→ 内建扩充与归约。
+下一步（按优先级）：**内建扩充与归约**（`num_programs/where/exp/sum`——softmax 前置）→ shape 表达式阶段一（全运算 DimExpr，`docs/type-system.md` §2.1，随 cat/reshape 落地）。双向类型注解（局部 AnnAssign）为 v0.5 候选。

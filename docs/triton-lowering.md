@@ -67,7 +67,11 @@ Triton 形参顺序（唯一规则）：
 - **匿名指令**：不发射变量，在使用点**内联**其表达式。依据 v0.1 事实"匿名值恰被使用一次"（`ast.md` §6 不变量 3）；发射器实现为按 use_count 决策（==1 内联、>1 物化为变量）——将来引入 CSE/DCE 等优化产生多次使用的匿名值时，只改发射决策，IR 不设此约束。
 - **`TStore`/`TReturn`**：无变量，直接发射调用行 / `return`。
 
-发射顺序 = TIR 指令序（直线序）。函数体内的发射结果即"每条源码赋值一行 + store 一行"。
+发射顺序 = TIR 指令序。v0.4 起 TIR 一层可嵌套（`TFor.body`）：循环体递归发射，
+每层缩进 +4 空格；`TPhi` 与合成引用一样**不发射**（loop-carried 由 Triton 的
+for 语义接管——种子在循环前物化、体内以同名读写，跨迭代类型稳定由 R19 的
+dtype/shape 严格检查保证）。函数体内的发射结果即"每条源码赋值一行 + store 一行
+（循环体按层缩进）"。
 
 ## 5. 表达式映射总表
 
@@ -85,6 +89,11 @@ Triton 形参顺序（唯一规则）：
 | `TLoad(p,m,o)` | `tl.load(⟨p⟩[, mask=⟨m⟩][, other=⟨o⟩])` |
 | `TStore(p,v,m)` | `tl.store(⟨p⟩, ⟨v⟩[, mask=⟨m⟩])` |
 | `TCast(dt,x)` | `⟨x⟩.to(tl.<dt>)`（dtype 表见 §6） |
+| `TExpandDim(t,a)` | `tl.expand_dims(⟨t⟩, a)`（v0.2 预览） |
+| `TDot(l,r)` | `tl.dot(⟨l⟩, ⟨r⟩)`（v0.2 fragment） |
+| `TZeros(shape,dt)` | `tl.zeros((⟨s₀⟩, …), dtype=tl.<dt>)`——shape 按 ConstExpr 渲染（名字/字面量）；单元素元组带尾逗号 `(64,)`（v0.4） |
+| `TFor(var,e,s)` | `for var in range(0, ⟨e⟩, ⟨s⟩):` + 嵌套体缩进 +4（v0.4；φ 不发射） |
+| `TPhi(pre,back)` | 不发射（Triton loop-carried 接管；种子/累加行以 src_name 同名渲染，如 `acc = acc + tl.dot(x, y)`）。**正确性映射**：`lower(LoopPhi) = Triton loop-carried assignment`——两侧不是逐字节对应而是语义等价，验收以同一 TIR 的 interpreter/GPU 差分为准（黄金只钉文本；v0.4-kloop §8.5） |
 
 操作数字段是 TIR `%id`：查表得该 id 的**发射名**（有 src_name → 名字；匿名 → 递归内联其表达式）。`addptr` 是匿名指令的标准内联对象：`load %p0` → `tl.load(a + offs)`——表面语言的 `tila.load(a + offs)` 到 Triton 的展开点。
 
@@ -118,7 +127,14 @@ def <name>_launch(<buffer 参数>, <constexpr 参数: int = 默认值>):
 
 - **shape 契约三件套**（补齐"静态维无运行时校验"与"rank 不校验"两个缺口）：rank 断言每张量必发；静态维断言（`Tensor[f32, 1024]` → `assert a.shape[0] == 1024`）；符号维相等断言（`language-spec.md` §7 运行时契约的执行点）。符号维一律按 `shape[i]` 取值/比较，不再用 `numel()`（可推广到多维）。
 - **grid 推导规则（launch_plan，launch analysis phase，失败 → E17）**：轴数 = kernel 内实际使用的 `program_id` 最大轴 + 1；每轴表达式 = `cdiv(维, tiling constexpr)`，其中"维"是该轴 mask 谓词覆盖的符号维（静态维直接代入字面量），"tiling constexpr" 是在该轴 `pid * CE` 中被引用的那个——**每轴必须唯一确定**（两个 constexpr 同时参与同一轴的 tiling 即 E17）。v0.1 实际只有轴 0。这是**语义模式识别**（识别 tiling 惯用法）而非类型检查，故独立成 phase——未来 autotune、多种 grid 策略、persistent kernel 都挂这一层。
-- 连续性：调用方契约，launcher 不检查（与 Triton 社区惯例一致；断言可由 `--safe` 选项开启，v0.2）。
+- **内存布局契约（v0.3 起；v0.4 增空真守卫）**：Strided buffer 逐轴
+  `assert b.stride(i) == <声明值>` / 绑定符号；RowMajor（默认）buffer 断言
+  实际连续（`stride(r−1) == 1` 且 `stride(i) == shape[i+1]`，期望步长永远由
+  shape 推导——declarative, not inferred）。**size-0 数组的契约空真**
+  （v0.4-kloop §12：torch 对空维报告的 stride 无意义，如 `(100,0).stride()
+  == (1,1)`；无元素可错读）——每个 RowMajor 断言带
+  `<b>.numel() == 0 or (…)` 守卫（复合式外层括号必须带：顶层以 `and`
+  连接而 `or` 结合度更低）。零迭代恒等式（K=0 的 matmul）由此在 GPU 侧成立。
 
 ## 8. 编译驱动、CLI 与后端校验层
 

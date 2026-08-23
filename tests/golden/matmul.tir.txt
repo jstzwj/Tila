@@ -1,4 +1,4 @@
-func @matmul(a: Buffer<f16, (M,K)>, b: Buffer<f16, (K,N)>, c: Buffer<f32, (M,N)>, M: Scalar(i32), K: Scalar(i32), N: Scalar(i32), BM: Constexpr(i32)=64, BN: Constexpr(i32)=128, BK: Constexpr(i32)=64)
+func @matmul(a: Buffer<f16, (M,K)>, b: Buffer<f16, (K,N), strides=(sb0,sb1)>, c: Buffer<f32, (M,N)>, M: Scalar(i32), K: Scalar(i32), N: Scalar(i32), sb0: Scalar(i32), sb1: Scalar(i32), BM: Constexpr(i32)=64, BN: Constexpr(i32)=128, BK: Constexpr(i32)=64)
 L0 = identity(64)
 L1 = identity(128)
 L2 = product(L0,L0)
@@ -20,31 +20,25 @@ L4 = mma(64,128,64)
 %rk2 = expand_dim %rk 0 : Tile<i32, (1,64), L0> [#rk2]
 %rk3 = expand_dim %rk 1 : Tile<i32, (64,1), L0> [#rk3]
 %rn2 = expand_dim %rn 0 : Tile<i32, (1,128), L1> [#rn2]
-%K = sym_ref K : Scalar(i32)
-%t2 = mul %rm2 %K : Tile<i32, (64,1), L0>
-%a_idx = add %t2 %rk2 : Tile<i32, (64,64), L2> [#a_idx]
-%N = sym_ref N : Scalar(i32)
-%t3 = mul %rk3 %N : Tile<i32, (64,1), L0>
-%b_idx = add %t3 %rn2 : Tile<i32, (64,128), L3> [#b_idx]
-%t4 = mul %rm2 %N : Tile<i32, (64,1), L0>
-%c_idx = add %t4 %rn2 : Tile<i32, (64,128), L3> [#c_idx]
 %M = sym_ref M : Scalar(i32)
 %m0 = lt %rm2 %M : Tile<bool, (64,1), L0>
+%K = sym_ref K : Scalar(i32)
 %m1 = lt %rk2 %K : Tile<bool, (1,64), L0>
 %a_m = and %m0 %m1 : Tile<bool, (64,64), L2> [#a_m]
 %m2 = lt %rk3 %K : Tile<bool, (64,1), L0>
+%N = sym_ref N : Scalar(i32)
 %m3 = lt %rn2 %N : Tile<bool, (1,128), L1>
 %b_m = and %m2 %m3 : Tile<bool, (64,128), L3> [#b_m]
 %m4 = lt %rm2 %M : Tile<bool, (64,1), L0>
 %m5 = lt %rn2 %N : Tile<bool, (1,128), L1>
 %c_m = and %m4 %m5 : Tile<bool, (64,128), L3> [#c_m]
-%p0 = addptr %a %a_idx : Address<f16, (64,64), L2>
-%t5 = const 0.0 : Scalar(f32)
-%x = load %p0 mask=%a_m other=%t5 : Tile<f16, (64,64), L2> [#x]
-%p1 = addptr %b %b_idx : Address<f16, (64,128), L3>
-%t6 = const 0.0 : Scalar(f32)
-%y = load %p1 mask=%b_m other=%t6 : Tile<f16, (64,128), L3> [#y]
+%p0 = addptr %a [%rm2, %rk2] : Address<f16, (64,64), L2>
+%t2 = const 0.0 : Scalar(f32)
+%x = load %p0 mask=%a_m other=%t2 : Tile<f16, (64,64), L2> [#x]
+%p1 = addptr %b [%rk3, %rn2] : Address<f16, (64,128), L3>
+%t3 = const 0.0 : Scalar(f32)
+%y = load %p1 mask=%b_m other=%t3 : Tile<f16, (64,128), L3> [#y]
 %acc = dot %x %y : Tile<f32, (64,128), L4> [#acc]
-%p2 = addptr %c %c_idx : Address<f32, (64,128), L3>
+%p2 = addptr %c [%rm2, %rn2] : Address<f32, (64,128), L3>
 store %p2 %acc mask=%c_m
 return

@@ -7,7 +7,8 @@ intrinsic resolution，查本表；表外属性 → E13。本模块同时承载 
 
 from __future__ import annotations
 
-INTRINSICS = ("program_id", "arange", "load", "store", "cast", "expand_dim", "dot")
+INTRINSICS = ("program_id", "arange", "load", "store", "cast", "expand_dim", "dot",
+              "range", "zeros")
 
 # 注解 / 装饰器名（非 intrinsic，出现在特定语法位置）
 MARKER_NAMES = ("jit", "constexpr", "Tensor")

@@ -20,10 +20,10 @@ def add(
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 
 
 # ---- ① CPU：numpy 数组（reference interpreter）--------------------------------

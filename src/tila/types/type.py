@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .layout import LayoutTerm, MemoryLayout, layout_str
-from .shape import Shape, shape_str
+from .shape import Shape, dim_str, shape_str
 
 
 @dataclass(frozen=True)
@@ -69,6 +69,10 @@ def type_str(t: TilaType, name_of=None) -> str:
     if isinstance(t, TileType):
         return f"Tile<{t.dtype}, {shape_str(t.shape)}, {layout_str(t.layout, name_of)}>"
     if isinstance(t, BufferType):
+        from .layout import Strided
+        if isinstance(t.mem, Strided):
+            inner = ",".join(dim_str(d) for d in t.mem.strides)
+            return f"Buffer<{t.dtype}, {shape_str(t.shape)}, strides=({inner})>"
         return f"Buffer<{t.dtype}, {shape_str(t.shape)}>"
     if isinstance(t, AddressType):
         return f"Address<{t.dtype}, {shape_str(t.shape)}, {layout_str(t.layout, name_of)}>"

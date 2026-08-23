@@ -65,7 +65,7 @@ class Param(Node):
     ann: Optional[Ann]                     # None → Scalar(i32)（language-spec.md §4）
     default: Optional[int]                 # 仅 ConstexprAnn 允许非 None
 
-Stmt = Union["Assign", "ExprStmt"]
+Stmt = Union["Assign", "AugAssign", "For", "ExprStmt"]
 
 @dataclass(frozen=True)
 class Assign(Node):
@@ -73,11 +73,23 @@ class Assign(Node):
     value: Expr
 
 @dataclass(frozen=True)
+class AugAssign(Node):                     # v0.4（docs/v0.4-kloop.md §1.3）：
+    target: str                            # 仅 '+='（其它增强赋值转换期 E20）；
+    value: Expr                            # 合法性（体内、zeros 播种）由 checker 围栏
+
+@dataclass(frozen=True)
+class For(Node):                           # v0.4（docs/v0.4-kloop.md §1.1）：
+    target: str                            # iterable 转换期已确认是 tila.range 调用
+    iter: Call                             # （否则 E20 NotRange）；三件套形态由 checker
+    body: tuple[Stmt, ...]                 # 判定（R18）
+
+@dataclass(frozen=True)
 class ExprStmt(Node):
     call: Call                             # checker 强制 intrinsic == "store"（E08）
 
 # ---------- 表达式 ----------
-Expr = Union["IntLit", "FloatLit", "NameRef", "BinOp", "Call", "Cast", "DTypeRef"]
+Expr = Union["IntLit", "FloatLit", "NameRef", "BinOp", "Call", "Cast", "DTypeRef",
+             "IndexTuple", "ShapeLit"]
 
 @dataclass(frozen=True)
 class IntLit(Node):
@@ -129,6 +141,8 @@ class Cast(Node):
 | 注解 `Subscript(Attribute(tila, Tensor), Tuple(dtype_ref, dims…))` | `TensorAnn` | dtype_ref 非法 → E12；`tila.Tensor` 出现在别处 → E14；无注解 → 不产生 Ann（→ Scalar(i32)） |
 | 注解 `Attribute(tila, constexpr)` | `ConstexprAnn` | 默认值非 `Constant(int)` → E15 |
 | `Assign(targets=[Name], value=…)` | `Assign` | 多目标/非 Name 目标 → E11 |
+| `AugAssign(Name, Add, …)`（v0.4） | `AugAssign` | 非 `+` 的增强赋值 → E20；非 Name 目标 → E11 |
+| `For(Name, tila.range 调用, body)`（v0.4） | `For` | iterable 非 tila.range → E20 NotRange；`for…else`/非 Name 目标 → E11；body 递归转换（嵌套由 checker E20） |
 | `Expr(Call)` | `ExprStmt` | `Expr` 的 value 非 Call → E11（E08 在 checker 期） |
 | `BinOp(Add/Sub/Mult/Div)` | `BinOp` | 其余 BinOp（`// % **`、移位）→ E11 |
 | `BitAnd/BitOr` | `BinOp` | `& \|` 合法；`^ ~ << >>` → E11 |
@@ -201,6 +215,18 @@ class TReturn(TOp):        ...                        # opcode: return（语句�
 # ---- v0.2 预览新增（docs/v0.2-preview-2d.md）----
 # TExpandDim(TOp): tile: str; axis: int        # opcode: expand_dim   R12
 
+# ---- v0.4 新增（docs/v0.4-kloop.md §3）----
+# TZeros(TOp): shape: tuple[ConstExpr, ...]; dtype: str   # opcode: zeros  R17：常量分布种子
+# TFor(TOp):   end: str; step: ConstExpr; body: tuple[TOp, ...]
+#              # opcode: for；id = 归纳变量（Scalar(i32)），start 隐含字面量 0；
+#              # body 是嵌套指令序列——TIR 唯一的嵌套点（嵌套 TFor 由 checker E20 拦截）
+# TPhi(TOp):   pre: str; back: str
+#              # opcode: phi；structured loop-carried φ（当前 IR 无一般 CFG，
+#              # φ 无歧义；将来引入 CFG φ 是另行设计的课题）。位于 body 顶部；
+#              # back 前向引用同 body 后文的最后一个 '+=' 结果——TIR 唯一允许
+#              # 前向引用的指令（SSA φ 的标准形态）。自带 tila_type（= back 的
+#              # 类型），printer 无需按 id 回查
+
 @dataclass(frozen=True)
 class TParam:
     name: str
@@ -241,6 +267,9 @@ class TKernel:
 - 头部：`func @<name>(<param>: <type>, …)`，constexpr 参数带 `= <默认值>`（`BLOCK: Constexpr(i32)=128`）。
 - dump **只含上述格式本身**：中文旁注、行号说明等不属于 dump 内容。opcode 拼写以 `type-checker.md` §8 的走查 dump 为参考实现。
 - ConstExpr 操作数按表达式原样渲染（`128`、`BLOCK`、`BLOCK // 2`）；constexpr 参数名**不带** `%` 前缀——区别于操作数 id 引用（`%BLOCK`）。
+- v0.4 循环：`%k0 = for 0 %K BK : Scalar(i32) [#k0]`（start 隐含 0、end 操作数、
+  step ConstExpr）；body 每行缩进 2 空格；`%acc.loop = phi %acc %acc.next : …`；
+  `zeros (BM, BN) f32` 的 shape 是单个 token。
 
 `add.tila`（BLOCK=128 特化）的完整 dump：
 
@@ -271,12 +300,18 @@ return
 
 ## 6. TIR 不变量（checker 保证，lowering 依赖）
 
-1. 每个 `%id` 唯一，且先定义后使用（直线序）。
+1. 每个 `%id` 唯一，且先定义后使用（v0.4 起 TIR 一层可嵌套：`TFor.body` 内部
+   保持直线序；**TPhi.back 是唯一的前向引用豁免**——φ 指向同 body 内后文定义
+   的出口值，SSA φ 的标准形态）。
 2. 每条指令操作数的类型满足其对应规则的全部前提（dtype、shape、layout 等价已检查）。
 3. **匿名值在其唯一使用点发射**——v0.1 中表达式树展平且 checker 不做 CSE，匿名值恰被使用一次。但这是 **lowering 的发射策略依据，不是 TIR 必须永久维持的结构性质**：将来的 CSE/常量折叠/copy propagation 会产生"被多次使用的匿名值"或"单次使用的具名值"，届时发射器改按 use_count 决策（==1 内联、>1 物化为变量，`triton-lowering.md` §4），IR 本身不设此约束。
 4. 所有 `Tile/Address` 类型中的 layout term 均可 normalize（无自由变量）。
 5. `TLoad/TStore` 的 `ptr` 字段引用 `TAddPtr` 产生的 Address 值；`TAddPtr.base` 引用 kernel 的 buffer 参数名。
 6. 每个值都有完全 resolve 的 dtype、shape、layout——**TIR 不做类型推断**（类型在 checker 已全部消耗；这是 lowering 能 total 的前提）。
+7. v0.4：`TPhi.tila_type` = 其 back 操作数的类型；pre 操作数的类型恒为 zeros
+   种子（join 单位元，L7）——入口值在任何分布解释下与 φ 类型兼容。若将来
+   放开非 zeros 播种的 carried 值，该不变量升级为 equiv(pre.layout,
+   φ.layout) 前提（v0.4-kloop §2.3）。
 
 ---
 

@@ -74,7 +74,7 @@ kernel_def     ::= "@" "tila" "." "jit" "def" IDENT "(" [params] ")" ":" NEWLINE
 params         ::= param ("," param)* [","]
 param          ::= IDENT [":" ann] ["=" INT]
 ann            ::= tensor_ann | "tila" "." "constexpr"
-tensor_ann     ::= "tila" "." "Tensor" "[" dtype_ref ("," dim)* "]"
+tensor_ann     ::= "tila" "." "Tensor" "[" dtype_ref ("," dim)* ["," strides] "]"
 dtype_ref      ::= "tila" "." dtype_name
 dtype_name     ::= "bool" | "i8" | "i16" | "i32" | "i64"
                  | "u8" | "u16" | "u32" | "u64"
@@ -82,9 +82,13 @@ dtype_name     ::= "bool" | "i8" | "i16" | "i32" | "i64"
                  | "fp8e4m3" | "fp8e5m2" | "fp8e4m3fn" | "fp8e4m3b15"
 dim            ::= INT | IDENT                      # 静态维 | 符号维
 
-stmt           ::= assign | expr_stmt
+stmt           ::= assign | aug_assign | for_stmt | expr_stmt
 assign         ::= IDENT "=" expr NEWLINE
-expr_stmt      ::= call NEWLINE                     # 只允许 store（checker 强制，E08）
+aug_assign     ::= IDENT "+=" expr NEWLINE          # v0.4：仅累加器；其它增强赋值 E20
+for_stmt       ::= "for" IDENT "in" range_call ":" NEWLINE INDENT stmt+ DEDENT
+                                                    # v0.4（docs/v0.4-kloop.md §1.1）：
+                                                    # 只允许 kernel 体顶层（嵌套 → E20）；
+                                                    # iterable 只能是 tila.range（E20）
 
 expr           ::= or_expr
 or_expr        ::= and_expr ("|" and_expr)*         # & | 仅 Tile[bool]（R10）
@@ -94,6 +98,20 @@ comp_op        ::= "<" | "<=" | ">" | ">=" | "==" | "!="
 additive       ::= multiplicative (("+" | "-") multiplicative)*
 multiplicative ::= atom (("*" | "/") atom)*
 atom           ::= INT | FLOAT | IDENT | call | cast | "(" expr ")"
+
+# v0.3（docs/v0.3-strides.md）：strides 尾随元组与坐标寻址
+strides        ::= "(" stride ("," stride)* ")"     # 只允许作 tensor_ann 最后一项
+stride         ::= INT | IDENT                      # INT ≥ 1；IDENT 按符号规则绑定
+coord_tuple    ::= "(" expr ("," expr)+ ")"         # 只允许作 tila.load/tila.store
+                                                # 的第 2 位置实参（其余位置的元组
+                                                #  → E11；坐标须为 i32 tile，
+                                                #  长度 = buffer rank，E19）
+shape_tuple    ::= "(" static_dim ("," static_dim)* ")"  # v0.4：只允许作 tila.zeros 的
+                                                # 第 1 位置实参；INT 字面量或
+                                                # constexpr 名（静态量，E20）
+range_call     ::= "tila" "." "range" "(" "0" "," expr "," const_expr ")"
+                                                # v0.4：start 恒为字面量 0；end 为
+                                                # 运行期 i32 标量；step 为 ConstExpr ≥ 1
 
 call           ::= "tila" "." IDENT "(" [arg_list] ")"     # IDENT ∈ INTRINSICS（表外 E13）
 arg_list       ::= expr ("," expr)* ["," kwarg ("," kwarg)*]
@@ -117,9 +135,13 @@ v0.1 没有用户函数。全部可调用对象：
 |---|---|---|---|---|---|
 | `program_id` | `tila.program_id(c)` | `c` 为字面量/constexpr 折叠值 ∈ {0}（v0.1；v0.2 预览扩至 {0,1}） | `Scalar(i32)` | R1 | `tl.program_id(c)` |
 | `arange` | `tila.arange(0, c₂)` | `c₁ = 0`（字面量）；`c₂` 为编译期常量表达式且特化值 = 2^k（1 ≤ k ≤ 20） | `Tile[i32, (c₂ᵛ,), …]`（取 build 期特化值） | R2 | `tl.arange(0, c₂)`（保留名字） |
-| `load` | `tila.load(ptr, mask=?, other=?)` | R8（§合同见语义模型 §5.3）：`ptr` 为 Address、mask/layout 等价、`other` 为类别匹配字面量且必须与 mask 同时给出 | `Tile[dt, Σ, L]` | R8 | `tl.load(<ptr>, mask=…, other=…)` |
-| `store` | `tila.store(ptr, value, mask=?)` | R9：dtype **严格相等**、shape 相等、layout 等价 | `()` | R9 | `tl.store(<ptr>, <v>, mask=…)` |
+| `load` | `tila.load(buf, coords, mask=?, other=?)` | R8（§合同见语义模型 §5.3）：`buf` 为 Buffer、`coords` 为坐标元组（每轴一个 i32 tile，长度 = rank；v0.3，`docs/v0.3-strides.md` §1.2）、mask/layout 等价、`other` 为类别匹配字面量且必须与 mask 同时给出 | `Tile[dt, Σ, L]` | R8 | `tl.load(<buf + 线性化>, mask=…, other=…)` |
+| `store` | `tila.store(buf, coords, value, mask=?)` | R9：dtype **严格相等**、shape 相等、layout 等价（R9' 放宽） | `()` | R9 | `tl.store(<buf + 线性化>, <v>, mask=…)` |
 | `cast` | `tila.cast(x, dt)` | R11：x 为 Tile 或 Scalar，dt 为 dtype_ref（17 种任意） | `Tile[dt', Σ, L]` / `Scalar[dt']` | R11 | `<x>.to(tl.<dt>)` |
+| `expand_dim` | `tila.expand_dim(t, axis)` | R13（v0.2 预览）：axis 编号结果张量轴 | `Tile[dt, Σ+1, L]` | R13 | `tl.expand_dims(<t>, axis)` |
+| `dot` | `tila.dot(x, y)` | R16（v0.2 fragment）：rank-2、收缩维相等、dtype ∈ {f16,bf16}、各维 ≥ 16 | `Tile[f32, (M,N), Mma]` | R16 | `tl.dot(<x>, <y>)` |
+| `zeros` | `tila.zeros(shape, dt)` | R17（v0.4）：shape 为静态元组（INT/constexpr 名，rank ≤ 2）、dt ≠ bool | `Tile[dt, Σ, Zeros(Σ)]` | R17 | `tl.zeros(<shape>, dtype=tl.<dt>)` |
+| `range` | `for k in tila.range(0, e, s):` | R18（v0.4）：仅 for 的 iterable 位置（其它位置 E20）；start 恒 0、e 为 i32 标量、s 为 ConstExpr ≥ 1 | 绑定 `k : Scalar(i32)` | R18 | `for k in range(0, <e>, <s>):` |
 
 运算符（作用于 Tile/Scalar 的二进制运算）：`+ - * / < <= > >= == != & |`。dtype 能力表见 `type-system.md` §1.1：bool 只能 `== != & |`；整数 `+ - *` 与全部比较；浮点另加 `/`；FP8 一切算术与比较 → E16。
 
@@ -128,7 +150,10 @@ v0.1 没有用户函数。全部可调用对象：
 - `mask`：省略时不做边界检查，越界行为未定义（与 Triton 一致）；kernel 作者负责用 `offs < N` 类的 mask 表达边界安全。
 - `other`：省略时 masked-out 通道未定义；给出时必须是**与元素 dtype 类别匹配的字面量**（整型 dt 配 `INT`、浮点 dt 配 `FLOAT`，如 `other=0` / `other=0.0`），跨类别 → E02；**必须与 `mask` 同时给出**——无 mask 时不存在 masked-out 通道 → E13。
 
-**指针类型不在表面语言中**：`a + offs`（Buffer + Tile[i32]）由 checker 判定为内部类型 `Address`（R7），`tila.load` 接受它；用户看不到指针。
+**指针类型与地址算术均不在表面语言中**（v0.3 定稿）：坐标只出现在
+`tila.load(buf, coords)` / `tila.store(buf, coords, value)` 的实参位置；`Address`
+是 checker/TIR 内部类型（在 load/store 检查中构造），用户看不到、不可命名。
+旧形式 `a + offs` / `tila.load(a + offs)` 已移除（E07/E13，消息附迁移提示）。
 
 ## 6. 名字、作用域与单赋值
 
@@ -141,10 +166,17 @@ v0.1 没有用户函数。全部可调用对象：
 
 **符号维（sym dim）自动绑定**：`tila.Tensor[dt, N]` 注解中出现的 IDENT（如 `N`）自动成为一个运行时 `Scalar(i32)` 参数：
 
-- 收集顺序 = 在签名中首次出现的顺序（决定生成 Triton 签名中的参数顺序，`triton-lowering.md` §3）。
+- 收集顺序 = 在签名中首次出现的顺序（决定生成 Triton 签名中的参数顺序，`triton-lowering.md` §3）。**strides 元组里的 IDENT 同款规则（v0.3）**：已绑定的符号（含维符号，如 `Tensor[f32, K, N, (N, 1)]` 显式行主序）→ 引用，新名 → 追加入序（launcher 从 `tensor.stride(i)` 取值）。
 - **符号维名不得与任何参数名、constexpr 名相同，也不得是保留名**（→ E12）——否则生成签名出现重复形参或保留名遮蔽。
-- 同一符号可出现在多个参数注解里（`a: tila.Tensor[tila.float32, N], b: …`）；这是**运行时契约**：launcher 校验这些张量的对应维长度相等（`semantic-model.md` §7）。
+- 同一符号可出现在多个参数注解里（`a: tila.Tensor[tila.float32, N], b: …`）；这是**运行时契约**：launcher 校验这些张量的对应维长度相等（`semantic-model.md` §7）。stride 符号跨张量共享同理（`b.stride(i)` 相等）。
 - 函数体内 `N` 可当普通 `Scalar(i32)` 使用（如 `offs < N`）。
+- **维符号的双重视图（v0.4 起正式规定）**：一个维符号有两个视角——
+  type-level 是 **ShapeSymbol**（注解 `Tensor[f16, M, K]` 里声明形状结构），
+  value-level 在 kernel 体内引用时**运行期物化**为 `Scalar(i32)`（其值 =
+  launcher 从首个绑定 buffer 的 `shape[i]` 读取的运行期维长）。`K` 既能写进
+  注解、又能作 `tila.range(0, K, BK)` 的 end 与 `rka < K` 的比较右部，依据是
+  同一条 elaboration 规则：`DimSymbol → RuntimeDimValue → Scalar(i32)`。
+  两个视角在 checker 的 Γ 中是同一绑定（type-system.md §4）。
 
 **constexpr**：
 
@@ -177,9 +209,9 @@ launcher 模板与 grid 推导规则见 `triton-lowering.md` §7；launch analys
 
 ## 10. v0.1 允许 / 禁止清单
 
-**允许**（完整清单）：1 个必需的 `import tila`；1 个 `@tila.jit` kernel；`tila.Tensor[...]` / `tila.constexpr` 参数；赋值；`tila.store` 表达式语句；二元算术（`+ - * /`）、比较、`& |`；`tila.cast`；5 个内建；int/float 字面量；`mask`/`other` kwarg；括号。
+**允许**（完整清单）：1 个必需的 `import tila`；1 个 `@tila.jit` kernel；`tila.Tensor[...]`（含 v0.3 尾随 strides 元组）/ `tila.constexpr` 参数；赋值；`tila.store` 表达式语句；二元算术（`+ - * /`）、比较、`& |`；`tila.cast`；内建；int/float 字面量；`mask`/`other` kwarg；括号；**坐标元组（仅 `tila.load`/`tila.store` 第 2 位置实参，v0.3）**；**`for k in tila.range(0, e, step):` 循环与 `acc += tile` 受限累加、`tila.zeros` 播种（v0.4，`docs/v0.4-kloop.md`）**。
 
-**禁止**（转换期直接拒绝，E11/E12/E13/E14）：`from tila import …` / `import tila as tl` / 多 import / 模块级其他语句；`return`、`if`、循环与迭代器、条件表达式；用户函数与 lambda；元组/列表/字典/切片/下标 `a[i]`；属性访问（除 `tila.<name>` 形态）；一元运算符（负字面量除外）；链式比较；布尔 `and/or/not`；`// % **` 与移位；增广赋值 `+=`；多目标赋值 `a = b = x`；字符串与 bool 字面量；f-string；class；`tila.<name>` 出现在非 call 位置或表外名字；dtype/内建名出现在 `tila.` 之外；非 store 的表达式语句；`store` 出现在表达式位置（含赋值右侧——它只能作为表达式语句，E08）。
+**禁止**（转换期直接拒绝，E11/E12/E13/E14）：`from tila import …` / `import tila as tl` / 多 import / 模块级其他语句；`return`、`if`、条件表达式；**循环的边界形态（v0.4）**：裸 `range(...)`/其它 iterable → E20 NotRange，嵌套 for、`while`、`break`/`continue`、`for…else` → E20/E11，`tila.range` 出现在非 iterable 位置 → E20，非 `+=` 增广赋值与体外 `+=` → E20，非 zeros 播种名作 `+=` 左部 → E20，体内读累加器 → E20，循环局部（含循环变量）出循环引用 → E20；用户函数与 lambda；元组/列表/字典/切片/下标 `a[i]`（**坐标元组的唯一豁免：load/store 的坐标实参位**）；属性访问（除 `tila.<name>` 形态）；一元运算符（负字面量除外）；链式比较；布尔 `and/or/not`；`// % **` 与移位；多目标赋值 `a = b = x`；字符串与 bool 字面量；f-string；class；`tila.<name>` 出现在非 call 位置或表外名字；dtype/内建名出现在 `tila.` 之外；非 store 的表达式语句；`store` 出现在表达式位置（含赋值右侧——它只能作为表达式语句，E08）；**地址算术 `buffer + …`（v0.3 定稿移除，E07/E13）**。
 
 **rank 限制（已强制，非 de facto）**：`tila.arange` 是唯一的索引种子且为一维，而 load/store 要求 `rank(idx) = rank(buffer)`——因此 v0.1 在签名检查直接拒绝 rank ≥ 2 注解（E12），kernel 只能操作一维张量。二维（`expand_dim`、size-1 广播、`&`）与 rank-2 解禁见 `docs/v0.2-preview-2d.md`。
 

@@ -14,14 +14,17 @@ from .ops import (  # noqa: F401
     TConstParamRef,
     TDot,
     TExpandDim,
+    TFor,
     TKernel,
     TLoad,
     TLogic,
     TParam,
+    TPhi,
     TProgramId,
     TReturn,
     TStore,
     TSymRef,
+    TZeros,
 )
 from .printer import dump  # noqa: F401
 from .ops import constexpr_str  # noqa: F401

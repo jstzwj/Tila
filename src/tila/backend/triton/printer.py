@@ -7,6 +7,8 @@ from typing import Dict
 from ... import tir
 from ...fmt import fmt_float
 from ...types import TRITON_DTYPE
+from ...types.layout import strides_of
+from ...types.shape import dim_str
 
 # Python 运算符优先级（比较 = 6，| = 8，& = 9，+ - = 11，* / = 12；原子最高）
 _PREC = {"<": 6, "<=": 6, ">": 6, ">=": 6, "==": 6, "!=": 6,
@@ -19,19 +21,27 @@ _ADDPTR_PREC = 11
 class OpRenderer:
     def __init__(self, kernel: tir.TKernel):
         self.kernel = kernel
-        self.by_id: Dict[str, tir.TOp] = {op.id: op for op in kernel.ops if op.id}
+        self.by_id: Dict[str, tir.TOp] = {}
         self.use_count: Dict[str, int] = {}
-        for op in kernel.ops:
+        self._materialized: set = set()
+        self._walk(kernel.ops)
+
+    def _walk(self, ops_seq) -> None:
+        """by_id / use_count 递归统计（v0.4 起含循环体；匿名编号空间跨层唯一）。"""
+        for op in ops_seq:
+            if op.id:
+                self.by_id[op.id] = op
             for oid in self._operands(op):
                 self.use_count[oid] = self.use_count.get(oid, 0) + 1
-        self._materialized: set = set()
+            if isinstance(op, tir.TFor):
+                self._walk(op.body)
 
     @staticmethod
     def _operands(op: tir.TOp):
         if isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
             return (op.lhs, op.rhs)
         if isinstance(op, tir.TAddPtr):
-            return (op.offs,)  # base 是参数名，不是值 id
+            return tuple(op.coords)  # base 是参数名，不是值 id
         if isinstance(op, tir.TLoad):
             return tuple(x for x in (op.ptr, op.mask, op.other) if x is not None)
         if isinstance(op, tir.TStore):
@@ -42,6 +52,10 @@ class OpRenderer:
             return (op.tile,)
         if isinstance(op, tir.TDot):
             return (op.lhs, op.rhs)
+        if isinstance(op, tir.TPhi):
+            return (op.pre, op.back)
+        if isinstance(op, tir.TFor):
+            return (op.end,)
         return ()
 
     # ------------------------------------------------------------------
@@ -102,7 +116,7 @@ class OpRenderer:
         if isinstance(op, tir.TLogic):
             return self._binop(op.op, op.lhs, op.rhs, _PREC[op.op])
         if isinstance(op, tir.TAddPtr):
-            return f"{op.base} + {self.render_operand(op.offs, _ADDPTR_PREC + 1)}"
+            return self._addptr(op)
         if isinstance(op, tir.TLoad):
             args = [self.render_operand(op.ptr)]
             if op.mask is not None:
@@ -117,28 +131,76 @@ class OpRenderer:
         if isinstance(op, tir.TDot):
             return (f"tl.dot({self.render_operand(op.lhs)}, "
                     f"{self.render_operand(op.rhs)})")
+        if isinstance(op, tir.TZeros):
+            inner = ", ".join(tir.constexpr_str(s) for s in op.shape)
+            shape = f"({inner},)" if len(op.shape) == 1 else f"({inner})"
+            return f"tl.zeros({shape}, dtype={TRITON_DTYPE[op.dtype]})"
+        if isinstance(op, (tir.TFor, tir.TPhi)):
+            # 循环头/φ 以 src_name 在使用点渲染（k0 / acc），从不作为表达式内联
+            return self.emission_name(op)
         raise AssertionError(f"cannot render {op!r}")  # pragma: no cover
+
+    def _stride_terms(self, op: tir.TAddPtr):
+        """逐轴 stride 渲染文本（v0.3-strides §4.1）；系数来自唯一的
+        `types.layout.strides_of`（Address Function，评审 §22 采纳的事实源共享）。"""
+        bparam = next((p for p in self.kernel.params
+                       if p.kind == "buffer" and p.name == op.base), None)
+        if bparam is None:  # pragma: no cover - typing 保证 base 是 buffer 参数
+            raise AssertionError(f"addptr base {op.base!r} is not a buffer param")
+        bty = bparam.tila_type
+        return [dim_str(d) for d in strides_of(bty.mem, bty.shape)]
+
+    def _addptr(self, op: tir.TAddPtr) -> str:
+        """`base + (c₀*s₀ + c₁*s₁ + …)`；单坐标且步长 1 时退化为 `base + c`
+        （rank-1 RowMajor 与 v0.2 逐字节一致）。"""
+        terms = []
+        for c, s in zip(op.coords, self._stride_terms(op)):
+            coord = self.render_operand(c, _ATOM)
+            terms.append(coord if s == "1" else f"{coord} * {s}")
+        if len(terms) == 1:
+            return f"{op.base} + {terms[0]}"
+        return f"{op.base} + ({' + '.join(terms)})"
 
     # ------------------------------------------------------------------
 
     def body_lines(self) -> list:
-        """kernel 体：每条源码赋值一行 + store 一行；匿名值按 use_count 决策。"""
+        """kernel 体：每条源码赋值一行 + store 一行；匿名值按 use_count 决策。
+        v0.4 起 TFor 递归渲染，每层 +4 空格（TPhi 与合成引用一样不发射）。"""
         taken = {op.src_name for op in self.kernel.ops if op.src_name}
         taken |= {p.name for p in self.kernel.params}
+
+        def collect_names(ops_seq) -> None:
+            for op in ops_seq:
+                if op.src_name:
+                    taken.add(op.src_name)
+                if isinstance(op, tir.TFor):
+                    collect_names(op.body)
+
+        collect_names(self.kernel.ops)
         lines = []
-        for op in self.kernel.ops:
-            if isinstance(op, tir.TReturn):
+        self._emit_ops(self.kernel.ops, 0, lines, taken)
+        return lines
+
+    def _emit_ops(self, ops_seq, depth: int, lines: list, taken: set) -> None:
+        pad = "    " * depth
+        for op in ops_seq:
+            if isinstance(op, (tir.TReturn, tir.TSymRef, tir.TConstParamRef,
+                               tir.TPhi)):
+                continue  # 语句终结 / 合成引用 / φ：均不发射
+            if isinstance(op, tir.TFor):
+                end = self.render_operand(op.end)
+                step = tir.constexpr_str(op.step)
+                lines.append(f"{pad}for {op.src_name} in range(0, {end}, {step}):")
+                self._emit_ops(op.body, depth + 1, lines, taken)
                 continue
-            if isinstance(op, (tir.TSymRef, tir.TConstParamRef)):
-                continue  # 合成引用：按参数名在使用点直接渲染，永不物化
             if isinstance(op, tir.TStore):
                 args = [self.render_operand(op.ptr), self.render_operand(op.value)]
                 if op.mask is not None:
                     args.append(f"mask={self.render_operand(op.mask)}")
-                lines.append(f"tl.store({', '.join(args)})")
+                lines.append(f"{pad}tl.store({', '.join(args)})")
                 continue
             if op.src_name is not None:
-                lines.append(f"{op.src_name} = {self.render_expr(op)}")
+                lines.append(f"{pad}{op.src_name} = {self.render_expr(op)}")
                 continue
             uses = self.use_count.get(op.id, 0)
             if uses == 1:
@@ -150,5 +212,4 @@ class OpRenderer:
             while name in taken:
                 name = "_" + name
             taken.add(name)
-            lines.append(f"{name} = {self.render_expr(op)}")
-        return lines
+            lines.append(f"{pad}{name} = {self.render_expr(op)}")

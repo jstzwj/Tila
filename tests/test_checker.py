@@ -17,7 +17,7 @@ def _c(body, params=F32, overrides=None):
 PRELUDE = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
 """
 
 
@@ -26,8 +26,8 @@ PRELUDE = """    pid = tila.program_id(0)
 # ---------------------------------------------------------------------------
 
 def test_r12_float_literal_matches_f16_tile():
-    res = _c(PRELUDE.replace("x = tila.load(a + offs, mask=mask)",
-                             "x = tila.load(a + offs, mask=mask)")
+    res = _c(PRELUDE.replace("x = tila.load(a, (offs,), mask=mask)",
+                             "x = tila.load(a, (offs,), mask=mask)")
              .replace("a: tila.Tensor[tila.float32, N]", "a: tila.Tensor[tila.float16, N]")
              + "    z = x + 1.0\n    m2 = x > 0.0\n",
              params="a: tila.Tensor[tila.float16, N], c: tila.Tensor[tila.float16, N]")
@@ -56,7 +56,7 @@ def test_r4_scalar_broadcast_both_sides():
     body = PRELUDE + """    s = 2.0
     t = x * s
     u = s * x
-    tila.store(c + offs, u, mask=mask)
+    tila.store(c, (offs,), u, mask=mask)
 """
     res = _c(body)
     assert "%t = mul %x %s" in res.tir_dump or "mul %x" in res.tir_dump
@@ -65,7 +65,7 @@ def test_r4_scalar_broadcast_both_sides():
 def test_r6_tile_tile_comparison():
     body = PRELUDE + """    y = x + x
     m = x < y
-    tila.store(c + offs, y, mask=m)
+    tila.store(c, (offs,), y, mask=m)
 """
     res = _c(body)
     assert "%m" in res.tir_dump and "Tile<bool, (128,), L0>" in res.tir_dump
@@ -77,8 +77,8 @@ def test_r10_bool_and_or():
     m1 = offs < N
     m2 = offs > 0
     m = m1 & m2
-    x = tila.load(a + offs, mask=m)
-    tila.store(c + offs, x, mask=m)
+    x = tila.load(a, (offs,), mask=m)
+    tila.store(c, (offs,), x, mask=m)
 """
     res = _c(body)
     assert "%m = and %m1 %m2 : Tile<bool, (128,), L0> [#m]" in res.tir_dump
@@ -90,8 +90,8 @@ def test_r10_anonymous_cmps_use_m_counter():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     m = (offs < N) & (offs > 0)
-    x = tila.load(a + offs, mask=m)
-    tila.store(c + offs, x, mask=m)
+    x = tila.load(a, (offs,), mask=m)
+    tila.store(c, (offs,), x, mask=m)
 """
     res = _c(body)
     assert "%m0 = lt %offs %N : Tile<bool, (128,), L0>" in res.tir_dump
@@ -103,21 +103,22 @@ def test_r11_scalar_cast_chain():
     body = (PRELUDE + "    a2 = tila.cast(pid, tila.float32)\n"
             "    a3 = tila.cast(a2, tila.float16)\n"
             "    a4 = tila.cast(a3, tila.bool)\n"
-            "    tila.store(c + offs, x, mask=mask)\n")
+            "    tila.store(c, (offs,), x, mask=mask)\n")
     res = _c(body)
     assert "cast %pid f32 : Scalar(f32) [#a2]" in res.tir_dump
     assert "cast %a2 f16 : Scalar(f16) [#a3]" in res.tir_dump
 
 
-def test_r7_address_value_can_be_named():
+def test_address_is_internal_e07():
+    """v0.3 定稿：Address 完全内部化——`p = a + offs` 的地址算术不可写（E07）；
+    坐标只出现在 tila.load/tila.store 的实参位置（docs/v0.3-strides.md §1.2）。"""
     body = """    offs = tila.arange(0, 128)
     p = a + offs
-    x = tila.load(p, mask=offs < N)
-    tila.store(c + offs, x, mask=offs < N)
 """
-    res = _c(body)
-    assert "%p = addptr %a %offs : Address<f32, (128,), L0> [#p]" in res.tir_dump
-    assert "p = a + offs" in res.triton_source
+    with pytest.raises(TilaError) as ei:
+        _c(body)
+    assert ei.value.code == "E07"
+    assert "compiler-owned" in ei.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +182,7 @@ def test_param_order_buffers_syms_scalars_constexpr():
 
 
 def test_sym_dim_shared_across_buffers_is_runtime_contract():
-    res = _c(PRELUDE + "    tila.store(c + offs, x, mask=mask)\n")
+    res = _c(PRELUDE + "    tila.store(c, (offs,), x, mask=mask)\n")
     assert "N = a.shape[0]" in res.triton_source
     assert "assert c.shape[0] == N" in res.triton_source
 
@@ -190,8 +191,8 @@ def test_static_dim_asserts_emitted():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < 1024
-    x = tila.load(a + offs, mask=mask)
-    tila.store(c + offs, x, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
 """
     res = _c(body, params="a: tila.Tensor[tila.float32, 1024], "
                           "c: tila.Tensor[tila.float32, 1024]")
@@ -268,7 +269,7 @@ def test_invariant_anonymous_used_once_and_layout_normal():
 
 
 def test_alias_assignment_shares_id():
-    body = PRELUDE + "    y = x\n    z = y + x\n    tila.store(c + offs, z, mask=mask)\n"
+    body = PRELUDE + "    y = x\n    z = y + x\n    tila.store(c, (offs,), z, mask=mask)\n"
     res = _c(body)
     # y 与 x 共享同一 id（无新指令）；z 的操作数是 %x
     assert "%y = " not in res.tir_dump

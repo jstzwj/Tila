@@ -78,7 +78,12 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
     elif isinstance(op, ops.TArange):
         toks += ["arange", str(op.start), ops.constexpr_str(op.end)]
     elif isinstance(op, ops.TAddPtr):
-        toks += ["addptr", f"%{op.base}", f"%{op.offs}"]
+        # 单坐标与 v0.2 逐字节一致；多坐标用方括号逗号表（v0.3-strides §3）
+        if len(op.coords) == 1:
+            toks += ["addptr", f"%{op.base}", f"%{op.coords[0]}"]
+        else:
+            inner = ", ".join(f"%{c}" for c in op.coords)
+            toks += ["addptr", f"%{op.base}", f"[{inner}]"]
     elif isinstance(op, ops.TArith):
         toks += [_ARITH_OPCODE[op.op], f"%{op.lhs}", f"%{op.rhs}"]
     elif isinstance(op, ops.TCmp):
@@ -97,6 +102,11 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
         toks += ["expand_dim", f"%{op.tile}", str(op.axis)]
     elif isinstance(op, ops.TDot):
         toks += ["dot", f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TZeros):
+        shape = "(" + ", ".join(ops.constexpr_str(s) for s in op.shape) + ")"
+        toks += ["zeros", shape, op.dtype]
+    elif isinstance(op, ops.TPhi):
+        toks += ["phi", f"%{op.pre}", f"%{op.back}"]
     elif isinstance(op, ops.TStore):
         toks += ["store", f"%{op.ptr}", f"%{op.value}"]
         if op.mask is not None:
@@ -113,15 +123,44 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
     return " ".join(toks)
 
 
+def _for_header(op: ops.TFor, namer: LayoutNamer) -> str:
+    """`%k0 = for 0 %K BK : Scalar(i32) [#k0]`（start 隐含字面量 0）。"""
+    toks = [f"%{op.id} =", "for", "0", f"%{op.end}", ops.constexpr_str(op.step)]
+    if op.tila_type is not None:
+        toks += [":", type_str(op.tila_type, namer.name_of)]
+    if op.src_name is not None:
+        toks.append(f"[#{op.src_name}]")
+    return " ".join(toks)
+
+
+def _walk(ops_seq, namer: LayoutNamer, depth: int, out: list) -> None:
+    """平铺指令行；TFor 的 body 递归缩进 2 空格（v0.4-kloop §3）。"""
+    pad = "  " * depth
+    for op in ops_seq:
+        if isinstance(op, ops.TFor):
+            out.append(pad + _for_header(op, namer))
+            _walk(op.body, namer, depth + 1, out)
+        else:
+            out.append(pad + _op_line(op, namer))
+
+
+def _register_ops(ops_seq, namer: LayoutNamer) -> None:
+    for op in ops_seq:
+        if op.tila_type is not None:
+            namer.register_type(op.tila_type)
+        if isinstance(op, ops.TFor):
+            _register_ops(op.body, namer)
+
+
 def dump(kernel: ops.TKernel) -> str:
     """canonical dump（单空格分隔、LF、恰一个尾换行）。"""
     namer = LayoutNamer()
-    for op in kernel.ops:
-        if op.tila_type is not None:
-            namer.register_type(op.tila_type)
+    _register_ops(kernel.ops, namer)
 
     lines = [f"func @{kernel.name}({_params_str(kernel)})"]
     lines.extend(namer.definitions())
     lines.append("")
-    lines.extend(_op_line(op, namer) for op in kernel.ops)
+    out: list = []
+    _walk(kernel.ops, namer, 0, out)
+    lines.extend(out)
     return "\n".join(lines) + "\n"

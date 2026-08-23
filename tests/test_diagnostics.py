@@ -35,8 +35,8 @@ F32_ARGS = "a: tila.Tensor[tila.float32, N], b: tila.Tensor[tila.float32, N], c:
 PRELUDE = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
 """
 
 
@@ -50,8 +50,8 @@ def test_E02_dtype_mismatch_between_tiles():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    yb = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    yb = tila.load(b, (offs,), mask=mask)
     z = x + yb
 """
     e = _expect(body, "E02", params=args)
@@ -65,8 +65,8 @@ def test_E02_store_narrowing_hint():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    tila.store(c + offs, x, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
 """
     e = _expect(body, "E02", params=args)
     assert "implicit narrowing" in " ".join(n.text for n in e.notes)
@@ -78,9 +78,9 @@ def test_E02_literal_category():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
     z = x + 1
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 """
     e = _expect(body, "E02", params=args)
     assert "1.0" in " ".join(n.text for n in e.notes)
@@ -106,9 +106,15 @@ def test_E06_arange_nonzero_start():
     _expect("    r = tila.arange(1, 128)\n", "E06")
 
 
-def test_E07_load_of_bare_buffer():
-    e = _expect("    x = tila.load(a)\n", "E07", params=F32_ARGS)
-    assert "address" in e.message
+def test_E13_load_arity():
+    e = _expect("    x = tila.load(a)\n", "E13", params=F32_ARGS)
+    assert "two positional" in e.message
+
+
+def test_E07_load_first_arg_not_buffer():
+    body = "    offs = tila.arange(0, 128)\n    x = tila.load(offs, (offs,))\n"
+    e = _expect(body, "E07", params=F32_ARGS)
+    assert "first argument" in e.message
 
 
 def test_E07_scalar_comparison():
@@ -123,12 +129,12 @@ def test_E07_buffer_as_value():
 
 
 def test_E08_store_in_value_position():
-    body = PRELUDE + "    w = tila.store(c + offs, x, mask=mask)\n"
+    body = PRELUDE + "    w = tila.store(c, (offs,), x, mask=mask)\n"
     _expect(body, "E08", params=F32_ARGS)
 
 
 def test_E08_non_store_expr_stmt():
-    body = PRELUDE + "    tila.load(c + offs)\n"
+    body = PRELUDE + "    tila.load(c, (offs,))\n"
     _expect(body, "E08", params=F32_ARGS)
 
 
@@ -142,7 +148,7 @@ def test_E09_cast_literal_operand():
 
 
 def test_E09_cast_bad_second_arg():
-    _expect("    x0 = tila.load(a + tila.arange(0, 128))\n"
+    _expect("    x0 = tila.load(a, (tila.arange(0, 128),))\n"
             "    y = tila.cast(x0, x0)\n", "E09", params=F32_ARGS)
 
 
@@ -158,8 +164,8 @@ def test_E16_fp8_arithmetic():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y
 """
     e = _expect(body, "E16", params=args)
@@ -169,9 +175,9 @@ def test_E16_fp8_arithmetic():
 
 def test_E16_int_division():
     args = "a: tila.Tensor[tila.int32, N], b: tila.Tensor[tila.int32, N]"
-    body = PRELUDE.replace("x = tila.load(a + offs, mask=mask)",
-                           "x = tila.load(a + offs, mask=mask)").replace(
-        "y = tila.load(b + offs, mask=mask)", "y = tila.load(b + offs, mask=mask)") + \
+    body = PRELUDE.replace("x = tila.load(a, (offs,), mask=mask)",
+                           "x = tila.load(a, (offs,), mask=mask)").replace(
+        "y = tila.load(b, (offs,), mask=mask)", "y = tila.load(b, (offs,), mask=mask)") + \
         "    q = x / y\n"
     _expect(body, "E16", params=args)
 
@@ -207,8 +213,8 @@ def test_E17_no_tiling_pattern():
     body = """    pid = tila.program_id(0)
     offs = pid + tila.arange(0, 128)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    tila.store(a + offs, x, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(a, (offs,), x, mask=mask)
 """
     _expect(body, "E17", params=F32_ARGS)
 
@@ -220,8 +226,8 @@ def test_E17_two_constexpr_same_axis():
     u = pid * 64 + tila.arange(0, 128)
     offs = t + u
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    tila.store(c + offs, x, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
 """
     _expect(body, "E17", params=args)
 
@@ -229,8 +235,8 @@ def test_E17_two_constexpr_same_axis():
 def test_E17_no_bound_predicate():
     body = """    pid = tila.program_id(0)
     offs = pid * 128 + tila.arange(0, 128)
-    x = tila.load(a + offs)
-    tila.store(a + offs, x)
+    x = tila.load(a, (offs,))
+    tila.store(a, (offs,), x)
 """
     _expect(body, "E17", params=F32_ARGS)
 
@@ -350,7 +356,7 @@ def test_E13_program_id_runtime_axis():
 
 def test_E13_other_without_mask():
     body = """    offs = tila.arange(0, 128)
-    x = tila.load(a + offs, other=0.0)
+    x = tila.load(a, (offs,), other=0.0)
 """
     with pytest.raises(TilaError) as ei:
         _compile_body(body, params=F32_ARGS)
@@ -359,7 +365,7 @@ def test_E13_other_without_mask():
 
 def test_E13_unknown_kwarg():
     body = """    offs = tila.arange(0, 128)
-    x = tila.load(a + offs, bogus=1)
+    x = tila.load(a, (offs,), bogus=1)
 """
     with pytest.raises(TilaError) as ei:
         _compile_body(body, params=F32_ARGS)
@@ -367,7 +373,7 @@ def test_E13_unknown_kwarg():
 
 
 def test_E13_store_other_kwarg():
-    body = PRELUDE + "    tila.store(c + offs, x, mask=mask, other=0.0)\n"
+    body = PRELUDE + "    tila.store(c, (offs,), x, mask=mask, other=0.0)\n"
     with pytest.raises(TilaError) as ei:
         _compile_body(body, params=F32_ARGS)
     assert ei.value.code == "E13"

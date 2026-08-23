@@ -26,10 +26,10 @@ def mixed_dtypes(                                   # Triton：f32 + i32 静默�
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y                                      # ← E02: Tile<f32> ⊕ Tile<i32>
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 
 
 @tila.jit
@@ -40,11 +40,11 @@ def shape_mismatch(                                 # Triton：运行期才报 b
 ):
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
-    x = tila.load(a + offs)
+    x = tila.load(a, (offs,))
     y = x + x
     half = tila.cast(tila.arange(0, 64), tila.float32)   # 同为 f32，排除 dtype 因素
     z = y + half                                   # ← E03: (128,) ⊕ (64,)
-    tila.store(c + offs, z)
+    tila.store(c, (offs,), z)
 
 
 @tila.jit
@@ -57,10 +57,10 @@ def fp8_arithmetic(                                 # Triton：fp8 算术行为�
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + y                                      # ← E16: fp8 是存储 dtype，禁止算术
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 
 
 @tila.jit
@@ -71,9 +71,9 @@ def reassignment(                                  # Triton/Python：合法；Ti
 ):
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
-    x = tila.load(a + offs)
+    x = tila.load(a, (offs,))
     x = x + 1.0                                    # ← E14: 名字只能绑定一次
-    tila.store(c + offs, x)
+    tila.store(c, (offs,), x)
 
 
 @tila.jit
@@ -82,8 +82,8 @@ def bad_arange(                                    # Triton：arange(0,100) 运�
     c: tila.Tensor[tila.float32, N],
 ):
     offs = tila.arange(0, 100)                     # ← E06: 长度必须是 2^k
-    x = tila.load(a + offs)
-    tila.store(c + offs, x)
+    x = tila.load(a, (offs,))
+    tila.store(c, (offs,), x)
 
 
 @tila.jit
@@ -95,8 +95,8 @@ def typo_name(                                     # Triton：NameError 运行�
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < n                                # ← E01: 'n' 未绑定（想要 N？）
-    x = tila.load(a + offs, mask=mask)
-    tila.store(c + offs, x, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    tila.store(c, (offs,), x, mask=mask)
 
 
 # ---------------------------------------------------------------------------
@@ -113,10 +113,10 @@ def mixed_dtypes_fixed(
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x = tila.load(a + offs, mask=mask)
-    y = tila.load(b + offs, mask=mask)
+    x = tila.load(a, (offs,), mask=mask)
+    y = tila.load(b, (offs,), mask=mask)
     z = x + tila.cast(y, tila.float32)             # ← E02 hint 给出的写法
-    tila.store(c + offs, z, mask=mask)
+    tila.store(c, (offs,), z, mask=mask)
 
 
 @tila.jit
@@ -129,13 +129,13 @@ def fp8_add_fixed(
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = offs < N
-    x0 = tila.load(a + offs, mask=mask)
-    y0 = tila.load(b + offs, mask=mask)
+    x0 = tila.load(a, (offs,), mask=mask)
+    y0 = tila.load(b, (offs,), mask=mask)
     x = tila.cast(x0, tila.float16)                # ← E16 hint 给出的写法
     y = tila.cast(y0, tila.float16)
     z = x + y
     z0 = tila.cast(z, tila.float8e4m3fn)
-    tila.store(c + offs, z0, mask=mask)
+    tila.store(c, (offs,), z0, mask=mask)
 
 
 # ---------------------------------------------------------------------------

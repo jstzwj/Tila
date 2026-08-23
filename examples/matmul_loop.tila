@@ -1,0 +1,30 @@
+import tila
+
+
+@tila.jit
+def matmul_loop(
+    a: tila.Tensor[tila.float16, M, K],
+    b: tila.Tensor[tila.float16, K, N, (sb0, sb1)],
+    c: tila.Tensor[tila.float16, M, N],
+    BM: tila.constexpr = 64,
+    BN: tila.constexpr = 128,
+    BK: tila.constexpr = 64,
+):
+    pid_m = tila.program_id(0)
+    pid_n = tila.program_id(1)
+    rm2 = tila.expand_dim(pid_m * BM + tila.arange(0, BM), 1)    # : Tile[i32, (64,1),  L0]
+    rn2 = tila.expand_dim(pid_n * BN + tila.arange(0, BN), 0)    # : Tile[i32, (1,128), L1]
+    rk2 = tila.expand_dim(tila.arange(0, BK), 0)                 # : Tile[i32, (1,64),  L2]
+    rk3 = tila.expand_dim(tila.arange(0, BK), 1)                 # : Tile[i32, (64,1),  L3]
+    c_m = (rm2 < M) & (rn2 < N)                                  # : Tile[bool, (64,128), L4]
+
+    acc = tila.zeros((BM, BN), tila.float32)                     # : Tile[f32, (64,128), L5]
+    for k0 in tila.range(0, K, BK):
+        rka = rk2 + k0                                           # : Tile[i32, (64,1),  L2]
+        rkb = rk3 + k0                                           # : Tile[i32, (1,64),  L3]
+        x = tila.load(a, (rm2, rka), mask=(rm2 < M) & (rka < K), other=0.0)
+        y = tila.load(b, (rkb, rn2), mask=(rkb < K) & (rn2 < N), other=0.0)
+        acc += tila.dot(x, y)                                    # : Tile[f32, (64,128), L6]
+
+    c16 = tila.cast(acc, tila.float16)                           # : Tile[f16, (64,128), L6]
+    tila.store(c, (rm2, rn2), c16, mask=c_m)

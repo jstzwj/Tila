@@ -139,19 +139,23 @@ program_id(c):  args 恰 1 个且为字面量/constexpr 折叠值 ∈ {0}（v0.1
 arange(a, b):   args 恰 2 个且为编译期常量表达式（ConstExpr）；a == 0（字面量）；b 的特化值 = 2^k
                 （1 ≤ k ≤ 20），否则 E06；边界非常量表达式 → E10 → R2
                 end 以 ConstExpr 进入 TIR，发射保留名字（模型 B）
-load(ptr, mask=?, other=?):
-    1. ptr 为 Address[dt, Σ, L]（由 `buffer + tile` 构造，否则 E07）
-    2. mask（若给）：Tile[bool, Σ', L']；Σ' ⊗ Σ 良式（v0.1 事实：Σ' ≡ Σ，否则 E03）、
+load(buf, coords, mask=?, other=?):        # v0.3 定稿：一级坐标原语（两位置实参 + kwargs）
+    1. buf 为 Buffer（NameRef → env.buffers，否则 E07）
+    2. coords 为坐标元组（IndexTuple，只在 load/store 第 2 实参位由转换期构造；
+       非元组 → E19 CoordinateForm）；长度 = rank(buf)（否则 E19 CoordinateArity）；
+       每项 Tile[i32]（标量 → E19 CoordinateKind、非 i32 → E02）；
+       坐标广播良式（E03）→ checker 内部 buffer_address 构造 Address 并发射 addptr
+    3. mask（若给）：Tile[bool, Σ', L']；Σ' ⊗ Σ 良式（否则 E03）、
        dtype 必须 bool（E02）、L' ~ L（E05）
-    3. other（若给）：字面量，类别与 dt 匹配（整型 dt 配 INT、浮点 dt 配 FLOAT），
+    4. other（若给）：字面量，类别与 dt 匹配（整型 dt 配 INT、浮点 dt 配 FLOAT），
        否则 E02；且要求 mask 同时给出（无 mask 的 other 无意义 → E13）
-    4. 构造 LoadL(M_dt, L)，由律 L1 规范化 → R8
-store(ptr, value, mask=?):
+    5. 构造 LoadL(M_dt, L)，由律 L1 规范化 → R8
+store(buf, coords, value, mask=?):
     0. 语境检查：store 只能作为 ExprStmt；出现在 Assign 右侧或任何子表达式位置
        → E08（类型 () 不可绑定、不可参与运算）
-    1. ptr 为 Address[dt, Σ, L]、value 为 Tile，否则 E07
+    1. buf/coords 同 load 第 1–2 步（内部 Address）；value 为 Tile，否则 E07
     2. rank 相等（E04）→ shape Σ_v ⊗ Σ 良式（E03）→ dtype 严格相等，无隐式收窄（E02）
-    3. layout：equiv(L_v, L)，mask 给出时再 equiv(L_mask, L)（E05）→ R9
+    3. layout：equiv(L_v, L)，mask 给出时再 equiv(L_mask, L)（E05）→ R9'（坐标语义）
 cast(x, dt):
     args 恰 2 个；dt 为 DTypeRef（17 种任意，否则 E09）；x 为 Tile 或 Scalar（否则 E09，
     比如把 Buffer 当操作数 —— Tile/Address 也不可 cast，地址不是值）→ R11
@@ -178,10 +182,18 @@ cast(x, dt):
 ```python
 @dataclass
 class Env:
-    buffers:   dict[str, BufferType]                 # 参数 Buffer（注解给出 dtype/shape）
-    syms:      dict[str, str]                        # 符号维名 → id（值即名字）
+    buffers:   dict[str, BufferType]                 # 参数 Buffer（注解给出 dtype/shape/mem）
+    syms:      dict[str, SymBinding]                 # 符号名 → (kind: dim|stride, 来源 buffer, axis)
     constexprs: dict[str, int]                       # 已特化的值
     locals:    dict[str, Binding]                    # name → (type, defining loc, tir id)
+
+@dataclass(frozen=True)
+class SymBinding:
+    """v0.3：Dim 符号与 Memory(stride) 符号共用一张符号表（评审 §9/§11）——
+    都是"运行期需物化的编译期符号"；kind 供诊断与将来的 assume/约束系统。"""
+    kind: str                                        # "dim" | "stride"
+    buffer: str
+    axis: int
 
 @dataclass(frozen=True)
 class Binding:
@@ -192,7 +204,7 @@ class Binding:
 
 签名检查顺序：
 
-1. 逐参数解析注解：dtype ∈ DTYPES（否则 E12）；**bool 不得作 Buffer 元素 dtype → E12**（能力表规定 bool 只作 mask/比较结果——否则一个未被使用的 `Buffer[bool]` 参数会全程漏检）；**rank ≥ 2 → E12**（v0.1 内 2D 参数永远无法被 load/store，放行只是陷阱；`v0.2-preview-2d.md` 片段解禁 rank 2）；`dim` 为 `StaticDim(int)` 或 `SymDim(name)`；sym dim 按首次出现顺序收集，重复出现绑定同一符号。无注解参数 → `Scalar(i32)`。
+1. 逐参数解析注解：dtype ∈ DTYPES（否则 E12）；**bool 不得作 Buffer 元素 dtype → E12**（能力表规定 bool 只作 mask/比较结果——否则一个未被使用的 `Buffer[bool]` 参数会全程漏检）；**rank ≥ 2 → E12**（v0.1 内 2D 参数永远无法被 load/store，放行只是陷阱；`v0.2-preview-2d.md` 片段解禁 rank 2）；`dim` 为 `StaticDim(int)` 或 `SymDim(name)`；sym dim 按首次出现顺序收集，重复出现绑定同一符号。无注解参数 → `Scalar(i32)`。**尾随 strides 元组（v0.3）**：元素同 dim 文法（INT 且 ≥ 1，或 IDENT），长度必须等于 rank（否则 E12，转换期检查）；IDENT 按同款规则绑定（已绑定的符号（含维符号）→ 引用，新名 → 追加 sym 序），符号表条目为 `SymBinding(kind, buffer, axis)`（dim/stride 二分类共用一张表，`v0.3-strides.md` §2.2）；MemoryLayout 取 `Strided(...)`，省略元组则 `RowMajor`。坐标寻址的形态检查见 R7'/E19（`docs/v0.3-strides.md`）。
 2. **名字冲突检查（E12）**：sym dim 名不得与任何参数名、constexpr 名相同，也不得是保留名——否则生成签名出现重复形参或保留名遮蔽。kernel 名、保留名（`tila`/`tl`/`triton`）不得作参数名/赋值目标（E12）。
 3. `tila.constexpr` 参数：默认值为整数字面量（E15）；用调用点覆盖值特化；无默认且未覆盖 → E15。特化值绑定进产物：**每个 override 组合一次完整编译，TIR 跨值不复用**（模型见 `semantic-model.md` §6）。
 4. **launch plan 推导（E17；独立的 launch analysis phase——typing 完成后在 typed TIR 上运行，见 §1）**：确定 grid 轴数（kernel 内实际使用的 `program_id` 最大轴 + 1）与每轴的 `(维, tiling constexpr)`（"tiling constexpr" = 在 `pid * CE` 中被引用的那个，每轴必须唯一确定；"维" = 该轴 mask 谓词（`offs < N`）覆盖的符号维，静态维直接代入字面量）；同时收集 rank/静态维/符号维断言。推导不出（如两个 constexpr 同时参与同一轴的 tiling）→ E17。结果存入 `TKernel.launch_plan`，lowering 只发射不推导——维持 lowering 对有效 TIR 全函数（total、无新语义拒绝）。
@@ -207,9 +219,25 @@ Assign(target, value):
     target 是保留名 → E12；已绑定名（含参数与符号维——N 是自动绑定参数，N = 5 同罪）→ E14
     infer(value)；若结果类型为 ()（即 value 是 store 调用）→ E08
     绑定 locals[target]，指令 src_name = target
+    value 为 zeros 调用且 target 被 kernel 全体 '+='（预扫描）→ 登记为累加器（R19 前提）
+
+AugAssign(target, value)（v0.4，docs/v0.4-kloop.md §2.3）:
+    体内（不在任何循环 → E20 AccumForm）
+    target 是外层 locals 且已登记累加器（否则 E20 AccumForm）
+    infer(value)；value 非 Tile → E07；dtype ≠ 累加器 → E02；shape 严格同形 → E03
+    layout：L_acc ≡ Zeros → 结果 = normalize(L_t)（L7）；否则 equiv → E05
+    发射 add（id = {acc}.next{N}，src_name 不变）；当前绑定推进为链上下一环
+
+For(target, iter=tila.range(0, end, step), body)（v0.4，§2.2/§2.4）:
+    嵌套 → E20 NestedLoop；target 保留名/已绑定 → E12/E14
+    range 形态：恰 3 实参、start 恒 0、end 为 Scalar(i32)、step ∈ ConstExpr ≥ 1（E20 RangeForm）
+    作用域三围栏：外层 locals 只读（重绑定 → E14 既有）；累加器体内只可作 '+=' 左部
+    （读 → E20 AccumRead）；循环局部（含 target）出循环不可见（引用 → E20 LoopScope）
+    收尾：每个被累加名字构造 TPhi（pre = 入口 id、back = 最后 next id、类型 = 出口类型）
+    前插 body 顶部；TFor(id = target) 携带嵌套 body 发射
 
 ExprStmt(call):
-    intrinsic != "store" → E08（v0.1 唯一合法表达式语句是 store）
+    intrinsic != "store" → E08（v0.1 唯一合法表达式语句是 store；循环体内同样合法）
     按 §4.2 store 流程检查（含语境检查 0）
 ```
 
@@ -247,6 +275,9 @@ notes 的固定形态：每个相关操作数一行 `lhs : Tile[f32, (128,), L0]
 | E15 | constexpr 缺省值非法或调用点未提供 | §5 |
 | E16 | op ∉ dtype 类别能力集（FP8 一切算术/比较、bool 算术、整数 `/`、整数 `& \|` 等） | 能力门（§4.1） |
 | E17 | launch plan 不可推导（grid 轴/tiling constexpr/符号维对应不唯一） | §5 |
+| E18 | dot 前提违反（dtype 非 f16/bf16、静态维 < 16、rank ≠ 2、收缩维不一致） | R16（v0.2 fragment） |
+| E19 | 寻址形态错误（load/store 第 2 实参非坐标元组、元组长度 ≠ rank、标量坐标）。subcode：CoordinateForm / CoordinateArity / CoordinateKind / CoordinatePosition（渲染不变，`TilaError.subcode`） | R8/R9 寻址前提（v0.3；旧 `a + offs` 算术 → E07，旧 load/store 实参形态 → E13；注解侧 strides 错误归 E12） |
+| E20 | 循环形态与围栏（iterable 非 tila.range、range 三件套形态、tila.range 越位、嵌套 for、zeros 形态、`+=` 纪律、体内读累加器、循环局部出循环）。subcode：NotRange / RangeForm / RangePosition / NestedLoop / ZerosForm / AccumForm / AccumRead / LoopScope | R17/R18/R19（v0.4，docs/v0.4-kloop.md §7）；dtype/shape/layout 链仍走 E02/E03/E05、单赋值冲突仍走 E14——E20 不做垃圾桶 |
 
 E01–E10、E16、E17 由 checker 抛出；E11–E15 由转换/签名阶段抛出（同一 TilaError 类型）。
 

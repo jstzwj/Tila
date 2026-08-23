@@ -8,6 +8,7 @@ from .nodes import (  # noqa: F401
     DTypeRef,
     ExprStmt,
     FloatLit,
+    IndexTuple,
     IntLit,
     KernelDef,
     NameRef,

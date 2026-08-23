@@ -19,5 +19,6 @@ def saxpy_launch(x, y, out, alpha, BLOCK: int = 128):
     assert x.dim() == 1 and y.dim() == 1 and out.dim() == 1
     N = x.shape[0]
     assert y.shape[0] == N and out.shape[0] == N
+    assert (x.numel() == 0 or (x.stride(0) == 1)) and (y.numel() == 0 or (y.stride(0) == 1)) and (out.numel() == 0 or (out.stride(0) == 1))
     grid = (triton.cdiv(N, BLOCK),)
     saxpy[grid](x, y, out, N, alpha, BLOCK=BLOCK)

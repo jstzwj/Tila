@@ -14,6 +14,7 @@ import numpy as np
 
 from . import tir
 from .fmt import f32_round
+from .types.layout import RowMajor
 
 _NP: Dict[str, object] = {
     "i8": np.int8, "i16": np.int16, "i32": np.int32, "i64": np.int64,
@@ -62,9 +63,31 @@ def _eval_constexpr(ce, constexpr_values: Dict[str, int]) -> int:
     raise AssertionError(f"unknown constexpr op {ce.op}")  # pragma: no cover
 
 
+def _element_strides(arr) -> list:
+    """numpy 数组的逐轴元素步长（.strides 是字节，转元素）。"""
+    return [s // arr.itemsize for s in arr.strides]
+
+
+def _is_row_major(arr) -> bool:
+    """实际布局是否行主序连续（与 launcher 的 RowMajor 断言同款契约）。
+
+    size-0 轴的数组无元素可错读——布局契约空真（numpy 对空维的 strides 全零、
+    torch 亦无意义；v0.4-kloop §12，零迭代恒等式测试的前提）。"""
+    if any(d == 0 for d in arr.shape):
+        return True
+    expect = 1
+    for d, s in zip(reversed(arr.shape), _element_strides(arr)[::-1]):
+        if s != expect:
+            return False
+        expect *= d
+    return True
+
+
 class Interpreter:
     def __init__(self, kernel: tir.TKernel):
         self.kernel = kernel
+        self._mems = {p.name: p.tila_type.mem for p in kernel.params
+                      if p.kind == "buffer"}
 
     def run(self, buffers: Dict[str, "np.ndarray"],
             scalars: Optional[Dict[str, int]] = None,
@@ -83,7 +106,33 @@ class Interpreter:
         for s, (b, i) in first_binding.items():
             scalars.setdefault(s, int(buffers[b].shape[i]))
 
+        # stride 符号取值 + 内存布局契约（v0.3-strides §5）：
+        # RowMajor 断言实际连续；Strided 按声明绑定（共享/dim 复用断言一致）
         plan = self.kernel.launch_plan
+        for name, mem in self._mems.items():
+            if isinstance(mem, RowMajor) and not _is_row_major(buffers[name]):
+                raise AssertionError(
+                    f"interpreter: buffer '{name}' is declared row-major but the "
+                    f"array is not contiguous (strides {_element_strides(buffers[name])}); "
+                    f"declare strides=(...) instead")
+        for b, i, sv in plan.stride_bindings:
+            actual = _element_strides(buffers[b])[i]
+            if isinstance(sv, int):
+                assert actual == sv, \
+                    f"interpreter: '{b}'.stride({i}) == {actual}, declared {sv}"
+            elif sv in scalars:
+                assert scalars[sv] == actual, \
+                    f"interpreter: '{b}'.stride({i}) == {actual}, symbol '{sv}' " \
+                    f"is bound to {scalars[sv]}"
+            else:
+                scalars[sv] = actual
+
+        # 坐标 → 平面偏移：不做。既然 stride 契约已断言（声明值 == 实际元素步长），
+        # "按声明步长访存"与逻辑多维索引严格等价——而逻辑索引对任意布局的
+        # numpy 视图都正确（reshape(-1) 对非连续数组会按逻辑序拷贝，平面模型
+        # 反而失真）。load/store 直接消费坐标元组（v0.3-strides §5）。
+        self._buffers = buffers
+
         grid_dims = []
         for axis in plan.axes:
             dim = scalars[axis.dim] if isinstance(axis.dim, str) else int(axis.dim)
@@ -96,6 +145,25 @@ class Interpreter:
         for pids in itertools.product(*(range(g) for g in grid_dims)):
             self._run_program(pids, buffers, scalars, constexpr_values)
 
+    def _gather(self, name: str, coords, mask, other):
+        """按逻辑坐标取数；mask 假通道取 other（缺省 0）。"""
+        arr = self._buffers[name]
+        arrays = np.broadcast_arrays(*[np.asarray(c) for c in coords])
+        if mask is not None:
+            safe = tuple(np.where(mask, c, 0) for c in arrays)
+            gathered = arr[safe]
+            return np.where(mask, gathered, other if other is not None else 0)
+        return arr[tuple(arrays)]
+
+    def _scatter(self, name: str, coords, mask, value):
+        """按逻辑坐标写回（就地）。"""
+        arr = self._buffers[name]
+        arrays = np.broadcast_arrays(*[np.asarray(c) for c in coords])
+        if mask is not None:
+            arr[tuple(c[mask] for c in arrays)] = value[mask]
+        else:
+            arr[tuple(arrays)] = value
+
     # ------------------------------------------------------------------
 
     def _run_program(self, pids, buffers, scalars, constexpr_values) -> None:
@@ -103,65 +171,83 @@ class Interpreter:
             p.name: scalars[p.name]
             for p in self.kernel.params if p.kind == "scalar"
         }
+        for op in self.kernel.ops:
+            self._exec(op, vals, pids, scalars, constexpr_values)
 
+    def _exec(self, op, vals: Dict[str, object], pids, scalars,
+              constexpr_values) -> None:
+        """单条 TIR 指令求值；TFor 递归进入 body（v0.4-kloop §5）。
+
+        φ 链：迭代开始时 φ 取上一迭代的 back（首轮取 pre 种子）；零迭代时
+        循环后回填种子——与 Triton loop-carried 变量语义一致。
+        """
         def v(oid: str):
             return vals[oid]
 
-        for op in self.kernel.ops:
-            if isinstance(op, tir.TProgramId):
-                vals[op.id] = pids[op.axis]
-            elif isinstance(op, (tir.TSymRef, tir.TConstParamRef)):
-                vals[op.id] = scalars[op.name] if isinstance(op, tir.TSymRef) \
-                    else constexpr_values[op.name]
-            elif isinstance(op, tir.TConstInt):
-                vals[op.id] = op.value
-            elif isinstance(op, tir.TConstFloat):
-                vals[op.id] = f32_round(op.value)
-            elif isinstance(op, tir.TArange):
-                end = _eval_constexpr(op.end, constexpr_values)
-                vals[op.id] = np.arange(op.start, end, dtype=np.int32)
-            elif isinstance(op, tir.TAddPtr):
-                vals[op.id] = (op.base, v(op.offs))
-            elif isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
-                vals[op.id] = self._binop(op, v(op.lhs), v(op.rhs))
-            elif isinstance(op, tir.TLoad):
-                name, offs = v(op.ptr)
-                flat = buffers[name].reshape(-1)  # idx 是行主序展平偏移（R7 语义）
-                if op.mask is not None:
-                    mask = np.asarray(v(op.mask), dtype=np.bool_)
-                    safe = np.where(mask, offs, 0)
-                    gathered = flat[safe]
-                    other = v(op.other) if op.other is not None else 0
-                    out = np.where(mask, gathered, other)
-                else:
-                    out = flat[np.asarray(offs)]
-                vals[op.id] = np.asarray(out).astype(np_dtype(op.tila_type.dtype))
-            elif isinstance(op, tir.TCast):
-                x = v(op.operand)
-                if isinstance(x, np.ndarray):
-                    vals[op.id] = x.astype(np_dtype(op.dtype))
-                else:
-                    vals[op.id] = np_dtype(op.dtype)(x)
-            elif isinstance(op, tir.TExpandDim):
-                vals[op.id] = np.expand_dims(v(op.tile), op.axis)
-            elif isinstance(op, tir.TDot):
-                x = np.asarray(v(op.lhs)).astype(np.float32)
-                y = np.asarray(v(op.rhs)).astype(np.float32)
-                vals[op.id] = x @ y  # fp16 乘积在 f32 中精确；累加序差异由容差覆盖
-            elif isinstance(op, tir.TStore):
-                name, offs = v(op.ptr)
-                flat = buffers[name].reshape(-1)  # 展平视图：写回就地生效
-                value = np.asarray(v(op.value))
-                offs = np.asarray(offs)
-                if op.mask is not None:
-                    mask = np.asarray(v(op.mask), dtype=np.bool_)
-                    flat[offs[mask]] = value[mask]
-                else:
-                    flat[offs] = value
-            elif isinstance(op, tir.TReturn):
-                return
-            else:  # pragma: no cover
-                raise UnsupportedInterpreterFeature(f"op {op!r}")
+        if isinstance(op, tir.TProgramId):
+            vals[op.id] = pids[op.axis]
+        elif isinstance(op, (tir.TSymRef, tir.TConstParamRef)):
+            vals[op.id] = scalars[op.name] if isinstance(op, tir.TSymRef) \
+                else constexpr_values[op.name]
+        elif isinstance(op, tir.TConstInt):
+            vals[op.id] = op.value
+        elif isinstance(op, tir.TConstFloat):
+            vals[op.id] = f32_round(op.value)
+        elif isinstance(op, tir.TArange):
+            end = _eval_constexpr(op.end, constexpr_values)
+            vals[op.id] = np.arange(op.start, end, dtype=np.int32)
+        elif isinstance(op, tir.TZeros):
+            shape = tuple(_eval_constexpr(s, constexpr_values) for s in op.shape)
+            vals[op.id] = np.zeros(shape, dtype=np_dtype(op.dtype))
+        elif isinstance(op, tir.TAddPtr):
+            vals[op.id] = (op.base, [v(c) for c in op.coords])
+        elif isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
+            vals[op.id] = self._binop(op, v(op.lhs), v(op.rhs))
+        elif isinstance(op, tir.TLoad):
+            name, coords = v(op.ptr)
+            out = self._gather(name, coords,
+                               v(op.mask) if op.mask is not None else None,
+                               v(op.other) if op.other is not None else None)
+            vals[op.id] = np.asarray(out).astype(np_dtype(op.tila_type.dtype))
+        elif isinstance(op, tir.TCast):
+            x = v(op.operand)
+            if isinstance(x, np.ndarray):
+                vals[op.id] = x.astype(np_dtype(op.dtype))
+            else:
+                vals[op.id] = np_dtype(op.dtype)(x)
+        elif isinstance(op, tir.TExpandDim):
+            vals[op.id] = np.expand_dims(v(op.tile), op.axis)
+        elif isinstance(op, tir.TDot):
+            x = np.asarray(v(op.lhs)).astype(np.float32)
+            y = np.asarray(v(op.rhs)).astype(np.float32)
+            vals[op.id] = x @ y  # fp16 乘积在 f32 中精确；累加序差异由容差覆盖
+        elif isinstance(op, tir.TFor):
+            end = vals[op.end]
+            step = _eval_constexpr(op.step, constexpr_values)
+            phis = [o for o in op.body if isinstance(o, tir.TPhi)]
+            k = 0
+            while k < end:
+                vals[op.id] = k
+                for ph in phis:
+                    vals[ph.id] = vals[ph.back] if ph.back in vals else vals[ph.pre]
+                for inner in op.body:
+                    if isinstance(inner, tir.TPhi):
+                        continue
+                    self._exec(inner, vals, pids, scalars, constexpr_values)
+                k += step
+            for ph in phis:  # 零迭代回退：出口值 = 种子（φ 语义）
+                if ph.back not in vals:
+                    vals[ph.back] = vals[ph.pre]
+        elif isinstance(op, tir.TStore):
+            name, coords = v(op.ptr)
+            value = np.asarray(v(op.value))
+            self._scatter(name, coords,
+                          np.asarray(v(op.mask)) if op.mask is not None else None,
+                          value)
+        elif isinstance(op, tir.TReturn):
+            return
+        else:  # pragma: no cover
+            raise UnsupportedInterpreterFeature(f"op {op!r}")
 
     @staticmethod
     def _binop(op, lhs, rhs):

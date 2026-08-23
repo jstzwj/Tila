@@ -182,6 +182,60 @@ def test_gpu_matmul_vs_interpreter():
     np.testing.assert_allclose(c_interp, c_t.cpu().numpy(), rtol=1e-2, atol=1e-2)
 
 
+@pytest.mark.parametrize("kind", ["transposed", "padded"])
+def test_gpu_matmul_noncontiguous_b(kind):
+    """v0.3 strides 的 GPU 验收主场：非连续 b（转置视图 / padded 存储）
+    在声明式 strides 下与 torch.matmul 对拍——v0.2 平面寻址做不到。"""
+    src = (ROOT / "examples/matmul.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n, k = 66, 90, 50
+    if kind == "transposed":
+        b = (torch.randn(n, k, device="cuda") * 0.5).half().t()  # (k,n) strides (1,n)
+        assert not b.is_contiguous()
+    else:
+        base = (torch.randn(k, 128, device="cuda") * 0.5).half()
+        b = base[:, :n]                                          # strides (128,1)
+    a = (torch.randn(m, k, device="cuda") * 0.5).half()
+    c = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, b, c))
+    want = a.float() @ b.float()
+    torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)
+
+
+def test_gpu_rowmajor_buffer_rejects_noncontiguous():
+    """RowMajor 默认声明的 buffer 收到非连续张量 → launcher 断言失败（正确拒绝，
+    而非静默读错元素）。"""
+    src = (ROOT / "examples/batched_add.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 64, 128
+    a = torch.randn(m, n, device="cuda")
+    b = torch.randn(m, n, device="cuda")
+    c_bad = torch.randn(n, m, device="cuda").t()  # 非连续
+    with pytest.raises(AssertionError):
+        _launch(res, launcher, (a, b, c_bad))
+
+
+@pytest.mark.parametrize("transposed", [False, True])
+def test_gpu_matmul_storage_offset_views(transposed):
+    """storage offset ABI（v0.3-strides §1.3）：base(b) = 逻辑张量原点
+    （torch data_ptr 含 storage_offset）——带非零偏移的视图（连续/转置）必须
+    照样正确（评审 §17 采纳的覆盖项）。"""
+    src = (ROOT / "examples/matmul.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, k, n, off = 66, 48, 40, 64
+    a = (torch.randn(m, k, device="cuda") * 0.5).half()
+    big = (torch.randn(off + n * k, device="cuda") * 0.5).half()
+    seg = big[off:]                                  # storage offset = 64
+    b = seg.view(n, k).t() if transposed else seg.view(k, n)
+    c = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, b, c))
+    want = a.float() @ b.float()
+    torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)
+
+
 @pytest.mark.skipif(
     HAS_TORCH and torch.cuda.get_device_capability() < (8, 9),
     reason="fp8e4m3fn 需要 SM89+")
@@ -198,3 +252,102 @@ def test_gpu_fp8_add():
     _launch(res, launcher, (a8, b8, c8))
     expected = (a8.to(torch.float16) + b8.to(torch.float16)).to(torch.float8_e4m3fn)
     torch.testing.assert_close(c8.float(), expected.float())
+
+
+# ---------------------------------------------------------------------------
+# v0.4 K 循环与累加器（docs/v0.4-kloop.md §8 的 GPU 差分主场）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("K", [0, 1, 50, 64, 65, 512])
+def test_gpu_matmul_loop_arbitrary_k(K):
+    # K=0：零迭代恒等式（C = A·B = 0；空维张量的 stride 契约空真）
+    """全 K matmul（K-loop 版）：GPU vs torch.matmul。K 非 BK 倍数由
+    mask + other=0.0 补零——正确性包络不受 K <= BK 限制（v0.4 验收主场）。"""
+    src = (ROOT / "examples/matmul_loop.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 100, 140
+    a = (torch.randn(m, K, device="cuda") * 0.5).half()
+    b = (torch.randn(K, n, device="cuda") * 0.5).half()
+    c = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, b, c))
+    want = a.float() @ b.float()
+    torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)
+
+
+@pytest.mark.parametrize("kind", ["transposed", "padded"])
+def test_gpu_matmul_loop_noncontiguous_b(kind):
+    """K-loop × 非连续 b：循环不改内存语义（v0.3 strides 正交性回归）。"""
+    src = (ROOT / "examples/matmul_loop.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n, k = 66, 90, 130
+    if kind == "transposed":
+        b = (torch.randn(n, k, device="cuda") * 0.5).half().t()
+        assert not b.is_contiguous()
+    else:
+        base = (torch.randn(k, 128, device="cuda") * 0.5).half()
+        b = base[:, :n]
+    a = (torch.randn(m, k, device="cuda") * 0.5).half()
+    c = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, b, c))
+    want = a.float() @ b.float()
+    torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)
+
+
+def test_gpu_matmul_loop_vs_interpreter():
+    """同一 TIR 双路径：K-loop 的 interpreter == GPU。"""
+    src = (ROOT / "examples/matmul_loop.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    rng = np.random.default_rng(19)
+    m, n, k = 70, 130, 200
+    a_np = (rng.standard_normal((m, k)) * 0.5).astype(np.float16)
+    b_np = (rng.standard_normal((k, n)) * 0.5).astype(np.float16)
+    c_interp = np.zeros((m, n), dtype=np.float32)
+    run_kernel(res.kernel, {"a": a_np, "b": b_np, "c": c_interp})
+    a_t = torch.from_numpy(a_np).cuda()
+    b_t = torch.from_numpy(b_np).cuda()
+    c_t = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a_t, b_t, c_t))
+    np.testing.assert_allclose(c_interp, c_t.cpu().numpy(), rtol=1e-2, atol=1e-2)
+
+
+def test_gpu_two_loops_same_accumulator():
+    """两个顺序 for 累加同一 acc（equiv 分支）在 GPU 上的差分。"""
+    src = """import tila
+
+
+@tila.jit
+def k2(a: tila.Tensor[tila.float16, M, K], b: tila.Tensor[tila.float16, K, N, (sb0, sb1)],
+       c: tila.Tensor[tila.float32, M, N], BKH: tila.constexpr = 64):
+    pid_m = tila.program_id(0)
+    pid_n = tila.program_id(1)
+    rm2 = tila.expand_dim(pid_m * 64 + tila.arange(0, 64), 1)
+    rn2 = tila.expand_dim(pid_n * 128 + tila.arange(0, 128), 0)
+    rk2 = tila.expand_dim(tila.arange(0, BKH), 0)
+    rk3 = tila.expand_dim(tila.arange(0, BKH), 1)
+    c_m = (rm2 < M) & (rn2 < N)
+    acc = tila.zeros((64, 128), tila.float32)
+    for k0 in tila.range(0, K, BKH):
+        rka = rk2 + k0
+        x = tila.load(a, (rm2, rka), mask=(rm2 < M) & (rka < K), other=0.0)
+        y = tila.load(b, (rk3 + k0, rn2), mask=((rk3 + k0) < K) & (rn2 < N), other=0.0)
+        acc += tila.dot(x, y)
+    for k1 in tila.range(0, K, BKH):
+        rkb = rk2 + k1
+        x2 = tila.load(a, (rm2, rkb), mask=(rm2 < M) & (rkb < K), other=0.0)
+        y2 = tila.load(b, (rk3 + k1, rn2), mask=((rk3 + k1) < K) & (rn2 < N), other=0.0)
+        acc += tila.dot(x2, y2)
+    tila.store(c, (rm2, rn2), acc, mask=c_m)
+"""
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, k, n = 66, 130, 90
+    a = (torch.randn(m, k, device="cuda") * 0.5).half()
+    b = (torch.randn(k, n, device="cuda") * 0.5).half()
+    c = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, b, c))
+    want = 2.0 * (a.float() @ b.float())
+    torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)

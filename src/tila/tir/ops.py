@@ -76,8 +76,14 @@ class TArange(TOp):
 
 @dataclass(frozen=True)
 class TAddPtr(TOp):
-    base: str                               # opcode: addptr  R7：Buffer + Tile[i32] → Address
-    offs: str
+    """opcode: addptr  R7/R7'：Buffer + 索引 → Address。
+
+    coords 是逐轴坐标 tile 的引用元组（长度 = buffer rank）。线性化不进 TIR：
+    lowering 与 interpreter 从 base 参数的 MemoryLayout 完成（v0.3-strides §3）。
+    """
+
+    base: str
+    coords: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,6 +152,47 @@ class TDot(TOp):
     rhs: str = ""
 
 
+@dataclass(frozen=True)
+class TZeros(TOp):
+    """opcode: zeros（R17，v0.4-kloop §2.1）：常量分布种子。
+
+    shape 每项是 ConstExpr（发射按表达式渲染，typing 用特化值）——与
+    TArange.end 同款模型 B。累加器的唯一合法播种方式。
+    """
+
+    shape: Tuple[ConstExpr, ...] = ()
+    dtype: str = "f32"
+
+
+@dataclass(frozen=True)
+class TFor(TOp):
+    """opcode: for（R18，v0.4-kloop §3）：一层可嵌套的循环容器。
+
+    id 即归纳变量（Scalar(i32)）；start 隐含字面量 0（规范化）；end 是
+    运行期标量操作数；step 是 ConstExpr。body 是嵌套指令序列——TIR 从
+    扁平变为"一层可嵌套"的唯一位置（嵌套 TFor 由 checker E20 拦截）。
+    """
+
+    end: str = ""
+    step: ConstExpr = 1
+    body: Tuple[TOp, ...] = ()
+
+
+@dataclass(frozen=True)
+class TPhi(TOp):
+    """opcode: phi（R19，v0.4-kloop §3）：structured loop-carried φ。
+
+    位于 body 顶部；back 指向同 body 内后文定义的最后一个 += 结果——
+    **TIR 唯一允许前向引用的指令**（SSA φ 的标准形态）。自带 tila_type
+    （= back 操作数的类型；pre 在 v0.4 恒为 zeros 种子——join 单位元，L7，
+    printer 无需按 id 回查）。当前 IR 无一般 CFG（控制流倾向 select），
+    φ 在 TIR 中无歧义；若将来引入 CFG φ，那是另行设计的课题。
+    """
+
+    pre: str = ""
+    back: str = ""
+
+
 # v0.2 预览：TExpandDim 已实现（docs/v0.2-preview-2d.md）；size-1 广播隐含于
 # TArith/TCmp/TLogic 操作数的 shape，不设独立指令。
 
@@ -174,6 +221,7 @@ class LaunchPlan:
     rank_asserts: Tuple[Tuple[str, int], ...] = ()          # (buffer 名, 注解 rank)
     static_dim_asserts: Tuple[Tuple[str, int, int], ...] = ()  # (buffer 名, 维下标, 静态值)
     sym_dim_asserts: Tuple[Tuple[str, int, str], ...] = ()  # (buffer 名, 维下标, 符号维名)
+    stride_bindings: Tuple[Tuple[str, int, Union[int, str]], ...] = ()  # v0.3：(buffer, 轴, 静态值|符号名)
 
 
 @dataclass(frozen=True)

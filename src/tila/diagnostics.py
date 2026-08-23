@@ -52,11 +52,18 @@ ERROR_NAMES = {
     "E16": "CapabilityError",
     "E17": "LaunchPlanUninferable",
     "E18": "DotConstraints",
+    "E19": "AddressForm",
+    "E20": "LoopForm",
 }
 
 
 class TilaError(Exception):
-    """唯一的 Tila 编译期错误类型；绝不以 Python 原生异常泄漏。"""
+    """唯一的 Tila 编译期错误类型；绝不以 Python 原生异常泄漏。
+
+    subcode（可选）：同码内的细分场景（如 E19 的 FlatAddressing /
+    CoordinateArity / CoordinatePosition / CoordinateKind）——渲染仍显示
+    主码（用户视角不变），测试与内部分派用 subcode 组织（docs/type-checker.md §7）。
+    """
 
     def __init__(
         self,
@@ -64,11 +71,13 @@ class TilaError(Exception):
         code: str,
         message: str,
         notes: Tuple[Note, ...] = (),
+        subcode: Optional[str] = None,
     ):
         self.loc = loc
         self.code = code
         self.message = message
         self.notes = tuple(notes)
+        self.subcode = subcode
         name = ERROR_NAMES.get(code, "Error")
         super().__init__(f"{code} {name}: {message}")
 
@@ -82,9 +91,9 @@ class TilaError(Exception):
         return "\n".join(lines)
 
 
-def err(loc, code: str, message: str, *notes: str) -> TilaError:
+def err(loc, code: str, message: str, *notes: str, subcode: str = None) -> TilaError:
     """构造 TilaError 的简写；notes 每条一行。"""
-    return TilaError(loc, code, message, tuple(Note(t) for t in notes))
+    return TilaError(loc, code, message, tuple(Note(t) for t in notes), subcode=subcode)
 
 
 # ---------------------------------------------------------------------------

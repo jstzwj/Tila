@@ -92,9 +92,9 @@ def test_unmasked_load_requires_in_bounds_contract():
 @tila.jit
 def fill(a: tila.Tensor[tila.float32, 128], c: tila.Tensor[tila.float32, 128]):
     offs = tila.arange(0, 128)
-    x = tila.load(a + offs)
+    x = tila.load(a, (offs,))
     y = x * 2.0
-    tila.store(c + offs, y)
+    tila.store(c, (offs,), y)
 """
     res = compile_kernel(src)
     a = np.arange(128, dtype=np.float32)
@@ -111,9 +111,9 @@ def test_r12_semantics_in_interpreter():
 @tila.jit
 def bias(a: tila.Tensor[tila.float16, 128], c: tila.Tensor[tila.float16, 128]):
     offs = tila.arange(0, 128)
-    x = tila.load(a + offs)
+    x = tila.load(a, (offs,))
     y = x + 1.0
-    tila.store(c + offs, y)
+    tila.store(c, (offs,), y)
 """
     res = compile_kernel(src)
     a = np.arange(128, dtype=np.float16)
@@ -129,12 +129,12 @@ def test_bool_ops_and_cast_bool():
 @tila.jit
 def clamp(a: tila.Tensor[tila.float32, 128], c: tila.Tensor[tila.float32, 128]):
     offs = tila.arange(0, 128)
-    x = tila.load(a + offs)
+    x = tila.load(a, (offs,))
     m = x > 0.5
     b = tila.cast(x, tila.bool)
     m2 = m | b
     y = x + 0.0
-    tila.store(c + offs, y, mask=m2)
+    tila.store(c, (offs,), y, mask=m2)
 """
     res = compile_kernel(src)
     rng = np.random.default_rng(9)

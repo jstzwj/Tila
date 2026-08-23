@@ -26,6 +26,7 @@ from ..types import (
 )
 from ..types import dtype as dt
 from ..types import type_str  # noqa: F401
+from ..types.layout import Zeros
 from . import broadcast as bcast
 from . import layout as lay
 
@@ -95,19 +96,16 @@ def check_arange(ctx, e: t.Call):
 
 
 def check_load(ctx, e: t.Call):
-    if not e.args or len(e.args) > 1:
-        raise err(e.loc, "E13", "tila.load takes exactly one positional argument "
-                                "(an address, built as buffer + offsets)")
+    if len(e.args) != 2:
+        raise err(e.loc, "E13", "tila.load takes exactly two positional arguments: "
+                                "tila.load(buffer, (coord, …)); the v0.2 form "
+                                "`tila.load(a + offs)` was removed — addressing is "
+                                "load/store-internal (docs/v0.3-strides.md §1.2)")
     kw = dict(e.kwargs)
     if set(kw) - {"mask", "other"}:
         raise err(e.loc, "E13", "tila.load accepts only 'mask' and 'other' keyword arguments")
 
-    ptr_ty, ptr_id = ctx.infer(e.args[0])
-    if not isinstance(ptr_ty, AddressType):
-        raise err(e.args[0].loc, "E07",
-                  "tila.load expects an address (buffer + index tile), i.e. the R7 form "
-                  "`a + offs`",
-                  _type_note("operand", ptr_ty))
+    ptr_ty, ptr_id = ctx.buffer_address(e.args[0], e.args[1])
 
     mask_id = None
     if "mask" in kw:
@@ -148,21 +146,18 @@ def check_load(ctx, e: t.Call):
 
 
 def check_store(ctx, e: t.Call):
-    if len(e.args) != 2:
-        raise err(e.loc, "E13", "tila.store takes exactly two positional arguments: "
-                                "tila.store(ptr, value)")
+    if len(e.args) != 3:
+        raise err(e.loc, "E13", "tila.store takes exactly three positional arguments: "
+                                "tila.store(buffer, (coord, …), value); the v0.2 form "
+                                "`tila.store(ptr, value)` was removed — addressing is "
+                                "load/store-internal (docs/v0.3-strides.md §1.2)")
     kw = dict(e.kwargs)
     if set(kw) - {"mask"}:
         raise err(e.loc, "E13", "tila.store accepts only the 'mask' keyword argument "
                                 "('other' is meaningless for stores)")
 
-    ptr_expr, val_expr = e.args
-    ptr_ty, ptr_id = ctx.infer(ptr_expr)
-    if not isinstance(ptr_ty, AddressType):
-        raise err(ptr_expr.loc, "E07",
-                  "tila.store expects an address (buffer + index tile), i.e. the R7 form "
-                  "`a + offs`",
-                  _type_note("operand", ptr_ty))
+    ptr_ty, ptr_id = ctx.buffer_address(e.args[0], e.args[1])
+    val_expr = e.args[2]
 
     val_ty, val_id = ctx.infer(val_expr)
     if not isinstance(val_ty, TileType):
@@ -323,3 +318,57 @@ def check_dot(ctx, e: t.Call):
 def shape_str_of(d) -> str:
     v = getattr(d, "value", None)
     return str(v) if v is not None else getattr(d, "name", "?")
+
+
+# ---------------------------------------------------------------------------
+# R17  zeros（v0.4，docs/v0.4-kloop.md §2.1）
+# ---------------------------------------------------------------------------
+
+
+def check_zeros(ctx, e: t.Call):
+    """常量分布种子：Tile[dt, (Const,…), Zeros(Σ)]。
+
+    shape 项是 INT 字面量或 constexpr 名（静态量——累加器 shape 参与类型
+    等价判定）；dtype 走 DTypeRef 位置（cast 第二实参同款解析）。
+    """
+    if len(e.args) != 2:
+        raise err(e.loc, "E20", "tila.zeros takes exactly two positional arguments: "
+                                "tila.zeros((BM, BN), tila.float32)",
+                  subcode="ZerosForm")
+    shape_arg, dtype_arg = e.args
+    if not isinstance(shape_arg, t.ShapeLit):
+        raise err(shape_arg.loc, "E20",
+                  "the zeros shape must be a tuple of integer literals or constexpr "
+                  "names: tila.zeros((BM, BN), tila.float32)",
+                  subcode="ZerosForm")
+    if not isinstance(dtype_arg, t.DTypeRef):
+        raise err(dtype_arg.loc, "E20", "the 2nd argument of tila.zeros must be a "
+                                        "dtype reference like tila.float32",
+                  subcode="ZerosForm")
+    if len(shape_arg.items) >= 3:
+        raise err(shape_arg.loc, "E20", "rank >= 3 is rejected "
+                                        "(rank <= 2 as of the v0.2 2D preview)",
+                  subcode="ZerosForm")
+    if not dt.can_be_tensor_element(dtype_arg.name):
+        raise err(dtype_arg.loc, "E20", "bool cannot be a zeros element dtype "
+                                        "(masks come from comparisons; bool storage "
+                                        "has no use)",
+                  subcode="ZerosForm")
+    shape_ce = []
+    shape_ty = []
+    for d in shape_arg.items:
+        if isinstance(d, t.StaticDim):
+            shape_ce.append(d.value)
+            shape_ty.append(Const(d.value))
+        else:  # SymDim：此处语义 = constexpr 名（静态量）
+            if d.name not in ctx.env.constexprs:
+                raise err(d.loc, "E20",
+                          f"zeros shape entries must be integer literals or "
+                          f"constexpr names; '{d.name}' is not a constexpr "
+                          f"(accumulator shapes are static)",
+                          subcode="ZerosForm")
+            shape_ce.append(d.name)
+            shape_ty.append(Const(ctx.env.constexprs[d.name]))
+    ty = TileType(dtype_arg.name, tuple(shape_ty), Zeros(tuple(shape_ty)))
+    return ty, ctx.emit(tir.TZeros(ctx.next_id("t"), ty, None, None,
+                                   tuple(shape_ce), dtype_arg.name)).id

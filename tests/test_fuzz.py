@@ -78,7 +78,7 @@ def _gen_program(seed: int):
         "    pid = tila.program_id(0)",
         "    offs = pid * BLOCK + tila.arange(0, BLOCK)",
         "    mask = offs < N",
-        "    x0 = tila.load(a + offs, mask=mask)",
+        "    x0 = tila.load(a, (offs,), mask=mask)",
     ]
     for i in range(rng.randint(1, 4)):
         mode = rng.random()
@@ -100,7 +100,7 @@ def _gen_program(seed: int):
             lines.append(f"    x{i + 1} = tila.cast({rng.choice(names)}, tila.bool)")
             lines.append(f"    b{i} = tila.cast(x{i + 1}, tila.float32)")
             names.append(f"b{i}")
-    lines.append("    tila.store(c + offs, x0, mask=mask)")
+    lines.append("    tila.store(c, (offs,), x0, mask=mask)")
     return "\n".join(lines) + "\n", block
 
 
@@ -130,12 +130,12 @@ def gen2(a: tila.Tensor[tila.float32, N], c: tila.Tensor[tila.float32, N],
     pid = tila.program_id(0)
     offs = pid * BLOCK + tila.arange(0, BLOCK)
     mask = (offs < N) & (offs > 1)
-    x = tila.load(a + offs, mask=mask, other=1.0)
+    x = tila.load(a, (offs,), mask=mask, other=1.0)
     y = x / 2.0
     m = y > 0.25
     w = m & mask
     z = y + 0.0
-    tila.store(c + offs, z, mask=w)
+    tila.store(c, (offs,), z, mask=w)
 """
     res = compile_kernel(src)
     n = 25

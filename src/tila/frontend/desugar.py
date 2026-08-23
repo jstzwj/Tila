@@ -150,6 +150,34 @@ def _convert_annotation(ann, arg) -> t.Ann:
     raise err(loc, "E12", "parameter annotation must be tila.Tensor[dt, dims] or tila.constexpr")
 
 
+def _convert_dim(d, loc: Loc, what: str):
+    """INT | IDENT → StaticDim | SymDim（维度与 strides 元素共用；v0.3-strides §1.1）。"""
+    if isinstance(d, py.Constant) and isinstance(d.value, int) and not isinstance(d.value, bool):
+        return t.StaticDim(_loc(d), d.value)
+    if isinstance(d, py.Name):
+        return t.SymDim(_loc(d), d.id)
+    raise err(_loc(d), "E12", f"{what} must be integer literals or symbol names (e.g. N)")
+
+
+def _convert_zeros_shape(a: py.Tuple) -> t.ShapeLit:
+    """zeros 的静态 shape 元组（v0.4-kloop §1.2）：INT 字面量或 constexpr 名。"""
+    if not a.elts:
+        raise err(_loc(a), "E20", "the zeros shape tuple must not be empty",
+                  subcode="ZerosForm")
+    items = []
+    for x in a.elts:
+        if isinstance(x, py.Constant) and isinstance(x.value, int) \
+                and not isinstance(x.value, bool):
+            items.append(t.StaticDim(_loc(x), x.value))
+        elif isinstance(x, py.Name):
+            items.append(t.SymDim(_loc(x), x.id))
+        else:
+            raise err(_loc(x), "E20", "zeros shape entries must be integer literals "
+                                      "or constexpr names (static extents only)",
+                      subcode="ZerosForm")
+    return t.ShapeLit(_loc(a), tuple(items))
+
+
 def _convert_tensor_ann(ann: py.Subscript, loc: Loc) -> t.TensorAnn:
     sl = ann.slice
     if isinstance(sl, py.Index):  # Python < 3.9 兼容
@@ -169,16 +197,28 @@ def _convert_tensor_ann(ann: py.Subscript, loc: Loc) -> t.TensorAnn:
     if dt is None:
         raise err(_loc(dt_node), "E12", f"'tila.{dt_node.attr}' is not a dtype "
                                         f"(17 dtypes aligned with triton.language)")
-    dims = []
-    for d in items[1:]:
-        if isinstance(d, py.Constant) and isinstance(d.value, int) and not isinstance(d.value, bool):
-            dims.append(t.StaticDim(_loc(d), d.value))
-        elif isinstance(d, py.Name):
-            dims.append(t.SymDim(_loc(d), d.id))
-        else:
-            raise err(_loc(d), "E12", "dimensions in tila.Tensor[dt, dims] must be integer literals "
-                                      "or symbol names (e.g. N)")
-    return t.TensorAnn(loc, dt, tuple(dims))
+    # v0.3：尾随 strides 元组（只允许最后一项；strides= 关键字形式是 Python
+    # SyntaxError——下标不支持关键字参数，PEP 637 从未落地）
+    strides = None
+    if items and isinstance(items[-1], py.Tuple):
+        stride_items = items[-1].elts
+        if not stride_items:
+            raise err(_loc(items[-1]), "E12", "the strides tuple of tila.Tensor[...] "
+                                              "must list one stride per dimension")
+        strides = tuple(_convert_dim(s, loc, "strides entries") for s in stride_items)
+        items = items[:-1]
+        if not items[1:]:
+            raise err(loc, "E12", "tila.Tensor[...] needs a dtype and at least one dimension")
+    dims = tuple(_convert_dim(d, loc, "dimensions in tila.Tensor[dt, dims]")
+                 for d in items[1:])
+    if strides is not None and len(strides) != len(dims):
+        raise err(loc, "E12", f"strides tuple has {len(strides)} entries but the "
+                              f"annotation has rank {len(dims)} (one stride per dimension)")
+    for s in strides or ():
+        if isinstance(s, t.StaticDim) and s.value < 1:
+            raise err(s.loc, "E12", f"static strides must be >= 1 (got {s.value}); "
+                                    f"use a symbol name for variable strides")
+    return t.TensorAnn(loc, dt, dims, strides)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +232,32 @@ def _convert_stmt(s: py.stmt) -> t.Stmt:
             raise _not_in_subset(s, "multi-target or non-name assignment")
         value = convert_expr(s.value)
         return t.Assign(_loc(s), s.targets[0].id, value)
+    if isinstance(s, py.AugAssign):
+        # v0.4（docs/v0.4-kloop.md §1.3）：只有 '+=' 进子集——累加器的显式标记
+        if not isinstance(s.target, py.Name):
+            raise _not_in_subset(s, "augmented assignment to a non-name target")
+        if not isinstance(s.op, py.Add):
+            raise err(_loc(s), "E20", f"only '+=' exists in the Tila v0.4 subset "
+                                      f"(accumulator update); {type(s.op).__name__} "
+                                      f"is rejected", subcode="AccumForm")
+        return t.AugAssign(_loc(s), s.target.id, convert_expr(s.value))
+    if isinstance(s, py.For):
+        if s.orelse:
+            raise _not_in_subset(s, "for ... else")
+        if not isinstance(s.target, py.Name):
+            raise _not_in_subset(s, "for target that is not a plain name")
+        it = s.iter
+        if not (isinstance(it, py.Call) and isinstance(it.func, py.Attribute)
+                and isinstance(it.func.value, py.Name)
+                and it.func.value.id == "tila" and it.func.attr == "range"):
+            # 不走 convert_expr：裸 range / 列表迭代器会报误导性的 E11
+            raise err(_loc(it), "E20",
+                      "the only iterable is tila.range(0, end, step) "
+                      "(tila.arange is a tile constructor, not an iterable)",
+                      subcode="NotRange")
+        call = _convert_call(it)
+        return t.For(_loc(s), s.target.id, call,
+                     tuple(_convert_stmt(b) for b in s.body))
     if isinstance(s, py.Expr):
         if not isinstance(s.value, py.Call):
             raise _not_in_subset(s, "expression statement that is not a call")
@@ -308,20 +374,42 @@ def _convert_call(node: py.Call) -> t.Expr:
             if kw.arg not in intrinsic.KWARG_NAMES:
                 raise err(_loc(kw), "E13",
                           f"unknown keyword argument '{kw.arg}' (only 'mask' and 'other' exist)")
+    if func.attr in ("range", "zeros") and node.keywords:
+        # 先于通用 kwarg 门：range/zeros 不接受任何关键字实参（v0.4-kloop §7）
+        raise err(_loc(node.keywords[0]), "E20",
+                  f"tila.{func.attr} takes no keyword arguments",
+                  subcode="RangeForm" if func.attr == "range" else "ZerosForm")
     kwargs = tuple(
         (kw.arg, convert_expr(kw.value)) for kw in node.keywords
     )
 
     name = func.attr
     if name in intrinsic.INTRINSICS:
-        const_ctx = name == "arange"  # arange 边界是编译期常量表达式位置
         args = []
+        for i, a in enumerate(node.args):
+            # range 的 step（第 3 实参）是 ConstExpr 位置：额外允许整数 //
+            const_ctx = name == "arange" or (name == "range" and i == 2)
         for i, a in enumerate(node.args):
             # cast 的第二位置实参是 DTypeRef 位置：tila.<dt> → DTypeRef
             if name == "cast" and i == 1 and isinstance(a, py.Attribute) \
                     and isinstance(a.value, py.Name) and a.value.id == "tila" \
                     and a.attr in SURFACE_DTYPE_NAMES:
                 args.append(t.DTypeRef(_loc(a), SURFACE_DTYPE_NAMES[a.attr]))
+            elif name == "zeros" and i == 1 and isinstance(a, py.Attribute) \
+                    and isinstance(a.value, py.Name) and a.value.id == "tila" \
+                    and a.attr in SURFACE_DTYPE_NAMES:
+                args.append(t.DTypeRef(_loc(a), SURFACE_DTYPE_NAMES[a.attr]))
+            elif name in ("load", "store") and i == 1 and isinstance(a, py.Tuple):
+                # v0.3 定稿：坐标元组只作为 load/store 的第 2 位置实参
+                # （tila.load(buffer, (c0, …))）；其余位置的元组一律 E11
+                if not a.elts:
+                    raise err(_loc(a), "E13", "the coordinates argument must be a "
+                                              "non-empty tuple of index tiles")
+                args.append(t.IndexTuple(_loc(a),
+                                         tuple(convert_expr(x) for x in a.elts)))
+            elif name == "zeros" and i == 0 and isinstance(a, py.Tuple):
+                # v0.4：静态 shape 元组——INT 字面量或 constexpr 名（§1.2）
+                args.append(_convert_zeros_shape(a))
             else:
                 args.append(convert_expr(a, const_ctx))
         args = tuple(args)
