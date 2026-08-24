@@ -54,6 +54,7 @@ ERROR_NAMES = {
     "E18": "DotConstraints",
     "E19": "AddressForm",
     "E20": "LoopForm",
+    "E21": "ReduceConstraints",
 }
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 
 from ... import tir
@@ -56,6 +57,12 @@ class OpRenderer:
             return (op.pre, op.back)
         if isinstance(op, tir.TFor):
             return (op.end,)
+        if isinstance(op, tir.TReduce):
+            return (op.tile,)
+        if isinstance(op, tir.TElem):
+            return (op.operand,)
+        if isinstance(op, tir.TWhere):
+            return (op.cond, op.a, op.b)
         return ()
 
     # ------------------------------------------------------------------
@@ -102,6 +109,9 @@ class OpRenderer:
         if isinstance(op, tir.TConstInt):
             return str(op.value)
         if isinstance(op, tir.TConstFloat):
+            if math.isinf(op.value):
+                # tila.neg_inf 等：非有限字面量在 Python 源码里只能这样拼写
+                return f'float("{op.value}")'
             return fmt_float(op.value)
         if isinstance(op, (tir.TSymRef, tir.TConstParamRef)):
             return op.name
@@ -135,6 +145,27 @@ class OpRenderer:
             inner = ", ".join(tir.constexpr_str(s) for s in op.shape)
             shape = f"({inner},)" if len(op.shape) == 1 else f"({inner})"
             return f"tl.zeros({shape}, dtype={TRITON_DTYPE[op.dtype]})"
+        if isinstance(op, tir.TReduce):
+            x = self.render_operand(op.tile, _ATOM)
+            d = op.tila_type.dtype
+            if op.op == "sum":
+                # dtype 恒显式：Tila 语义钉死结果/累加 dtype——不继承 Triton
+                # 的默认提升策略（int<32 → i32/u32，triton 3.7.1 实测）
+                return f"tl.sum({x}, {op.axis}, dtype={TRITON_DTYPE[d]})"
+            # tl.max 无 dtype 形参，且对 <32 位 dtype 内部提升 f32/i32 并以
+            # 提升后 dtype 返回（3.7.1 实测）——cast 恢复 Tila dtype（max
+            # 无舍入，恢复无损）
+            if d in ("f16", "bf16", "i8", "i16", "u8", "u16"):
+                return f"tl.cast(tl.max({x}, {op.axis}), {TRITON_DTYPE[d]})"
+            return f"tl.max({x}, {op.axis})"
+        if isinstance(op, tir.TElem):
+            return f"tl.{op.op}({self.render_operand(op.operand, _ATOM)})"
+        if isinstance(op, tir.TWhere):
+            return (f"tl.where({self.render_operand(op.cond, _ATOM)}, "
+                    f"{self.render_operand(op.a, _ATOM)}, "
+                    f"{self.render_operand(op.b, _ATOM)})")
+        if isinstance(op, tir.TNumPrograms):
+            return f"tl.num_programs({op.axis})"
         if isinstance(op, (tir.TFor, tir.TPhi)):
             # 循环头/φ 以 src_name 在使用点渲染（k0 / acc），从不作为表达式内联
             return self.emission_name(op)

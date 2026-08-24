@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from ..diagnostics import Loc, TilaError, err
-from ..types.layout import Identity, LayoutTerm, ProductL, equiv, layout_str, normalize
+from ..types.layout import (
+    Identity,
+    LayoutTerm,
+    ProductL,
+    Zeros,
+    equiv,
+    layout_str,
+    normalize,
+)
 
 
 def require_equiv(l1: LayoutTerm, l2: LayoutTerm, loc: Loc, what: str) -> None:
@@ -77,3 +85,40 @@ def broadcast_layout(l1: LayoutTerm, s1, l2: LayoutTerm, s2,
     for seg in segs[1:]:
         out = ProductL(out, seg)
     return out
+
+
+def marginal(l: LayoutTerm, s, k: int, loc: Loc, what: str) -> LayoutTerm:
+    """R20 边缘化（v0.5-reduce §2.1）：归约 = 分布的边缘化——被归约轴积分掉，
+    幸存轴保留自身分布。构造规则而非化简律（无新 term）：
+
+      1. Product(L₀, L₁)          → 幸存因子（Product 只在双非平凡轴时构造）
+      2. Σ[k] ≡ 1（归约平凡轴）   → L 原样（layout 代数对 size-1 轴不可见）
+      3. 唯一非平凡轴被归约       → Identity(())（结果全平凡；与 broadcast_layout
+                                   的全 size-1 退化同款）
+      4. Zeros(Σ)                 → Zeros(Σ∖k)（全同值的边缘分布仍是全同值——
+                                   Zeros 种子对轴删除封闭）
+      其余（Mma 等不可按轴分解项）→ E21 ReduceLayout：**语义层**边缘化未定义
+      （不声称 backend 做不到——v0.6 Mma 归约若落地是 Convertible 新规则）。
+    """
+    n = normalize(l)
+    nontriv = [i for i, d in enumerate(s) if getattr(d, "value", None) != 1]
+    if isinstance(n, Zeros):
+        return Zeros(tuple(d for i, d in enumerate(s) if i != k))
+    if not nontriv:
+        return Identity(())
+    parts = _parts(n)
+    if len(parts) == 2 and len(nontriv) == 2:
+        return n.rhs if k == 0 else n.lhs
+    if len(parts) == 1 and len(nontriv) == 1:
+        return n if k != nontriv[0] else Identity(())
+    raise err(
+        loc, "E21",
+        f"semantic marginalization is not defined for this layout in {what}",
+        f"operand layout: {layout_str(n)} covers {len(parts)} axis group(s), "
+        f"shape has {len(nontriv)} non-trivial axis(es)",
+        "the layout is not Product-compatible (a dot result carries an MMA "
+        "distribution whose row/column axes are not independent); attention "
+        "(softmax over dot results) is the v0.6 topic — reduce loaded or "
+        "computed tiles in the Product family",
+        subcode="ReduceLayout",
+    )

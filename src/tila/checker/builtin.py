@@ -372,3 +372,176 @@ def check_zeros(ctx, e: t.Call):
     ty = TileType(dtype_arg.name, tuple(shape_ty), Zeros(tuple(shape_ty)))
     return ty, ctx.emit(tir.TZeros(ctx.next_id("t"), ty, None, None,
                                    tuple(shape_ce), dtype_arg.name)).id
+
+
+# ---------------------------------------------------------------------------
+# R20  sum / max（v0.5，docs/v0.5-reduce.md §2.1——归约 = 分布的边缘化）
+# ---------------------------------------------------------------------------
+
+
+def _reduce_axis_arg(ctx, e, args, kwargs):
+    """axis 实参：位置实参或唯一 kwargs `axis=`；INT 字面量 / constexpr 特化值。"""
+    kw = dict(kwargs)
+    if set(kw) - {"axis"}:
+        raise err(e.loc, "E13", "tila.sum/tila.max accept only the 'axis' keyword argument")
+    axis_expr = None
+    if len(args) == 2 and not kw:
+        axis_expr = args[1]
+    elif len(args) == 1 and set(kw) == {"axis"}:
+        axis_expr = kw["axis"]
+    if axis_expr is None:
+        raise err(e.loc, "E13", "tila.sum/tila.max take (tile, axis) — axis is an "
+                                "integer literal 0 or 1, positional or axis=…")
+    if isinstance(axis_expr, t.IntLit):
+        return axis_expr.value
+    if isinstance(axis_expr, t.NameRef) and axis_expr.name in ctx.env.constexprs:
+        return ctx.env.constexprs[axis_expr.name]
+    raise err(axis_expr.loc, "E13", "reduction axis must be a compile-time constant "
+                                    "(literal or constexpr value) in {0, 1}")
+
+
+def check_reduce(ctx, e: t.Call, op: str):
+    if not e.args:
+        raise err(e.loc, "E13", "tila.sum/tila.max take (tile, axis)")
+    axis = _reduce_axis_arg(ctx, e, e.args, e.kwargs)
+    if axis not in (0, 1):
+        raise err(e.loc, "E13", f"reduction axis {axis} is not supported "
+                                f"(drop-axis reductions over {0, 1} as of v0.5)")
+    x_ty, x_id = ctx.infer(e.args[0])
+    if not isinstance(x_ty, TileType):
+        raise err(e.args[0].loc, "E07", f"tila.{op} operates on a Tile",
+                  _type_note("operand", x_ty))
+    if len(x_ty.shape) != 2:
+        raise err(e.loc, "E21",
+                  f"reductions are rank-2 in v0.5 (drop-axis only; full-reduce "
+                  f"to Scalar is deferred) — operand rank is {len(x_ty.shape)}",
+                  _type_note("operand", x_ty), subcode="ReduceRank")
+    # 能力门与普通运算同源：sum 走 '+' 能力、max 走比较能力（fp8 storage-only、
+    # bool 无序 → E16）
+    ok = ("+" in dt.arith_ops(x_ty.dtype)) if op == "sum" \
+        else ("<" in dt.cmp_ops(x_ty.dtype))
+    if not ok:
+        raise err(e.loc, "E16", f"'{op}' is not in the capability set of dtype "
+                                f"{x_ty.dtype} (reductions follow the same capability "
+                                f"table as arithmetic/comparisons; fp8 is storage-only, "
+                                f"bool masks are not ordered values)")
+    out_layout = lay.marginal(x_ty.layout, x_ty.shape, axis, e.loc, f"'{op}'")
+    out_shape = x_ty.shape[:axis] + x_ty.shape[axis + 1:]
+    ty = TileType(x_ty.dtype, out_shape, out_layout)
+    return ty, ctx.emit(tir.TReduce(ctx.next_id("t"), ty, None, x_ty.layout,
+                                    op, x_id, axis)).id
+
+
+# ---------------------------------------------------------------------------
+# R21  exp / exp2 / sqrt / abs（v0.5，docs/v0.5-reduce.md §2.2——律 L8 记法）
+# ---------------------------------------------------------------------------
+
+
+def check_elem(ctx, e: t.Call, op: str):
+    if len(e.args) != 1 or e.kwargs:
+        raise err(e.loc, "E13", f"tila.{op} takes exactly one positional argument: "
+                                f"tila.{op}(tile)")
+    x_ty, x_id = ctx.infer(e.args[0])
+    if not isinstance(x_ty, TileType):
+        raise err(e.args[0].loc, "E07", f"tila.{op} operates on a Tile",
+                  _type_note("operand", x_ty))
+    if not dt.unary_ok(x_ty.dtype, op):
+        domain = "float" if op != "abs" else "int or float"
+        raise err(e.loc, "E16", f"'{op}' is not in the capability set of dtype "
+                                f"{x_ty.dtype} (elementwise math requires {domain} "
+                                f"element dtypes; cast to tila.float32 first if "
+                                f"intended)")
+    # 律 L8（记法 ElemL(L) ≡ L）：逐元素一元不改变分布——不物化任何新 term
+    ty = TileType(x_ty.dtype, x_ty.shape, x_ty.layout)
+    return ty, ctx.emit(tir.TElem(ctx.next_id("t"), ty, None, x_ty.layout,
+                                  op, x_id)).id
+
+
+# ---------------------------------------------------------------------------
+# R22  where（v0.5，docs/v0.5-reduce.md §2.3——R14 的 n 元推广）
+# ---------------------------------------------------------------------------
+
+
+def check_where(ctx, e: t.Call):
+    if len(e.args) != 3 or e.kwargs:
+        raise err(e.loc, "E13", "tila.where takes exactly three positional arguments: "
+                                "tila.where(cond, a, b)")
+    cond_expr, a_expr, b_expr = e.args
+    c_ty, c_id = ctx.infer(cond_expr)
+    if not isinstance(c_ty, TileType) or c_ty.dtype != "bool":
+        raise err(cond_expr.loc, "E02", "where condition must be Tile[bool] "
+                                        "(produced by comparisons)",
+                  _type_note("cond", c_ty))
+
+    sides = []
+    for expr in (a_expr, b_expr):
+        ty, oid = ctx.infer(expr)
+        if isinstance(ty, TileType):
+            sides.append(("tile", expr, ty, oid))
+        elif isinstance(expr, (t.IntLit, t.FloatLit)):
+            sides.append(("lit", expr, ty, oid))
+        else:
+            raise err(expr.loc, "E13", "where branches must be Tiles or literals "
+                                       "(scalar names have no broadcast select "
+                                       "meaning; bind to a name or use a literal)",
+                      _type_note("branch", ty))
+    if sides[0][0] == "lit" and sides[1][0] == "lit":
+        raise err(e.loc, "E13", "where branches cannot both be literals — at least "
+                                "one Tile is needed to fix shape and dtype")
+
+    # dtype：Tile 侧严格相等（E02）；字面量侧按语境定型（R24——类别匹配，
+    # 与 R4/R12 同款：float 字面量配浮点类、int 字面量配整数类）
+    tile_sides = [s for s in sides if s[0] == "tile"]
+    dtype = tile_sides[0][2].dtype
+    for _, expr, ty, _ in tile_sides[1:]:
+        if ty.dtype != dtype:
+            raise err(e.loc, "E02", "where branch dtypes must match exactly",
+                      _type_note("a-branch" if expr is a_expr else "b-branch", ty),
+                      f"expected element dtype {dtype} (no implicit conversion; "
+                      f"write tila.cast(branch, tila.{dt.TILA_SURFACE_NAME.get(dtype, dtype)}))")
+    for kind, expr, _, _ in sides:
+        if kind == "lit":
+            ctx._literal_category(expr, dtype, "where")
+    if dt.is_storage_only(dtype):
+        raise err(e.loc, "E16", f"fp8 dtypes are storage-only: no arithmetic, no "
+                                f"selects (element dtype {dtype}); hint: "
+                                f"tila.cast(x, tila.float16) first")
+
+    # shape / layout：三方广播 + merge_nontrivial（pairwise 折叠严格退化为
+    # R14 的 broadcast_layout；双侧非平凡 → equiv，否则 E05）；字面量侧
+    # 不携带 shape/分布，不参与折叠
+    shape = c_ty.shape
+    layout = c_ty.layout
+    for _, expr, ty, _ in tile_sides:
+        new_shape = bcast.require_broadcast(shape, ty.shape, expr.loc, "'where'")
+        layout = lay.broadcast_layout(layout, shape, ty.layout, ty.shape,
+                                      expr.loc, "'where'")
+        shape = new_shape
+    ty = TileType(dtype, shape, layout)
+    return ty, ctx.emit(tir.TWhere(ctx.next_id("t"), ty, None, layout,
+                                   c_id, sides[0][3], sides[1][3])).id
+
+
+# ---------------------------------------------------------------------------
+# R23  num_programs（v0.5，docs/v0.5-reduce.md §2.4——program-context query）
+# ---------------------------------------------------------------------------
+
+
+def check_num_programs(ctx, e: t.Call):
+    if len(e.args) != 1 or e.kwargs:
+        raise err(e.loc, "E13", "tila.num_programs takes exactly one positional "
+                                "argument: tila.num_programs(0)")
+    arg = e.args[0]
+    axis = None
+    if isinstance(arg, t.IntLit):
+        axis = arg.value
+    elif isinstance(arg, t.NameRef) and arg.name in ctx.env.constexprs:
+        axis = ctx.env.constexprs[arg.name]
+    else:
+        raise err(arg.loc, "E13", "num_programs axis must be a compile-time constant "
+                                  "(literal or constexpr value)")
+    if axis not in (0, 1):
+        raise err(e.loc, "E13", f"num_programs axis {axis} is not supported "
+                                f"(axes {{0, 1}} as of the v0.2 2D preview)")
+    ty = ScalarType("i32")
+    return ty, ctx.emit(tir.TNumPrograms(ctx.next_id("t"), ty, None, None, axis)).id

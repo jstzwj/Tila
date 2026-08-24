@@ -105,6 +105,14 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
     elif isinstance(op, ops.TZeros):
         shape = "(" + ", ".join(ops.constexpr_str(s) for s in op.shape) + ")"
         toks += ["zeros", shape, op.dtype]
+    elif isinstance(op, ops.TReduce):
+        toks += [op.op, f"%{op.tile}", str(op.axis)]
+    elif isinstance(op, ops.TElem):
+        toks += [op.op, f"%{op.operand}"]
+    elif isinstance(op, ops.TWhere):
+        toks += ["where", f"%{op.cond}", f"%{op.a}", f"%{op.b}"]
+    elif isinstance(op, ops.TNumPrograms):
+        toks += ["num_programs", str(op.axis)]
     elif isinstance(op, ops.TPhi):
         toks += ["phi", f"%{op.pre}", f"%{op.back}"]
     elif isinstance(op, ops.TStore):

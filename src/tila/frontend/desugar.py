@@ -314,6 +314,9 @@ def convert_expr(node: py.expr, const_ctx: bool = False) -> t.Expr:
                                       f"argument of tila.cast(x, tila.<dt>) or inside tila.Tensor[...]")
             if name == "Tensor":
                 raise err(loc, "E14", "tila.Tensor may only appear in a parameter annotation position")
+            if name in intrinsic.CONSTANT_NAMES:
+                # v0.5：tila.neg_inf ——max 的归约零元（−∞），语境定型同浮点字面量
+                return t.FloatLit(loc, float("-inf"))
             if name in intrinsic.INTRINSICS or name in intrinsic.MARKER_NAMES:
                 raise err(loc, "E13", f"tila.{name} may only be used in call position")
             raise err(loc, "E13", f"unknown tila.{name} (v0.1 builtins: "
@@ -373,7 +376,8 @@ def _convert_call(node: py.Call) -> t.Expr:
                 raise _not_in_subset(node, "**kwargs argument")
             if kw.arg not in intrinsic.KWARG_NAMES:
                 raise err(_loc(kw), "E13",
-                          f"unknown keyword argument '{kw.arg}' (only 'mask' and 'other' exist)")
+                          f"unknown keyword argument '{kw.arg}' (only 'mask', "
+                          f"'other' and 'axis' exist)")
     if func.attr in ("range", "zeros") and node.keywords:
         # 先于通用 kwarg 门：range/zeros 不接受任何关键字实参（v0.4-kloop §7）
         raise err(_loc(node.keywords[0]), "E20",
@@ -422,6 +426,9 @@ def _convert_call(node: py.Call) -> t.Expr:
                               f"of tila.cast(x, tila.<dt>) or inside tila.Tensor[...]")
     if name == "Tensor":
         raise err(loc, "E14", "tila.Tensor may only appear in a parameter annotation position")
+    if name in intrinsic.CONSTANT_NAMES:
+        raise err(loc, "E13", f"tila.{name} is a constant, not a callable — use it "
+                              f"bare (e.g. tila.where(mask, x, tila.{name}))")
     if name in intrinsic.MARKER_NAMES:
         raise err(loc, "E13", f"tila.{name} may not be called (it is a decorator/annotation marker)")
     raise err(loc, "E13", f"unknown tila.{name} (v0.1 builtins: "

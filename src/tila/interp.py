@@ -88,6 +88,7 @@ class Interpreter:
         self.kernel = kernel
         self._mems = {p.name: p.tila_type.mem for p in kernel.params
                       if p.kind == "buffer"}
+        self._grid_dims = []
 
     def run(self, buffers: Dict[str, "np.ndarray"],
             scalars: Optional[Dict[str, int]] = None,
@@ -141,9 +142,14 @@ class Interpreter:
             grid_dims.append(max(1, -(-dim // tiling)))
         if not grid_dims:
             grid_dims = [1]
+        self._grid_dims = grid_dims
 
-        for pids in itertools.product(*(range(g) for g in grid_dims)):
-            self._run_program(pids, buffers, scalars, constexpr_values)
+        # 浮点异常不可观察（v0.5-reduce §1.3/§5）：where 只规定选中值，未选侧
+        # 的 0/0 → NaN、f16 exp 溢出等 dead-lane 现象不产生可依赖的副作用——
+        # 警告与 GPU 语义对齐，屏蔽之。
+        with np.errstate(all="ignore"):
+            for pids in itertools.product(*(range(g) for g in grid_dims)):
+                self._run_program(pids, buffers, scalars, constexpr_values)
 
     def _gather(self, name: str, coords, mask, other):
         """按逻辑坐标取数；mask 假通道取 other（缺省 0）。"""
@@ -217,6 +223,26 @@ class Interpreter:
                 vals[op.id] = np_dtype(op.dtype)(x)
         elif isinstance(op, tir.TExpandDim):
             vals[op.id] = np.expand_dims(v(op.tile), op.axis)
+        elif isinstance(op, tir.TReduce):
+            # dtype 钉死：numpy 对 int<32 默认提升平台整数宽度（与 Triton 的
+            # 默认策略同款陷阱）；结果 dtype = 输入 dtype（v0.5-reduce §5）
+            x = np.asarray(v(op.tile))
+            d = np_dtype(op.tila_type.dtype)
+            if op.op == "sum":
+                vals[op.id] = np.sum(x, axis=op.axis, dtype=d).astype(d)
+            else:
+                vals[op.id] = np.max(x, axis=op.axis).astype(d)
+        elif isinstance(op, tir.TElem):
+            x = np.asarray(v(op.operand))
+            fn = {"exp": np.exp, "exp2": np.exp2, "sqrt": np.sqrt, "abs": np.abs}[op.op]
+            vals[op.id] = fn(x).astype(np_dtype(op.tila_type.dtype))
+        elif isinstance(op, tir.TWhere):
+            out = np.where(np.asarray(v(op.cond)), v(op.a), v(op.b))
+            vals[op.id] = np.asarray(out).astype(np_dtype(op.tila_type.dtype))
+        elif isinstance(op, tir.TNumPrograms):
+            # observational：读当前 grid 维；未建立的轴 = 1（Triton 补 1 语义）
+            vals[op.id] = self._grid_dims[op.axis] \
+                if op.axis < len(self._grid_dims) else 1
         elif isinstance(op, tir.TDot):
             x = np.asarray(v(op.lhs)).astype(np.float32)
             y = np.asarray(v(op.rhs)).astype(np.float32)

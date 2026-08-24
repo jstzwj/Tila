@@ -351,3 +351,199 @@ def k2(a: tila.Tensor[tila.float16, M, K], b: tila.Tensor[tila.float16, K, N, (s
     _launch(res, launcher, (a, b, c))
     want = 2.0 * (a.float() @ b.float())
     torch.testing.assert_close(c, want, rtol=1e-2, atol=1e-2)
+
+
+# ---------------------------------------------------------------------------
+# v0.5 归约与逐元素内建（docs/v0.5-reduce.md）：softmax 验收主场 + 归约/一元/
+# where/neg_inf/num_programs 的 GPU 差分
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("M,N,BN", [
+    (1, 1, 128), (63, 127, 128), (64, 128, 128), (65, 129, 256),
+    (100, 140, 256), (130, 300, 512),
+])
+def test_gpu_softmax_vs_torch(M, N, BN):
+    """v0.5 验收主场：softmax vs torch.softmax（f16 进出 / f32 内部）。
+    数据含 f16 最低值（−65504，−∞ 哨兵不被污染）、全负行、大正值（max-减法
+    防 exp 溢出）。"""
+    src = (ROOT / "examples/softmax.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src, {"BN": BN})
+    _, launcher = _load_generated(res)
+    rng = np.random.default_rng(M + N)
+    a_np = rng.standard_normal((M, N)).astype(np.float16)
+    a_np[0, 0] = -65504.0
+    a_np[M // 2] = -60000.0
+    a_np[0, min(1, N - 1)] = 30000.0
+    a = torch.from_numpy(a_np).cuda()
+    o = torch.zeros(M, N, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (a, o), BN=BN)
+    want = torch.softmax(a.float(), dim=-1).half()
+    torch.testing.assert_close(o, want, rtol=2e-2, atol=2e-3)
+
+
+def test_gpu_softmax_vs_interpreter():
+    """同一 TIR 双路径：softmax 的 interpreter == GPU。"""
+    src = (ROOT / "examples/softmax.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src, {"BN": 256})
+    _, launcher = _load_generated(res)
+    rng = np.random.default_rng(23)
+    m, n = 100, 140
+    a_np = rng.standard_normal((m, n)).astype(np.float16)
+    a_np[0, 0] = -65504.0
+    o_interp = np.zeros((m, n), dtype=np.float16)
+    run_kernel(res.kernel, {"a": a_np, "o": o_interp}, {}, {"BN": 256})
+    a = torch.from_numpy(a_np).cuda()
+    o = torch.zeros(m, n, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (a, o), BN=256)
+    np.testing.assert_allclose(
+        o_interp.astype(np.float32), o.cpu().numpy().astype(np.float32),
+        rtol=1e-2, atol=2e-3)
+
+
+@pytest.mark.parametrize("op", ["sum", "max"])
+def test_gpu_reduce_f32_vs_torch(op):
+    src = """import tila
+
+
+@tila.jit
+def red(a: tila.Tensor[tila.float32, M, N], o: tila.Tensor[tila.float32, M, N],
+        BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    s = tila.{OP}(x, axis=1)
+    s2 = tila.expand_dim(s, 1)
+    y = x - s2
+    tila.store(o, (rm2, rn2), y, mask=m2)
+""".replace("{OP}", op)
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 100, 128
+    a = torch.randn(m, n, device="cuda", dtype=torch.float32)
+    o = torch.zeros_like(a)
+    _launch(res, launcher, (a, o))
+    fn = torch.sum if op == "sum" else torch.amax
+    want = a - fn(a, dim=1, keepdim=True)
+    torch.testing.assert_close(o, want, rtol=1e-5, atol=1e-6)
+
+
+def test_gpu_reduce_narrow_dtypes_dtype_preserved():
+    """f16 / i32 归约：结果 dtype 恢复（tl.max 的内部提升由 cast 抵消；
+    int 求和 dtype 显式）——GPU 上与 torch 数值对拍。"""
+    src16 = """import tila
+
+
+@tila.jit
+def r16(a: tila.Tensor[tila.float16, M, N], o: tila.Tensor[tila.float16, M],
+        BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    mx = tila.max(x, axis=1)
+    rm = pid * BM + tila.arange(0, BM)
+    tila.store(o, (rm,), mx, mask=rm < M)
+"""
+    res = compile_kernel(src16)
+    _, launcher = _load_generated(res)
+    m, n = 100, 128
+    a = (torch.randn(m, n, device="cuda") * 100).half()
+    o = torch.zeros(m, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (a, o))
+    assert o.dtype == torch.float16
+    torch.testing.assert_close(o.float(), a.float().max(dim=1).values.float())
+
+    src32 = src16.replace("float16", "int32").replace(
+        "mx = tila.max(x, axis=1)", "mx = tila.sum(x, axis=1)")
+    res = compile_kernel(src32)
+    _, launcher = _load_generated(res)
+    ai = torch.randint(-1000, 1000, (m, n), device="cuda", dtype=torch.int32)
+    oi = torch.zeros(m, device="cuda", dtype=torch.int32)
+    _launch(res, launcher, (ai, oi))
+    assert oi.dtype == torch.int32
+    torch.testing.assert_close(oi, ai.sum(dim=1, dtype=torch.int32))
+
+
+@pytest.mark.parametrize("op,torch_fn", [
+    ("exp", torch.exp), ("exp2", torch.exp2), ("sqrt", torch.sqrt),
+    ("abs", torch.abs),
+])
+def test_gpu_elem_vs_torch(op, torch_fn):
+    src = """import tila
+
+
+@tila.jit
+def el(a: tila.Tensor[tila.float32, M, N], o: tila.Tensor[tila.float32, M, N],
+       BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    y = tila.{OP}(x)
+    tila.store(o, (rm2, rn2), y, mask=m2)
+""".replace("{OP}", op)
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 100, 128
+    a = torch.abs(torch.randn(m, n, device="cuda"))  # sqrt 域非负
+    o = torch.zeros_like(a)
+    _launch(res, launcher, (a, o))
+    torch.testing.assert_close(o, torch_fn(a), rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("M,N,BN", [(100, 300, 64), (64, 128, 128), (1, 1, 128)])
+def test_gpu_rowsum_loop(M, N, BN):
+    """归约 × K-loop 累加（acc += tila.sum(e, 1)）：GPU vs torch.sum。"""
+    src = """import tila
+
+
+@tila.jit
+def rowsum(a: tila.Tensor[tila.float32, M, N], o: tila.Tensor[tila.float32, M],
+           BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rm = pid * BM + tila.arange(0, BM)
+    acc = tila.zeros((BM,), tila.float32)
+    for k0 in tila.range(0, N, BN):
+        cols2 = tila.expand_dim(k0 + tila.arange(0, BN), 0)
+        m2 = (rm2 < M) & (cols2 < N)
+        t = tila.load(a, (rm2, cols2), mask=m2)
+        e = tila.where(m2, t, 0.0)
+        acc += tila.sum(e, 1)
+    tila.store(o, (rm,), acc, mask=rm < M)
+"""
+    res = compile_kernel(src, {"BN": BN})
+    _, launcher = _load_generated(res)
+    a = torch.randn(M, N, device="cuda", dtype=torch.float32)
+    o = torch.zeros(M, device="cuda", dtype=torch.float32)
+    _launch(res, launcher, (a, o), BN=BN)
+    torch.testing.assert_close(o, a.sum(dim=1), rtol=2e-4, atol=1e-4)
+
+
+def test_gpu_num_programs_observational():
+    """num_programs(0) 读 grid 维（cdiv(M,BM)）——只读观测，不改变 launch。"""
+    src = """import tila
+
+
+@tila.jit
+def npk(a: tila.Tensor[tila.float32, M, N], o: tila.Tensor[tila.float32, M, N],
+        BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    nblk = tila.num_programs(0)
+    tila.store(o, (rm2, rn2), x + tila.cast(nblk, tila.float32), mask=m2)
+"""
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 130, 128
+    a = torch.zeros(m, n, device="cuda", dtype=torch.float32)
+    o = torch.zeros_like(a)
+    _launch(res, launcher, (a, o))
+    assert torch.all(o == 3.0)  # cdiv(130,64) = 3

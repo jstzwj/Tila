@@ -193,6 +193,55 @@ class TPhi(TOp):
     back: str = ""
 
 
+@dataclass(frozen=True)
+class TReduce(TOp):
+    """opcode: sum / max（R20，v0.5-reduce §2.1）：轴归约——分布的边缘化。
+
+    op/axis 已在 checker 特化（axis ∈ {0,1}，ConstExpr 不进 TIR）；
+    结果 dtype = 输入 dtype（无隐式提升——Triton 侧的默认提升策略由
+    lowering 显式抵消，v0.5-reduce §4）。
+    """
+
+    op: str = "sum"
+    tile: str = ""
+    axis: int = 1
+
+
+@dataclass(frozen=True)
+class TElem(TOp):
+    """opcode: exp / exp2 / sqrt / abs（R21，v0.5-reduce §2.2）：逐元素一元。
+
+    律 L8 是记法不是 term——结果 layout = 操作数 layout，IR 不物化 ElemL。
+    """
+
+    op: str = "exp"
+    operand: str = ""
+
+
+@dataclass(frozen=True)
+class TWhere(TOp):
+    """opcode: where（R22，v0.5-reduce §2.3）：值选择（select 形态的条件值）。
+
+    语义只规定选中值（result_i = c_i ? a_i : b_i）；未选分支是否求值不可
+    观察（非严格——backend 可自由优化）。字面量分支以 const 指令物化。
+    """
+
+    cond: str = ""
+    a: str = ""
+    b: str = ""
+
+
+@dataclass(frozen=True)
+class TNumPrograms(TOp):
+    """opcode: num_programs（R23，v0.5-reduce §2.4）：program-context query。
+
+    只读观测当前 grid 的该维大小——不参与 launch 推导（observational，
+    E17 的推导输入只有 program_id）。
+    """
+
+    axis: int = 0
+
+
 # v0.2 预览：TExpandDim 已实现（docs/v0.2-preview-2d.md）；size-1 广播隐含于
 # TArith/TCmp/TLogic 操作数的 shape，不设独立指令。
 

@@ -201,6 +201,12 @@ class Checker:
                 op = dataclasses.replace(op, lhs=r(op.lhs), rhs=r(op.rhs))
             elif isinstance(op, tir.TPhi):
                 op = dataclasses.replace(op, pre=r(op.pre), back=r(op.back))
+            elif isinstance(op, tir.TReduce):
+                op = dataclasses.replace(op, tile=r(op.tile))
+            elif isinstance(op, tir.TElem):
+                op = dataclasses.replace(op, operand=r(op.operand))
+            elif isinstance(op, tir.TWhere):
+                op = dataclasses.replace(op, cond=r(op.cond), a=r(op.a), b=r(op.b))
             elif isinstance(op, tir.TFor):
                 op = dataclasses.replace(op, end=r(op.end),
                                          body=tuple(rewrite(b) for b in op.body))
@@ -558,6 +564,14 @@ class Checker:
             return builtin.check_dot(self, e)
         if e.intrinsic == "zeros":
             return builtin.check_zeros(self, e)
+        if e.intrinsic in ("sum", "max"):
+            return builtin.check_reduce(self, e, e.intrinsic)
+        if e.intrinsic in ("exp", "exp2", "sqrt", "abs"):
+            return builtin.check_elem(self, e, e.intrinsic)
+        if e.intrinsic == "where":
+            return builtin.check_where(self, e)
+        if e.intrinsic == "num_programs":
+            return builtin.check_num_programs(self, e)
         if e.intrinsic == "range":
             raise err(e.loc, "E20", "tila.range may only appear as the iterable of "
                                     "a for loop: for k0 in tila.range(0, end, step)",
