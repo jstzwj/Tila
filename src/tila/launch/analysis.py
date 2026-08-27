@@ -140,7 +140,7 @@ def plan_launch(ops: List[tir.TOp], env, loc: Loc) -> tir.LaunchPlan:
                 static_dim_asserts.append((name, i, d.value))
             else:
                 sym_dim_asserts.append((name, i, d.name))
-        from ..types.layout import Strided
+        from ..types.memory import Strided
         if isinstance(bty.mem, Strided):
             for i, s in enumerate(bty.mem.strides):
                 stride_bindings.append(

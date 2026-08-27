@@ -77,13 +77,16 @@ class Assign(Node):
 
 @dataclass(frozen=True)
 class AugAssign(Node):
-    """`acc += tile`（v0.4，docs/v0.4-kloop.md §1.3）：累加器的 primitive
-    reduction update——表面语义直接定义为 acc⁺ = acc ⊕ t，不是
-    `acc = acc + t` 的缩写、不是 read-modify-write。
+    """AccumulatorUpdate 的 reduce/scale 形态（v0.4 起 +=；v0.6b 增 *=）。
 
-    转换期只放行 '+='；其它增强赋值 → E20。合法性（体内、zeros 播种累加器）
-    由 checker 围栏判定。"""
+    `acc += tile`：累加器的 primitive reduction update（ReduceUpdate）——
+    表面语义直接定义为 acc⁺ = acc ⊕ t；`acc *= t`：ScaleUpdate（重定标，
+    乘数 R-ST 读透明、seed(0) mul-identity 特例）。不是 `acc = acc ⊕ t`
+    的缩写、不是 read-modify-write。转换期只放行 '+='/ '*='；其它增强
+    赋值 → E20 AccumForm。合法性（体内、zeros/full 播种累加器）由 checker
+    围栏判定。"""
 
+    op: str                            # "+" | "*"
     target: str
     value: "Expr"
 

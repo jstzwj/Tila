@@ -8,7 +8,7 @@ from typing import Dict
 from ... import tir
 from ...fmt import fmt_float
 from ...types import TRITON_DTYPE
-from ...types.layout import strides_of
+from ...types.memory import strides_of
 from ...types.shape import dim_str
 
 # Python 运算符优先级（比较 = 6，| = 8，& = 9，+ - = 11，* / = 12；原子最高）
@@ -39,7 +39,7 @@ class OpRenderer:
 
     @staticmethod
     def _operands(op: tir.TOp):
-        if isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
+        if isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic, tir.TMaximum)):
             return (op.lhs, op.rhs)
         if isinstance(op, tir.TAddPtr):
             return tuple(op.coords)  # base 是参数名，不是值 id
@@ -145,6 +145,18 @@ class OpRenderer:
             inner = ", ".join(tir.constexpr_str(s) for s in op.shape)
             shape = f"({inner},)" if len(op.shape) == 1 else f"({inner})"
             return f"tl.zeros({shape}, dtype={TRITON_DTYPE[op.dtype]})"
+        if isinstance(op, tir.TFull):
+            inner = ", ".join(tir.constexpr_str(s) for s in op.shape)
+            shape = f"({inner},)" if len(op.shape) == 1 else f"({inner})"
+            value = op.value
+            if isinstance(value, float) and math.isinf(value):
+                value = f'float("{value}")'
+            elif isinstance(value, float):
+                value = fmt_float(value)
+            return f"tl.full({shape}, {value}, dtype={TRITON_DTYPE[op.dtype]})"
+        if isinstance(op, tir.TMaximum):
+            return (f"tl.maximum({self.render_operand(op.lhs)}, "
+                    f"{self.render_operand(op.rhs)})")
         if isinstance(op, tir.TReduce):
             x = self.render_operand(op.tile, _ATOM)
             d = op.tila_type.dtype
@@ -159,7 +171,15 @@ class OpRenderer:
                 return f"tl.cast(tl.max({x}, {op.axis}), {TRITON_DTYPE[d]})"
             return f"tl.max({x}, {op.axis})"
         if isinstance(op, tir.TElem):
-            return f"tl.{op.op}({self.render_operand(op.operand, _ATOM)})"
+            x = self.render_operand(op.operand, _ATOM)
+            d = op.tila_type.dtype
+            # 数学一元（exp/exp2/sqrt）在 triton 3.7.1 只接受 fp32/fp64（语义层
+            # 拒绝 f16/bf16）——f32 中计算、cast 回输入 dtype（与 numpy 对 f16
+            # ufunc 的内部升精度一致；abs 原生支持全部浮点宽度，直发）
+            if op.op != "abs" and d in ("f16", "bf16"):
+                return (f"tl.cast(tl.{op.op}(tl.cast({x}, tl.float32)), "
+                        f"{TRITON_DTYPE[d]})")
+            return f"tl.{op.op}({x})"
         if isinstance(op, tir.TWhere):
             return (f"tl.where({self.render_operand(op.cond, _ATOM)}, "
                     f"{self.render_operand(op.a, _ATOM)}, "
@@ -173,7 +193,7 @@ class OpRenderer:
 
     def _stride_terms(self, op: tir.TAddPtr):
         """逐轴 stride 渲染文本（v0.3-strides §4.1）；系数来自唯一的
-        `types.layout.strides_of`（Address Function，评审 §22 采纳的事实源共享）。"""
+        `types.memory.strides_of`（Address Function，评审 §22 采纳的事实源共享）。"""
         bparam = next((p for p in self.kernel.params
                        if p.kind == "buffer" and p.name == op.base), None)
         if bparam is None:  # pragma: no cover - typing 保证 base 是 buffer 参数
@@ -216,8 +236,9 @@ class OpRenderer:
         pad = "    " * depth
         for op in ops_seq:
             if isinstance(op, (tir.TReturn, tir.TSymRef, tir.TConstParamRef,
-                               tir.TPhi)):
-                continue  # 语句终结 / 合成引用 / φ：均不发射
+                               tir.TPhi, tir.TLaunchAssert)):
+                continue  # 语句终结 / 合成引用 / φ / host 断言：均不发射
+                # （TLaunchAssert 只进 launcher，kernel 内无痕）
             if isinstance(op, tir.TFor):
                 end = self.render_operand(op.end)
                 step = tir.constexpr_str(op.step)

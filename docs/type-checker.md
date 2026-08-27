@@ -41,7 +41,7 @@ def infer(expr, env) -> (Type, TOp):
 
 ## 3. 类型与 layout term 的实现
 
-类型与 term 即 `type-system.md` §6 的 dataclass（`ScalarType / BufferType / AddressType / TileType / UnitType`、`Identity / LoadL / BcastScalarL / CastL / JoinL`），补充：
+类型与 term 即 `type-system.md` §6 的 dataclass（`ScalarType / BufferType / AddressType / TileType / UnitType`；dist 侧的 `Identity / Mma / Product / Lift / Slice / Seed` 与标量面 `NoDist`；memory 侧 `RowMajor / Strided`）。v0.6a 起（评审 D）擦除包装 term（LoadL / BcastScalarL / CastL / JoinL）退役，**构造点直接产出正规形式**（loader 不变量：TIR 类型中的 dist 必须已是正规形式）；join 的带诊断规则在 `checker/layout.py`（strict_join / read_join / join_distributions / marginal）。补充：
 
 ```python
 # src/tila/types/dtype.py
@@ -59,34 +59,35 @@ BOOL_KIND     = lambda dt: dt == "bool"
 
 layout term 的**构造点**（每条规则产出的 term，构造时即断言律的前提成立）：
 
-| 规则 | 构造 | 规范化（律） |
+| 规则 | 构造（v0.6a：直接正规形式） | 机制 |
 |---|---|---|
 | R2 `arange` | `Identity(shape)` | — |
-| R4 标量⊕Tile | `BcastScalarL(L_tile)` | ≡ L2 → L_tile |
-| R5 Tile⊕Tile | `JoinL(L₁, L₂)`，前提 `L₁ ~ L₂` | ≡ L4 → L₁ |
-| R6 比较 | 沿用 lhs 的 term（包一层 `JoinL` 亦可，等价） | ≡ |
-| R7 `addptr` | 结果沿用索引 tile 的 term | ≡ |
-| R8 load | `LoadL(M_A, L_idx)` | ≡ L1 → L_idx |
-| R10 `& \|` | `JoinL(L₁, L₂)`，前提等价 | ≡ L4 → L₁ |
-| R11 cast | `CastL(L_x)` | ≡ L3 |
+| R13 `expand_dim` | `Lift(D, axis)` | 无所有权轴（v0.6a 更名自 Broadcast） |
+| R4 标量⊕Tile | `read_join(D_tile, NoDist)` | 标量不携带分布（评审 §25） |
+| R5 Tile⊕Tile | `join_distributions`（同形→strict_join / one-sided→read_join / 双广播→逐轴段联合） | L5/L6 |
+| R6 比较 | 同 R4/R5 的 join（标量侧 NoDist） | |
+| R7 `addptr` | `infer_coordinate_dist(t₀,…,t_{r−1})` | 逐轴段联合（n-ary Product） |
+| R8 load | 结果 dist = 索引 dist（load 保序） | |
+| R10 `& \|` | 同 R5 的 join | |
+| R11 cast | 结果 dist = 操作数 dist（保序） | |
+| R17 zeros | `Seed(shape)` | 种子状态载体（非 DistExpr） |
+| R20 sum/max | `marginal(D, Σ, k)` | 分支六：Mma → Slice(Mma,k) |
 
 **normalize / equiv**：
 
 ```python
-# src/tila/types/layout.py
-def normalize(l: LayoutTerm) -> LayoutTerm:
-    match l:
-        case Identity(s):        return Identity(s)
-        case LoadL(_, inner):    return normalize(inner)      # L1
-        case BcastScalarL(inner):return normalize(inner)      # L2
-        case CastL(inner):       return normalize(inner)      # L3
-        case JoinL(a, _):        return normalize(a)          # L4
+# src/tila/types/dist.py（v0.6a 重构，评审 D）
+def normalize_dist(d: TileDist) -> TileDist:
+    """律 D1–D6（type-system.md §3.3）：Identity 原样 / Product 拍平 +
+    逐分量 / Slice·Lift 内层规范化 / Lift 同轴幂等；无 speculative rewrite。"""
 
-def equiv(l1, l2) -> bool:
-    return normalize(l1) == normalize(l2)
+def equiv_dist(d1: TileDist, d2: TileDist) -> bool:
+    return normalize_dist(d1) == normalize_dist(d2)
 ```
 
-v0.1 事实：唯一种子构造点是 `arange`，L1–L4 全部是擦除性的，因此**正规形式恒为 `Identity(n)`**——等价判定退化为种子相等。算法保持通用签名，v0.2 引入 `Product`/`Broadcast` 等非擦除 term 后无需改动调用方（只加 match 分支与律 L5/L6）。原始 term 存入 `TOp.origin_layout` 供诊断解释。
+v0.6a 起正规形式恒为五 term + Seed 之一的结构树；构造点全部产出正规形式，
+`TOp.origin_dist` 仅作诊断记录。dist 等价是语义代数，不由求解器判定
+（`constraints` 层永不 import dist term——结构判定，无 SMT）。
 
 ## 4. 表达式推导
 
@@ -115,8 +116,8 @@ ARITH_RULES = {
 
 | lhs ＼ rhs | `Scalar` | `Tile` |
 |---|---|---|
-| `Scalar` | R3 → `TArith`（i32 配 i32、f32 配 f32；跨类别 E02） | R4 → `TArith`（标量侧，dtype 必须一致；字面量按 R12） |
-| `Tile` | R4 → `TArith` | R5 → `TArith`（dtype 一致 → shape `⊗` → layout equiv） |
+| `Scalar` | R3 → `TArith`（i32 配 i32、f32 配 f32；跨类别 E02） | R4 → `TArith`（标量 = NoDist，dist 随 tile：read_join） |
+| `Tile` | R4 → `TArith` | R5 → `TArith`（dtype 一致 → shape `⊗` → join_distributions） |
 
 **比较运算**（结果一律 `Tile[bool, Σ_lhs ⊗ Σ_rhs, L]`；标量/字面量侧接受 `Scalar(dt)` 严格同 dtype，或**类别匹配的字面量**：`a > 0.0`、`a < s` 均合法）
 
@@ -127,7 +128,7 @@ ARITH_RULES = {
 
 **`& |`**（R10）：两侧必须 `Tile[bool]`（否则 E02/E16，见 type-system §R10 注）→ shape `⊗` → layout equiv → `TLogic`。
 
-检查顺序固定：**dtype → shape → layout**（错误报告优先级同序）。shape 相等/⊗ 用 §3 的 `broadcast`；layout 用 `equiv`。
+检查顺序固定：**dtype → shape → dist**（错误报告优先级同序）。shape 相等/⊗ 用 `checker/broadcast.py` 的 `require_broadcast`；dist 用 `join_distributions` / `strict_join` / `read_join` / `require_equiv`。
 
 **能力门（矩阵命中之后、规则前提的一部分）**：查能力表（`type-system.md` §1.1）——FP8 四种格式不做任何算术与比较（→ E16，消息附 `tila.cast(a, tila.float16) + …` 建议）；bool 不做算术、比较仅 `== !=`；整数不含 `/` 与 `& |`；`u*` 与 `i*` 是不同 dtype，混用 → E02。**统一原则：op ∉ 该 dtype 类别的运算集 ⇒ E16**，不逐条枚举。
 
@@ -149,7 +150,7 @@ load(buf, coords, mask=?, other=?):        # v0.3 定稿：一级坐标原语（
        dtype 必须 bool（E02）、L' ~ L（E05）
     4. other（若给）：字面量，类别与 dt 匹配（整型 dt 配 INT、浮点 dt 配 FLOAT），
        否则 E02；且要求 mask 同时给出（无 mask 的 other 无意义 → E13）
-    5. 构造 LoadL(M_dt, L)，由律 L1 规范化 → R8
+    5. 结果 dist = 索引 dist（load 保序）→ R8
 store(buf, coords, value, mask=?):
     0. 语境检查：store 只能作为 ExprStmt；出现在 Assign 右侧或任何子表达式位置
        → E08（类型 () 不可绑定、不可参与运算）
@@ -159,6 +160,35 @@ store(buf, coords, value, mask=?):
 cast(x, dt):
     args 恰 2 个；dt 为 DTypeRef（17 种任意，否则 E09）；x 为 Tile 或 Scalar（否则 E09，
     比如把 Buffer 当操作数 —— Tile/Address 也不可 cast，地址不是值）→ R11
+sum/max(x, axis):                       # v0.5（docs/v0.5-reduce.md §2.1）
+    1. args 恰 (tile, axis)——axis 位置实参或唯一 kwargs axis=（INT 字面量 /
+       constexpr 特化值 ∈ {0,1}，否则 E13）
+    2. x 为 Tile（E07）且 rank = 2（否则 E21 ReduceRank——rank-1 全归约与
+       rank≥3 都推迟）
+    3. 能力门同源：sum→'+' 算术能力、max→'<' 比较能力（fp8/bool → E16）
+    4. dist：marginal(D, Σ, k)（checker/layout.py 的构造规则——Product →
+       幸存分量 / size-1 轴 → 原样（Lift(D,k) 归约到无所有权轴 → D）/ 唯一
+       非平凡轴被归约 → Identity(()) / Seed → Seed(Σ∖k) / Mma → Slice(Mma, k)
+       （v0.6a 分支六）/ 其余 → E21 ReduceLayout——分支六后对合法输入
+       为空位，保留码位防新 term）
+    5. 结果 dtype = 输入 dtype（Σ∖k；TReduce 携带 op/axis 特化值）→ R20
+exp/exp2/sqrt/abs(x):
+    args 恰 1 个（E13）；x 为 Tile（E07）；dtype ∈ UNARY 能力表（E16——
+    exp 族 float-only、abs int+float）；layout 保序（L8 记法，无新 term）→ R21
+where(c, a, b):                         # v0.5（§2.3）；v0.6a R-PT 修订
+    1. args 恰 3 个、无 kwargs（E13）
+    2. c 为 Tile[bool]（E02）；a/b 各为 Tile 或字面量/neg_inf（标量名 → E13），
+       不得同为字面量（E13）
+    3. dtype：Tile 侧严格相等（E02）；字面量侧类别检查（R24，E02）；
+       fp8 → E16（storage-only 无 select）
+    4. shape：Σ = Σc ⊗ Σa ⊗ Σb 三方广播（E03，字面量侧不参与；cond 可
+       撑大值侧结果——被撑大的轴在 dist 侧包 Lift）；
+       dist：**R-PT——cond 是谓词不进入分布代数**；结果 = 值侧 pairwise
+       join_distributions（同形双侧 → strict_join/E05；one-sided 广播 →
+       read_join 取全形侧）→ R22
+num_programs(axis):
+    args 恰 1 个且为字面量/constexpr ∈ {0,1}（E13）→ Scalar(i32)；TNumPrograms
+    不进入 launch analysis（observational）→ R23
 ```
 
 - kwarg 未知键在转换期已被 E13 拒绝；位置实参多于形参要求 → E13。
@@ -167,7 +197,7 @@ cast(x, dt):
 
 ### 4.3 Cast
 
-`tila.cast(x, dt)`（R11）：operand 为 `Tile[dt₁, Σ, L]` 或 `Scalar[dt₁]`；目标 `dt` 为 DTYPES 任意成员；结果 `Tile[dt, Σ, CastL(L)]` / `Scalar[dt]`。cast 矩阵全开——数值 dtype 任意互转，含 FP8 与 bool 两个端点（FP8 作为源和目标都合法，限制只在算术侧；bool 目标 = 数值→掩码转换，非零为真，不是逻辑谓词的构造）。字面量不可直接作 cast 操作数（配标量走字面量上下文规则 §4.1）。
+`tila.cast(x, dt)`（R11）：operand 为 `Tile[dt₁, Σ, D]` 或 `Scalar[dt₁]`；目标 `dt` 为 DTYPES 任意成员；结果 `Tile[dt, Σ, D]`（v0.6a 起保序直接表达，CastL 包装随重构退役）/ `Scalar[dt]`。cast 矩阵全开——数值 dtype 任意互转，含 FP8 与 bool 两个端点（FP8 作为源和目标都合法，限制只在算术侧；bool 目标 = 数值→掩码转换，非零为真，不是逻辑谓词的构造）。字面量不可直接作 cast 操作数（配标量走字面量上下文规则 §4.1）。
 
 ### 4.4 叶子
 
@@ -278,6 +308,7 @@ notes 的固定形态：每个相关操作数一行 `lhs : Tile[f32, (128,), L0]
 | E18 | dot 前提违反（dtype 非 f16/bf16、静态维 < 16、rank ≠ 2、收缩维不一致） | R16（v0.2 fragment） |
 | E19 | 寻址形态错误（load/store 第 2 实参非坐标元组、元组长度 ≠ rank、标量坐标）。subcode：CoordinateForm / CoordinateArity / CoordinateKind / CoordinatePosition（渲染不变，`TilaError.subcode`） | R8/R9 寻址前提（v0.3；旧 `a + offs` 算术 → E07，旧 load/store 实参形态 → E13；注解侧 strides 错误归 E12） |
 | E20 | 循环形态与围栏（iterable 非 tila.range、range 三件套形态、tila.range 越位、嵌套 for、zeros 形态、`+=` 纪律、体内读累加器、循环局部出循环）。subcode：NotRange / RangeForm / RangePosition / NestedLoop / ZerosForm / AccumForm / AccumRead / LoopScope | R17/R18/R19（v0.4，docs/v0.4-kloop.md §7）；dtype/shape/layout 链仍走 E02/E03/E05、单赋值冲突仍走 E14——E20 不做垃圾桶 |
+| E21 | 归约前提违反（rank ≠ 2、边缘化未定义）。subcode：ReduceRank（rank-1 全归约/rank≥3 推迟）/ ReduceLayout（Mma 已由 v0.6a 分支六覆盖——`Slice(Mma, k)`；该 subcode 对合法输入成为空位，保留防未来原子 term 回归） | R20（v0.5，docs/v0.5-reduce.md §7；分支六见 docs/v0.6-attention.md §2.1）；axis 形态 → E13、dtype 能力 → E16、where 的 shape → E03——E21 不做垃圾桶 |
 
 E01–E10、E16、E17 由 checker 抛出；E11–E15 由转换/签名阶段抛出（同一 TilaError 类型）。
 
@@ -342,14 +373,17 @@ line 11  z = x + y
 ```
 src/tila/types/dtype.py        dtype 域 + 能力表 + ARITH_RULES 数据源                （§3/§4.1）
 src/tila/types/shape.py        Dim/Shape/broadcast(⊗)                                   （type-system §2）
-src/tila/types/layout.py       LayoutTerm + normalize + equiv（律 L1–L4）               （§3）
+src/tila/types/dist.py         DistExpr 五 term + Seed/NoDist + normalize_dist/equiv_dist（§3）
+src/tila/types/memory.py       MemoryLayout（RowMajor/Strided + strides_of）        （type-system §3.1）
+src/tila/types/join.py         纯结构谓词（axis_segments / is_proper_broadcast_projection） （type-system §3.5）
 src/tila/types/type.py         ScalarType/BufferType/AddressType/TileType/UnitType      （type-system §6）
 src/tila/frontend/desugar.py   pyast → tila_ast 转换 + 子集校验 + intrinsic resolution（E11–E15，ast.md §3）
 src/tila/checker/checker.py    check_kernel / Env / infer / RULES 表                    （§2–§6）
 src/tila/checker/arithmetic.py 运算分派矩阵（ARITH_RULES，唯一权威）                    （§4.1）
 src/tila/checker/builtin.py    check_program_id/arange/load/store/cast                （§4.2）
 src/tila/checker/broadcast.py  ⊗ 与 shape 规则                                          （§3）
-src/tila/checker/layout.py     layout 推导与 equiv 检查                                （§4）
+src/tila/checker/layout.py     join/marginal 规则（strict_join/read_join/join_distributions/
+marginal/grow_to_shape/infer_coordinate_dist + E05/E21）          （§3.5/§4）
 src/tila/diagnostics.py        TilaError / Note / 渲染（E 码）                          （§7）
 src/tila/tir/ops.py            节点 + printer（canonical dump）                         （ast.md §4–§5）
 ```

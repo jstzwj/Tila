@@ -1,7 +1,7 @@
 """TIR：typed straight-line SSA（docs/ast.md §4）。
 
 kernel 体的扁平指令序列：每个值一个 %id，先定义后使用，单赋值；每条指令携带
-推导出的完整类型（含 layout term）与来源信息。TIR 不做类型推断——类型在
+推导出的完整类型（含 DistExpr）与来源信息。TIR 不做类型推断——类型在
 checker 已全部 resolve（不变量 6，lowering 能 total 的前提）。
 """
 
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union
 
 from ..diagnostics import Loc
-from ..types.layout import LayoutTerm
+from ..types.dist import TileDist
 from ..types.type import TilaType
 
 # 编译期常量表达式：字面量 | constexpr 名 | 整数运算（发射按表达式渲染，不折叠——模型 B）
@@ -40,7 +40,7 @@ class TOp:
     id: Optional[str]
     tila_type: Optional[TilaType]
     src_name: Optional[str]                    # 源码赋值目标名；匿名指令为 None
-    origin_layout: Optional[LayoutTerm]        # 规范化前的原始 term（仅诊断用）
+    origin_dist: Optional[TileDist]            # 规范化前的原始 term（仅诊断用）
 
 
 @dataclass(frozen=True)
@@ -122,6 +122,37 @@ class TStore(TOp):
 
 
 @dataclass(frozen=True)
+class TFull(TOp):
+    """opcode: full（R25，v0.6b）：常量播种（任意值；zeros 是 value=0 的
+    既名缩写，TZeros 指令保留）。value: int|float（`-inf` 以 float 表）。
+    状态语义：TFull → Tile[.., Seed(shape)]；种子值属于指令、状态属于
+    类型态（docs/v0.6b-flash.md §3 B）。"""
+
+    shape: Tuple[ConstExpr, ...] = ()
+    value: Union[int, float] = 0
+    dtype: str = "f32"
+
+
+@dataclass(frozen=True)
+class TMaximum(TOp):
+    """opcode: maximum（R26，v0.6b）：逐元素二元 max（值选择，保持分布）——
+    与归约 max 分立（max_axis ≠ maximum，docs/v0.6-attention.md §1.3）。"""
+
+    lhs: str = ""
+    rhs: str = ""
+
+
+@dataclass(frozen=True)
+class TLaunchAssert(TOp):
+    """opcode: launch_assert（v0.6b）：host 侧启动断言（语句级，无值 id 无
+    类型）。cond 是已核验的延迟表达式文本（符号/constexpr/字面量经
+    + - * // % 与 == !=）；checker 保证其名字已绑定。interpreter 在运行
+    期求值（与 launcher 同判据）；不带入 launch analysis。"""
+
+    cond: str = ""
+
+
+@dataclass(frozen=True)
 class TCast(TOp):
     dtype: str                              # opcode: cast（R11）
     operand: str = ""
@@ -184,9 +215,9 @@ class TPhi(TOp):
 
     位于 body 顶部；back 指向同 body 内后文定义的最后一个 += 结果——
     **TIR 唯一允许前向引用的指令**（SSA φ 的标准形态）。自带 tila_type
-    （= back 操作数的类型；pre 在 v0.4 恒为 zeros 种子——join 单位元，L7，
-    printer 无需按 id 回查）。当前 IR 无一般 CFG（控制流倾向 select），
-    φ 在 TIR 中无歧义；若将来引入 CFG φ，那是另行设计的课题。
+    （= back 操作数的类型；pre 在 v0.4 恒为 zeros 种子——累加状态机的
+    Seed 态，printer 无需按 id 回查）。当前 IR 无一般 CFG（控制流倾向
+    select），φ 在 TIR 中无歧义；若将来引入 CFG φ，那是另行设计的课题。
     """
 
     pre: str = ""
@@ -211,7 +242,7 @@ class TReduce(TOp):
 class TElem(TOp):
     """opcode: exp / exp2 / sqrt / abs（R21，v0.5-reduce §2.2）：逐元素一元。
 
-    律 L8 是记法不是 term——结果 layout = 操作数 layout，IR 不物化 ElemL。
+    律 L8 是记法不是 term——结果 dist = 操作数 dist，IR 不物化 ElemL。
     """
 
     op: str = "exp"

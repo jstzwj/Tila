@@ -3,6 +3,7 @@ R21 一元族（L8 记法）、R22 where（三方广播 + merge_nontrivial）、
 num_programs（observational）、R24 语境字面量/neg_inf、E21 矩阵、
 softmax 差分（interpreter 主场）与归约 × K-loop 累加组合。"""
 
+import re
 import numpy as np
 import pytest
 import torch
@@ -10,7 +11,7 @@ import torch
 from tila.driver import compile_kernel
 from tila.diagnostics import TilaError
 from tila.interp import run_kernel
-from tila.types.layout import Identity, Mma, ProductL, Zeros
+from tila.types.dist import Identity, Mma, Product, Seed, Slice, equiv_dist
 from tila.types.shape import Const
 from tila.checker.layout import marginal
 from tila.diagnostics import Loc, TilaError as TE
@@ -56,8 +57,8 @@ _S2 = (Const(64), Const(128))
 
 
 def test_marginal_product_takes_factor():
-    assert marginal(ProductL(_L0, _L1), _S2, 1, Loc(1, 1), "t") == _L0
-    assert marginal(ProductL(_L0, _L1), _S2, 0, Loc(1, 1), "t") == _L1
+    assert marginal(Product((_L0, _L1)), _S2, 1, Loc(1, 1), "t") == _L0
+    assert marginal(Product((_L0, _L1)), _S2, 0, Loc(1, 1), "t") == _L1
 
 
 def test_marginal_size1_axis_leaves_layout():
@@ -67,22 +68,33 @@ def test_marginal_size1_axis_leaves_layout():
     assert marginal(_L1, (Const(1), Const(128)), 0, Loc(1, 1), "t") == _L1
 
 
+def test_marginal_lift_axis_dropped():
+    # expand_dim 的 Lift 产物被归约到无所有权轴 → Lift 剥离（评审 §31）
+    from tila.types import Lift
+
+    assert marginal(Lift(_L0, 1), (Const(64), Const(1)), 1, Loc(1, 1), "t") == _L0
+    assert marginal(Lift(_L1, 0), (Const(1), Const(128)), 0, Loc(1, 1), "t") == _L1
+
+
 def test_marginal_only_nontrivial_axis_reduced_to_trivial():
     # (64,1) 归约轴 0：结果 (1,) 全平凡
     assert marginal(_L0, (Const(64), Const(1)), 0, Loc(1, 1), "t") == Identity(())
 
 
-def test_marginal_zeros_closed_under_axis_drop():
-    z = Zeros(_S2)
-    assert marginal(z, _S2, 1, Loc(1, 1), "t") == Zeros((Const(64),))
+def test_marginal_seed_closed_under_axis_drop():
+    z = Seed(_S2)
+    assert marginal(z, _S2, 1, Loc(1, 1), "t") == Seed((Const(64),))
 
 
-def test_marginal_mma_is_e21():
-    with pytest.raises(TilaError) as ei:
-        marginal(Mma(64, 128, 64), _S2, 1, Loc(1, 1), "t")
-    assert ei.value.code == "E21"
-    assert ei.value.subcode == "ReduceLayout"
-    assert "marginalization" in ei.value.message
+def test_marginal_mma_branch6_slice():
+    # v0.6 分支六（docs/v0.6-attention.md §2.1）：Mma → Slice(Mma, k)——
+    # 边缘 = 亲代切片（v0.5 的 E21 ReduceLayout 对合法输入成为空位）
+    assert marginal(Mma(64, 128, 64), _S2, 1, Loc(1, 1), "t") == Slice(Mma(64, 128, 64), 1)
+    assert marginal(Mma(64, 128, 64), _S2, 0, Loc(1, 1), "t") == Slice(Mma(64, 128, 64), 0)
+    # equiv 仅同亲代；Slice ≢ Identity（能力边界维持）
+    assert equiv_dist(Slice(Mma(64, 128, 64), 1), Slice(Mma(64, 128, 64), 1))
+    assert not equiv_dist(Slice(Mma(64, 128, 64), 1), Slice(Mma(64, 128, 32), 1))
+    assert not equiv_dist(Slice(Mma(64, 128, 64), 1), Identity((Const(64),)))
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +107,7 @@ def test_sum_max_tir_and_triton():
 """
     res = _c(body)
     assert "%s = sum %x 1 : Tile<f32, (64,), L0> [#s]" in res.tir_dump
-    assert "%m = max %x 0 : Tile<f32, (128,), L1> [#m]" in res.tir_dump
+    assert "%m = max %x 0 : Tile<f32, (128,), L2> [#m]" in res.tir_dump
     assert "tl.sum(s_x, 1, dtype=tl.float32)" in res.triton_source or \
            "tl.sum(x, 1, dtype=tl.float32)" in res.triton_source
     assert "tl.max(x, 0)" in res.triton_source
@@ -138,7 +150,7 @@ def test_int_sum_dtype_preserved():
 def test_reduce_zeros_layout_closed():
     body = _PRELUDE_2D + "    z = tila.zeros((BM, BN), tila.float32)\n    s = tila.sum(z, 1)\n"
     res = _c(body)
-    assert "zeros(64)" in res.tir_dump  # Zeros((64,)) 正规形式
+    assert "seed(64)" in res.tir_dump  # Seed((64,)) 正规形式
 
 
 def test_e21_rank1_full_reduce():
@@ -172,20 +184,24 @@ def test_e16_reduce_capability():
     _expect(body, code="E16")
 
 
-def test_e21_mma_input_rejected():
-    # dot 结果是 Mma 分布：语义层边缘化未定义
+def test_mma_reduce_branch6_positive():
+    # v0.6 分支六（docs/v0.6-attention.md §2.1）：dot 结果的归约合法——
+    # 结果布局 = Slice(Mma, k)（亲代切片）；v0.5 的 E21 ReduceLayout 对合法
+    # 输入成为空位。TIR 布局定义行出现 slice(L?, 1)。
     sig = ("a: tila.Tensor[tila.float16, M, K], b: tila.Tensor[tila.float16, K, N], "
            "BM: tila.constexpr = 64, BN: tila.constexpr = 128, BK: tila.constexpr = 64")
     body = ("    pid = tila.program_id(0)\n"
             "    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)\n"
             "    rn2 = tila.expand_dim(tila.arange(0, BN), 0)\n"
-            "    x = tila.load(a, (rm2, tila.expand_dim(tila.arange(0, BK), 0)))\n"
-            "    y = tila.load(b, (tila.expand_dim(tila.arange(0, BK), 1), rn2))\n"
+            "    rk2 = tila.expand_dim(tila.arange(0, BK), 0)\n"
+            "    rk3 = tila.expand_dim(tila.arange(0, BK), 1)\n"
+            "    x = tila.load(a, (rm2, rk2), mask=(rm2 < M) & (rk2 < K), other=0.0)\n"
+            "    y = tila.load(b, (rk3, rn2), mask=(rk3 < K) & (rn2 < N), other=0.0)\n"
             "    d = tila.dot(x, y)\n"
             "    s = tila.sum(d, 1)\n")
-    e = _expect(body, params=sig, subcode="ReduceLayout")
-    assert "Product-compatible" in " ".join(n.text for n in e.notes) or \
-           "marginalization" in e.message
+    res = _c(body, params=sig)
+    assert re.search(r"^L\d+ = slice\(L\d+, 1\)$", res.tir_dump, re.M), res.tir_dump
+    assert "tl.sum(d, 1, dtype=tl.float32)" in res.triton_source
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +211,9 @@ def test_e21_mma_input_rejected():
 def test_elem_layout_preserved_and_lowering():
     body = _PRELUDE_2D + _load_2d() + "    e = tila.exp(x)\n    r = tila.sqrt(x)\n    q = tila.exp2(x)\n"
     res = _c(body)
-    assert "%e = exp %x : Tile<f32, (64,128), L2>" in res.tir_dump
-    assert "%r = sqrt %x : Tile<f32, (64,128), L2>" in res.tir_dump
-    assert "%q = exp2 %x : Tile<f32, (64,128), L2>" in res.tir_dump
+    assert "%e = exp %x : Tile<f32, (64,128), L4>" in res.tir_dump
+    assert "%r = sqrt %x : Tile<f32, (64,128), L4>" in res.tir_dump
+    assert "%q = exp2 %x : Tile<f32, (64,128), L4>" in res.tir_dump
     assert "tl.exp(x)" in res.triton_source
     assert "tl.sqrt(x)" in res.triton_source
     assert "tl.exp2(x)" in res.triton_source
@@ -208,7 +224,7 @@ def test_abs_int_domain():
            "BM: tila.constexpr = 64, BN: tila.constexpr = 128")
     body = _PRELUDE_2D + _load_2d() + "    v = tila.abs(x)\n"
     res = _c(body, params=sig)
-    assert "%v = abs %x : Tile<i32, (64,128), L2>" in res.tir_dump
+    assert "%v = abs %x : Tile<i32, (64,128), L4>" in res.tir_dump
     assert "tl.abs(x)" in res.triton_source
 
 
@@ -230,6 +246,16 @@ def test_e13_elem_form():
     _expect(body, code="E13", overrides=None)
 
 
+def test_elem_narrow_float_f32_compute_lowering():
+    # 数学一元在 triton 3.7.1 只接受 fp32/fp64：f16/bf16 经 f32 计算 + cast 回
+    sig = ("a: tila.Tensor[tila.float16, M, N], "
+           "BM: tila.constexpr = 64, BN: tila.constexpr = 128")
+    body = _PRELUDE_2D + _load_2d() + "    e = tila.exp(x)\n    v = tila.abs(x)\n"
+    res = _c(body, params=sig)
+    assert "tl.cast(tl.exp(tl.cast(x, tl.float32)), tl.float16)" in res.triton_source
+    assert "tl.abs(x)" in res.triton_source
+
+
 # ---------------------------------------------------------------------------
 # R22 where：三方广播、merge_nontrivial、字面量分支
 # ---------------------------------------------------------------------------
@@ -240,7 +266,7 @@ def test_where_literal_branches_and_neg_inf():
 """
     res = _c(body)
     assert "%t2 = const -inf : Scalar(f32)" in res.tir_dump
-    assert "%neg = where %m2 %x %t2 : Tile<f32, (64,128), L2>" in res.tir_dump
+    assert "%neg = where %m2 %x %t2 : Tile<f32, (64,128), L4>" in res.tir_dump
     assert 'tl.where(m2, x, float("-inf"))' in res.triton_source
     assert "tl.where(m2, x, 0.0)" in res.triton_source
 
@@ -253,7 +279,7 @@ def test_where_three_way_broadcast():
 """
     res = _c(body)
     assert "%w = where %rowmask %x %t" in res.tir_dump
-    assert ": Tile<f32, (64,128), L2> [#w]" in res.tir_dump
+    assert ": Tile<f32, (64,128), L4> [#w]" in res.tir_dump
 
 
 def test_where_both_tiles_dtype_mismatch():
@@ -374,7 +400,7 @@ def test_neg_inf_standalone_binding():
 def test_r24_binop_tile_vs_float_literal():
     body = _PRELUDE_2D + _load_2d() + "    y = x * 0.5\n"
     res = _c(body)
-    assert "%y = mul %x %t2 : Tile<f32, (64,128), L2> [#y]" in res.tir_dump
+    assert "%y = mul %x %t2 : Tile<f32, (64,128), L4> [#y]" in res.tir_dump
     assert "y = x * 0.5" in res.triton_source
 
 

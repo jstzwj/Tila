@@ -52,7 +52,9 @@ dtype ∈ {fp16, bf16, fp32}
 
 1. `tools/oracle_add.py`——手写 Triton add，GPU 实测基准（Stage 0 的延续物）；
 2. `docs/semantic-model.md`——语义模型（值类别、执行模型、内建合同）**先行冻结**，它是 checker 与 lowering 的共同契约；
-3. `src/tila/types/`——`dtype.py` / `shape.py` / `layout.py` / `type.py`（类型与 layout term + normalize/equiv）；
+3. `src/tila/types/`——`dtype.py` / `shape.py` / `type.py`（v0.6a 重构后：
+   `layout.py` 拆为 `dist.py` + `memory.py` + `join.py`——DistExpr 五 term +
+   normalize_dist/equiv_dist、MemoryLayout、纯结构谓词，见 `type-system.md` §3）；
 4. `src/tila/tir/`——TIR 节点与 canonical dump；
 5. `src/tila/checker/`——规则驱动的 check_kernel；
 6. `src/tila/backend/triton/lowering.py`——total lowering；

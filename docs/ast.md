@@ -10,7 +10,7 @@
 |---|---|---|---|
 | Python `ast` | 语法树 | 解析（`ast.parse`） | — |
 | `tila_ast` | 表面子集的干净树 | **语法层**子集校验、脱糖（`tila.cast(x, tila.f32)` → `Cast`）、intrinsic resolution（`tila.load` → `Call(intrinsic="load")`） | 任何类型/语义判断 |
-| `tir` | 带类型的直线 SSA | 携带推导出的类型与 layout term | — |
+| `tir` | 带类型的直线 SSA | 携带推导出的类型与 dist term | — |
 
 checker 是唯一的 `tila_ast → TIR` 通道；lowering 只消费 TIR。所有报错发生在前两级（E11–E15 转换/签名期）或 checker（E01–E10、E16、E17），lowering 对有效 TIR 全函数（total）。
 
@@ -160,7 +160,7 @@ class Cast(Node):
 
 ## 4. TIR：带类型的直线 SSA
 
-TIR 是 kernel 体的扁平指令序列：每个值一个 `%id`，先定义后使用，单赋值。每条指令携带推导出的完整类型（含 layout term）与来源信息。
+TIR 是 kernel 体的扁平指令序列：每个值一个 `%id`，先定义后使用，单赋值。每条指令携带推导出的完整类型（含 dist term）与来源信息。
 
 ```python
 # src/tila/tir/ops.py
@@ -170,7 +170,7 @@ class TOp(Node):                           # 所有指令的基类
     id: str                                # "%pid"、"%t3"
     tila_type: Type                        # ScalarType / TileType / AddressType / UnitType
     src_name: Optional[str]                # 源码赋值目标名；匿名指令为 None
-    origin_layout: Optional[LayoutTerm]    # 规范化前的原始 term（仅诊断用）
+    origin_dist: Optional[TileDist]        # 规范化前的原始 term（仅诊断用）
 
 # ---- v0.1 指令 ----
 @dataclass(frozen=True)
@@ -227,6 +227,18 @@ class TReturn(TOp):        ...                        # opcode: return（语句�
 #              # 前向引用的指令（SSA φ 的标准形态）。自带 tila_type（= back 的
 #              # 类型），printer 无需按 id 回查
 
+# ---- v0.5 新增（docs/v0.5-reduce.md §3）----
+# TReduce(TOp): op: str; tile: str; axis: int  # opcode: sum | max   R20：轴归约——
+#              # 分布的边缘化（marginal 构造规则，无新 dist term）。op/axis
+#              # 已在 checker 特化；结果 dtype = 输入 dtype（Triton 侧默认提升
+#              # 由 lowering 显式抵消）
+# TElem(TOp):   op: str; operand: str          # opcode: exp | exp2 | sqrt | abs
+#              # R21：逐元素一元；律 L8 是记法不是 term——dist 保序，IR 不物化 ElemL
+# TWhere(TOp):  cond: str; a: str; b: str      # opcode: where   R22：值选择——语义只
+#              # 规定选中值（非严格：未选分支求值不可观察）；字面量分支以 const 指令物化
+# TNumPrograms(TOp): axis: int                 # opcode: num_programs   R23：program-context
+#              # query——只读观测，不参与 launch 推导（launch analysis 只扫 TProgramId）
+
 @dataclass(frozen=True)
 class TParam:
     name: str
@@ -250,7 +262,7 @@ class TKernel:
     launch_plan: LaunchPlan                # grid 与 shape 断言的依据（E17 在 launch analysis 消化）
 ```
 
-指令与 typing rules 的对应：`TProgramId`←R1、`TArange`←R2、`TArith`←R3/R4/R5、`TCmp`←R6、`TAddPtr`←R7、`TLoad`←R8、`TStore`←R9、`TLogic`←R10、`TCast`←R11、`TSymRef`/`TConstParamRef`/`TConstInt`/`TConstFloat`←叶子。
+指令与 typing rules 的对应：`TProgramId`←R1、`TArange`←R2、`TArith`←R3/R4/R5、`TCmp`←R6、`TAddPtr`←R7、`TLoad`←R8、`TStore`←R9、`TLogic`←R10、`TCast`←R11、`TSymRef`/`TConstParamRef`/`TConstInt`/`TConstFloat`←叶子、`TReduce`←R20、`TElem`←R21、`TWhere`←R22、`TNumPrograms`←R23。
 
 ---
 
@@ -262,7 +274,7 @@ class TKernel:
 - `%id`：有 `src_name` 的指令用 `%<src_name>`；匿名指令按出现顺序 `%t0, %t1, …`；**合成引用指令**（`TSymRef`/`TConstParamRef`）以被引用参数名原样作 id（`%N`、`%BLOCK`），且**不带** `[#src_name]` 尾注。
 - 指令形如 `%id = opcode operand* : type [#src_name]`；语句级指令（`store`、`return`）不产生值，无 id、无类型。
 - kwarg 形如 `mask=%mask`。
-- **layout 打印规则**：layout 打印其**正规形式**；相同正规形式按首次出现顺序命名 `L0, L1, …`，并在 dump 首部列印 `L0 = identity(128)` 形式的定义行（shape 打印为 `identity((128,))`；v0.2 的 `product(L0,L1)` 同理）。
+- **dist 打印规则**：dist 打印其**正规形式**；相同正规形式按首次出现顺序命名 `L0, L1, …`，并在 dump 首部列印 `L0 = identity(128)` 形式的定义行（子项先于复合项命名）。拼写（v0.6a 重构定稿）：`identity(64)` / `product(L0,L1)`（n-ary，逗号分隔）/ `mma(64,128,64)` / `lift(L0, 1)`（v0.6a 更名自 broadcast）/ `slice(L2, 1)`（marginal 分支六的亲代切片）/ `seed(64, 128)`（v0.6a 更名自 zeros；TIR opcode 保持 `zeros`）。
 - 类型打印：`Scalar(i32)`、`Tile<i32, (128,), L0>`、`Tile<bool, (128,), L0>`、`Address<f32, (128,), L0>`、`()`；符号维打印名字（`(N,)`）；dtype 打印短名（`f32`、`fp8e4m3fn`）。
 - 头部：`func @<name>(<param>: <type>, …)`，constexpr 参数带 `= <默认值>`（`BLOCK: Constexpr(i32)=128`）。
 - dump **只含上述格式本身**：中文旁注、行号说明等不属于 dump 内容。opcode 拼写以 `type-checker.md` §8 的走查 dump 为参考实现。
@@ -303,15 +315,15 @@ return
 1. 每个 `%id` 唯一，且先定义后使用（v0.4 起 TIR 一层可嵌套：`TFor.body` 内部
    保持直线序；**TPhi.back 是唯一的前向引用豁免**——φ 指向同 body 内后文定义
    的出口值，SSA φ 的标准形态）。
-2. 每条指令操作数的类型满足其对应规则的全部前提（dtype、shape、layout 等价已检查）。
+2. 每条指令操作数的类型满足其对应规则的全部前提（dtype、shape、dist 等价已检查）。
 3. **匿名值在其唯一使用点发射**——v0.1 中表达式树展平且 checker 不做 CSE，匿名值恰被使用一次。但这是 **lowering 的发射策略依据，不是 TIR 必须永久维持的结构性质**：将来的 CSE/常量折叠/copy propagation 会产生"被多次使用的匿名值"或"单次使用的具名值"，届时发射器改按 use_count 决策（==1 内联、>1 物化为变量，`triton-lowering.md` §4），IR 本身不设此约束。
-4. 所有 `Tile/Address` 类型中的 layout term 均可 normalize（无自由变量）。
+4. 所有 `Tile/Address` 类型中的 dist term 均可 normalize_dist（无自由变量；构造点保证正规形式）。
 5. `TLoad/TStore` 的 `ptr` 字段引用 `TAddPtr` 产生的 Address 值；`TAddPtr.base` 引用 kernel 的 buffer 参数名。
-6. 每个值都有完全 resolve 的 dtype、shape、layout——**TIR 不做类型推断**（类型在 checker 已全部消耗；这是 lowering 能 total 的前提）。
+6. 每个值都有完全 resolve 的 dtype、shape、dist——**TIR 不做类型推断**（类型在 checker 已全部消耗；这是 lowering 能 total 的前提）。
 7. v0.4：`TPhi.tila_type` = 其 back 操作数的类型；pre 操作数的类型恒为 zeros
    种子（join 单位元，L7）——入口值在任何分布解释下与 φ 类型兼容。若将来
-   放开非 zeros 播种的 carried 值，该不变量升级为 equiv(pre.layout,
-   φ.layout) 前提（v0.4-kloop §2.3）。
+   放开非 zeros 播种的 carried 值，该不变量升级为 equiv_dist(pre.dist,
+   φ.dist) 前提（v0.4-kloop §2.3）。
 
 ---
 
@@ -319,6 +331,6 @@ return
 
 - **为什么是 intrinsic resolution 而不是内建关键字节点**：`tila.load(...)` 是 Python 子集里的普通属性调用；识别为 intrinsic 后 checker 按合同检查，Tila 表面语言保持"Python 子集 + tila 固有命名空间"，不发明第二套语法。解析用静态表（`INTRINSICS`），表外属性直接 E13。
 - **为什么不用 pyast 直接检查**：pyast 节点语义过宽（链式比较、多赋值目标、上下文表达式），子集校验后换成窄节点，checker 的分派永远不遇"不可能的形状"。
-- **为什么 TIR 是扁平 SSA 而非类型化表达式树**：① 类型/layout 挂在**值**上而不是树上，诊断可以直接引用值的定义点；② 与 `type-system.md` §8 的文本 IR 一一对应；③ lowering 内联匿名指令后自然回到源码形态（`triton-lowering.md` §4）。
-- **为什么 `origin_layout` 留在指令上**：normalize 后的信息足以判等，但不足以解释（"这个 layout 来自第 6 行那次 load"）；诊断需要原始 term。
+- **为什么 TIR 是扁平 SSA 而非类型化表达式树**：① 类型/dist 挂在**值**上而不是树上，诊断可以直接引用值的定义点；② 与 `type-system.md` §8 的文本 IR 一一对应；③ lowering 内联匿名指令后自然回到源码形态（`triton-lowering.md` §4）。
+- **为什么 `origin_dist` 留在指令上**：normalize 后的信息足以判等，但不足以解释（"这个 dist 来自第 6 行那次 load"）；诊断需要原始 term。
 - **为什么 `TArange` 保留 ConstExpr 而不折叠**：检查按 override 值特化（TIR 是特化产物、跨值不复用，`semantic-model.md` §6）；发射保留名字则维持与源码的 1:1 同构和稳定的黄金输出，生成的 kernel 形参仍是 `BLOCK: tl.constexpr`，Triton 对每个 launch 值做自己的 jit 特化。折叠成字面量在"逐值重编译"模型下虽不再产生覆盖空洞，但产物不再与源码同构，黄金输出也随 override 漂移——故发射口径恒保留名字（模型 B），检查口径恒用特化值。

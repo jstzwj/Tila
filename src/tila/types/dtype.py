@@ -105,11 +105,14 @@ def logic_ok(dt: str) -> bool:
 
 
 # 一元数学能力表（v0.5，docs/v0.5-reduce.md §2.2）：op → 允许的 dtype 集合。
-# abs 覆盖 int+float 双域，使 UNARY 成为真实矩阵而非全员 float-only。
-UNARY_OPS: Tuple[str, ...] = ("exp", "exp2", "sqrt", "abs")
+# abs 覆盖 int+float 双域，使 UNARY 成为真实矩阵而非全员 float-only；
+# log2（v0.6b，评审焦点 #3）与 exp2 同款 FLOAT 域——UNARY 完全数据驱动，
+# 无 per-op 逻辑。能力表是 infer/lowering/interp 唯一事实源。
+UNARY_OPS: Tuple[str, ...] = ("exp", "exp2", "sqrt", "abs", "log2")
 _UNARY_FOR: Dict[str, FrozenSet[str]] = {
     "exp": frozenset(FLOAT_DTYPES),
     "exp2": frozenset(FLOAT_DTYPES),
+    "log2": frozenset(FLOAT_DTYPES),
     "sqrt": frozenset(FLOAT_DTYPES),
     "abs": frozenset(INT_DTYPES + FLOAT_DTYPES),
 }

@@ -547,3 +547,136 @@ def npk(a: tila.Tensor[tila.float32, M, N], o: tila.Tensor[tila.float32, M, N],
     o = torch.zeros_like(a)
     _launch(res, launcher, (a, o))
     assert torch.all(o == 3.0)  # cdiv(130,64) = 3
+
+
+@pytest.mark.parametrize("dt", [torch.float16, torch.bfloat16])
+def test_gpu_elem_narrow_float_f32_compute(dt):
+    """f16/bf16 数学一元：Triton 3.7.1 只接受 fp32/fp64——lowering 经
+    cast→f32 计算→cast 回实现；GPU 与 torch（f32 计算 + 一次性舍入）对拍。"""
+    src = """import tila
+
+
+@tila.jit
+def eln(a: tila.Tensor[DT, M, N], o: tila.Tensor[DT, M, N],
+        BM: tila.constexpr = 64, BN: tila.constexpr = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    tila.store(o, (rm2, rn2), tila.sqrt(x), mask=m2)
+"""
+    name = "float16" if dt == torch.float16 else "bfloat16"
+    src = src.replace("DT", f"tila.{name}")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 64, 128
+    a = torch.abs(torch.randn(m, n, device="cuda")).to(dt)
+    o = torch.zeros_like(a)
+    _launch(res, launcher, (a, o))
+    want = torch.sqrt(a.float()).to(dt)
+    torch.testing.assert_close(o.float(), want.float(), rtol=1e-2, atol=1e-3)
+
+
+def test_gpu_exp_f16_roundtrip():
+    src = """import tila
+
+
+@tila.jit
+def ef(a: tila.Tensor[tila.float16, M, N], o: tila.Tensor[tila.float16, M, N],
+       BM: tila.constexpr = 64, BN: tl_dtype = 128):
+    pid = tila.program_id(0)
+    rm2 = tila.expand_dim(pid * BM + tila.arange(0, BM), 1)
+    rn2 = tila.expand_dim(tila.arange(0, BN), 0)
+    m2 = (rm2 < M) & (rn2 < N)
+    x = tila.load(a, (rm2, rn2), mask=m2)
+    tila.store(o, (rm2, rn2), tila.exp(x), mask=m2)
+"""
+    src = src.replace("tl_dtype", "tila.constexpr")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n = 64, 128
+    a = (torch.randn(m, n, device="cuda") * 2).half()
+    o = torch.zeros_like(a)
+    _launch(res, launcher, (a, o))
+    want = torch.exp(a.float()).half()
+    torch.testing.assert_close(o.float(), want.float(), rtol=1e-2, atol=1e-2)
+
+
+# ---------------------------------------------------------------------------
+# v0.6a attention fragment（docs/v0.6-attention.md §8.4）：分支六/R-PT/R-BT
+# 的 GPU 验收——softmax(QK^T)·V vs torch、双路径互拍
+# ---------------------------------------------------------------------------
+
+
+def _attn_ref(q, k, v):
+    return (torch.softmax(q.float() @ k.float().transpose(0, 1), dim=-1)
+            @ v.float())
+
+
+@pytest.mark.parametrize("M,N,D,BN,BD", [
+    (1, 1, 64, 64, 64), (63, 63, 64, 64, 64), (64, 64, 64, 64, 64),
+    (64, 127, 64, 128, 64), (100, 127, 64, 128, 64), (128, 128, 64, 128, 64),
+    (33, 64, 16, 64, 64), (64, 33, 33, 64, 64), (200, 100, 64, 128, 64),
+])
+def test_gpu_attention_vs_torch(M, N, D, BN, BD):
+    """attention fragment vs torch 参考（f16 进出 / f32 内部）。数据含大
+    logits（±3e4：exp 安全由构造保证）、全负行、f16 最低值元素。
+    注：BN=BD=128 的 dot 组合需 64KB 共享内存（超本机 TITAN Xp 的 48KB
+    硬件限）——block 组合受目标 SM 共享内存约束（与手写 Triton 同款），
+    典型 flash 配置 BD=64 不受限。"""
+    src = (ROOT / "examples/attention.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src, {"BN": BN, "BD": BD})
+    _, launcher = _load_generated(res)
+    rng = np.random.default_rng(M + N * 3 + D)
+    q_np = ((rng.standard_normal((M, D)) + 0.3) * 200.0).astype(np.float16)
+    k_np = ((rng.standard_normal((N, D)) - 0.2) * 200.0).astype(np.float16)
+    q_np[0, 0] = -65504.0
+    k_np[N // 2] = -60000.0
+    v_np = rng.standard_normal((N, D)).astype(np.float16)
+    q = torch.from_numpy(q_np).cuda()
+    k = torch.from_numpy(k_np).cuda()
+    v = torch.from_numpy(v_np).cuda()
+    o = torch.zeros(M, D, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (q, k, v, o), BN=BN, BD=BD)
+    want = _attn_ref(q, k, v).half()
+    torch.testing.assert_close(o.float(), want.float(), rtol=2e-2, atol=2e-3)
+
+
+def test_gpu_attention_vs_interpreter():
+    """同一 TIR 双路径：attention 的 interpreter == GPU（翻译语义验收）。"""
+    src = (ROOT / "examples/attention.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src, {"BN": 128, "BD": 64})
+    _, launcher = _load_generated(res)
+    rng = np.random.default_rng(77)
+    m, n, d = 100, 127, 64
+    q_np = (rng.standard_normal((m, d)) * 1.5).astype(np.float16)
+    k_np = (rng.standard_normal((n, d)) * 3.0).astype(np.float16)
+    v_np = rng.standard_normal((n, d)).astype(np.float16)
+    o_interp = np.zeros((m, d), dtype=np.float16)
+    run_kernel(res.kernel, {"q": q_np, "k": k_np, "v": v_np, "o": o_interp},
+               {}, {"BN": 128, "BD": 64})
+    q = torch.from_numpy(q_np).cuda()
+    k = torch.from_numpy(k_np).cuda()
+    v = torch.from_numpy(v_np).cuda()
+    o = torch.zeros(m, d, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (q, k, v, o), BN=128, BD=64)
+    np.testing.assert_allclose(
+        o_interp.astype(np.float32), o.cpu().numpy().astype(np.float32),
+        rtol=1e-2, atol=2e-3)
+
+
+def test_gpu_attention_double_softmax_block_stays_mma():
+    """布局轨迹的 GPU 侧健全性：softmax 块两个 dot + 归约/where/除法全链
+    编译执行（H3-S/H3-C 的运行时对应物——值正确性）。"""
+    src = (ROOT / "examples/attention.tila").read_text(encoding="utf-8")
+    res = compile_kernel(src)
+    _, launcher = _load_generated(res)
+    m, n, d = 64, 64, 64
+    q = torch.randn(m, d, device="cuda").half()
+    k = torch.randn(n, d, device="cuda").half()
+    v = torch.randn(n, d, device="cuda").half()
+    o = torch.zeros(m, d, device="cuda", dtype=torch.float16)
+    _launch(res, launcher, (q, k, v, o))
+    want = _attn_ref(q, k, v).half()
+    torch.testing.assert_close(o.float(), want.float(), rtol=2e-2, atol=2e-3)

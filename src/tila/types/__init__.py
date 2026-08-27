@@ -16,18 +16,24 @@ from .dtype import (  # noqa: F401
     logic_ok,
     can_be_tensor_element,
 )
-from .layout import (  # noqa: F401
-    ROW_MAJOR,
-    BroadcastL,
-    BcastScalarL,
-    CastL,
+from .dist import (  # noqa: F401
+    NODIST,
+    Alpha,
     Identity,
-    JoinL,
-    LoadL,
+    Lift,
     Mma,
-    ProductL,
-    equiv,
-    normalize,
+    NoDist,
+    Product,
+    Seed,
+    Slice,
+    DistExpr,
+    TileDist,
+    dist_str,
+    equiv_dist,
+    lift,
+    normalize_dist,
 )
-from .shape import Const, Product, Shape, Symbol, broadcast, numel, shape_eq, shape_str  # noqa: F401
+from .shape import Const, Shape, Symbol, broadcast, numel, shape_eq, shape_str  # noqa: F401
+from .memory import MemoryLayout, ROW_MAJOR, RowMajor, Strided, strides_of  # noqa: F401
+from .join import axis_segments, is_proper_broadcast_projection  # noqa: F401
 from .type import AddressType, BufferType, ScalarType, TileType, UnitType, UNIT, type_str  # noqa: F401

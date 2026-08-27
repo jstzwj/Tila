@@ -14,7 +14,7 @@ import numpy as np
 
 from . import tir
 from .fmt import f32_round
-from .types.layout import RowMajor
+from .types.memory import RowMajor
 
 _NP: Dict[str, object] = {
     "i8": np.int8, "i16": np.int16, "i32": np.int32, "i64": np.int64,
@@ -205,6 +205,23 @@ class Interpreter:
         elif isinstance(op, tir.TZeros):
             shape = tuple(_eval_constexpr(s, constexpr_values) for s in op.shape)
             vals[op.id] = np.zeros(shape, dtype=np_dtype(op.dtype))
+        elif isinstance(op, tir.TFull):
+            shape = tuple(_eval_constexpr(s, constexpr_values) for s in op.shape)
+            vals[op.id] = np.full(shape, op.value, dtype=np_dtype(op.dtype))
+        elif isinstance(op, tir.TMaximum):
+            vals[op.id] = np.maximum(v(op.lhs), v(op.rhs))
+        elif isinstance(op, tir.TLaunchAssert):
+            # host 启动断言：interpreter 与 launcher 同判据（名字 = 符号维/
+            # constexpr，白名单求值——checker 已核验表达式合法性）
+            env = dict(scalars)
+            env.update(constexpr_values)
+            try:
+                ok = eval(op.cond, {"__builtins__": None}, env)
+            except Exception as exc:  # 名字缺失等求值期故障 → 明确运行期错误
+                raise RuntimeError(f"launch_assert could not be evaluated: "
+                                   f"{op.cond} ({exc})") from None
+            if not ok:
+                raise RuntimeError(f"launch_assert failed: {op.cond}")
         elif isinstance(op, tir.TAddPtr):
             vals[op.id] = (op.base, [v(c) for c in op.coords])
         elif isinstance(op, (tir.TArith, tir.TCmp, tir.TLogic)):
@@ -234,7 +251,8 @@ class Interpreter:
                 vals[op.id] = np.max(x, axis=op.axis).astype(d)
         elif isinstance(op, tir.TElem):
             x = np.asarray(v(op.operand))
-            fn = {"exp": np.exp, "exp2": np.exp2, "sqrt": np.sqrt, "abs": np.abs}[op.op]
+            fn = {"exp": np.exp, "exp2": np.exp2, "sqrt": np.sqrt,
+                  "abs": np.abs, "log2": np.log2}[op.op]
             vals[op.id] = fn(x).astype(np_dtype(op.tila_type.dtype))
         elif isinstance(op, tir.TWhere):
             out = np.where(np.asarray(v(op.cond)), v(op.a), v(op.b))

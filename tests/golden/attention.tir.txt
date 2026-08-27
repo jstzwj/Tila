@@ -1,0 +1,64 @@
+func @attention(q: Buffer<f16, (M,D)>, k: Buffer<f16, (N,D)>, v: Buffer<f16, (N,D)>, o: Buffer<f16, (M,D)>, M: Scalar(i32), D: Scalar(i32), N: Scalar(i32), BM: Constexpr(i32)=64, BN: Constexpr(i32)=64, BD: Constexpr(i32)=64)
+L0 = identity(64)
+L1 = lift(L0, 1)
+L2 = lift(L0, 0)
+L3 = product(L0,L0)
+L4 = mma(64,64,64)
+L5 = slice(L4, 1)
+L6 = lift(L5, 1)
+
+%pid = program_id 0 : Scalar(i32) [#pid]
+%BM = constexpr_ref BM : Scalar(i32)
+%t0 = mul %pid %BM : Scalar(i32)
+%r0 = arange 0 BM : Tile<i32, (64,), L0>
+%t1 = add %t0 %r0 : Tile<i32, (64,), L0>
+%rm2 = expand_dim %t1 1 : Tile<i32, (64,1), L1> [#rm2]
+%r1 = arange 0 BN : Tile<i32, (64,), L0>
+%rn2 = expand_dim %r1 0 : Tile<i32, (1,64), L2> [#rn2]
+%r2 = arange 0 BN : Tile<i32, (64,), L0>
+%rn3 = expand_dim %r2 1 : Tile<i32, (64,1), L1> [#rn3]
+%r3 = arange 0 BD : Tile<i32, (64,), L0>
+%rd2 = expand_dim %r3 0 : Tile<i32, (1,64), L2> [#rd2]
+%r4 = arange 0 BD : Tile<i32, (64,), L0>
+%rd3 = expand_dim %r4 1 : Tile<i32, (64,1), L1> [#rd3]
+%N = sym_ref N : Scalar(i32)
+%m_qk = lt %rn2 %N : Tile<bool, (1,64), L2> [#m_qk]
+%p0 = addptr %q [%rm2, %rd2] : Address<f16, (64,64), L3>
+%M = sym_ref M : Scalar(i32)
+%m0 = lt %rm2 %M : Tile<bool, (64,1), L1>
+%D = sym_ref D : Scalar(i32)
+%m1 = lt %rd2 %D : Tile<bool, (1,64), L2>
+%m2 = and %m0 %m1 : Tile<bool, (64,64), L3>
+%t2 = const 0.0 : Scalar(f32)
+%q2 = load %p0 mask=%m2 other=%t2 : Tile<f16, (64,64), L3> [#q2]
+%p1 = addptr %k [%rn2, %rd3] : Address<f16, (64,64), L3>
+%m3 = lt %rn2 %N : Tile<bool, (1,64), L2>
+%m4 = lt %rd3 %D : Tile<bool, (64,1), L1>
+%m5 = and %m3 %m4 : Tile<bool, (64,64), L3>
+%t3 = const 0.0 : Scalar(f32)
+%k2 = load %p1 mask=%m5 other=%t3 : Tile<f16, (64,64), L3> [#k2]
+%p2 = addptr %v [%rn3, %rd2] : Address<f16, (64,64), L3>
+%m6 = lt %rn3 %N : Tile<bool, (64,1), L1>
+%m7 = lt %rd2 %D : Tile<bool, (1,64), L2>
+%m8 = and %m6 %m7 : Tile<bool, (64,64), L3>
+%t4 = const 0.0 : Scalar(f32)
+%v2 = load %p2 mask=%m8 other=%t4 : Tile<f16, (64,64), L3> [#v2]
+%qk = dot %q2 %k2 : Tile<f32, (64,64), L4> [#qk]
+%t5 = const -inf : Scalar(f32)
+%qk_ = where %m_qk %qk %t5 : Tile<f32, (64,64), L4> [#qk_]
+%mx = max %qk_ 1 : Tile<f32, (64,), L5> [#mx]
+%mx2 = expand_dim %mx 1 : Tile<f32, (64,1), L6> [#mx2]
+%t6 = sub %qk_ %mx2 : Tile<f32, (64,64), L4>
+%p = exp %t6 : Tile<f32, (64,64), L4> [#p]
+%s = sum %p 1 : Tile<f32, (64,), L5> [#s]
+%s2 = expand_dim %s 1 : Tile<f32, (64,1), L6> [#s2]
+%w = div %p %s2 : Tile<f32, (64,64), L4> [#w]
+%t7 = cast %w f16 : Tile<f16, (64,64), L4>
+%y = dot %t7 %v2 : Tile<f32, (64,64), L4> [#y]
+%p3 = addptr %o [%rm2, %rd2] : Address<f16, (64,64), L3>
+%t8 = cast %y f16 : Tile<f16, (64,64), L4>
+%m9 = lt %rm2 %M : Tile<bool, (64,1), L1>
+%m10 = lt %rd2 %D : Tile<bool, (1,64), L2>
+%m11 = and %m9 %m10 : Tile<bool, (64,64), L3>
+store %p3 %t8 mask=%m11
+return

@@ -10,23 +10,21 @@ from .. import tir
 from ..ast import nodes as t
 from ..diagnostics import Loc, err
 from ..types import (
-    ROW_MAJOR,
     AddressType,
     BufferType,
-    CastL,
     Const,
     Identity,
-    LoadL,
     Mma,
     ScalarType,
     TileType,
     UnitType,
     numel,
-    normalize,
+    normalize_dist,
 )
 from ..types import dtype as dt
 from ..types import type_str  # noqa: F401
-from ..types.layout import Zeros
+from ..types.dist import Seed, lift
+from ..types.memory import ROW_MAJOR
 from . import broadcast as bcast
 from . import layout as lay
 
@@ -115,7 +113,7 @@ def check_load(ctx, e: t.Call):
                                              "(produced by comparisons)",
                       _type_note("mask", m_ty))
         bcast.require_same_shape(m_ty.shape, ptr_ty.shape, kw["mask"].loc, "load mask")
-        lay.require_equiv(m_ty.layout, ptr_ty.layout, kw["mask"].loc, "load mask")
+        lay.require_equiv(m_ty.dist, ptr_ty.dist, kw["mask"].loc, "load mask")
 
     other_id = None
     if "other" in kw:
@@ -134,8 +132,8 @@ def check_load(ctx, e: t.Call):
                                          f"dtype {ptr_ty.dtype}; write {want}")
         _, other_id = ctx.infer(o_expr)
 
-    origin = LoadL(ROW_MAJOR, ptr_ty.layout)
-    ty = TileType(ptr_ty.dtype, ptr_ty.shape, normalize(origin))
+    origin = ptr_ty.dist
+    ty = TileType(ptr_ty.dtype, ptr_ty.shape, normalize_dist(origin))
     return ty, ctx.emit(tir.TLoad(ctx.next_id("t"), ty, None, origin,
                                   ptr_id, mask_id, other_id)).id
 
@@ -205,8 +203,8 @@ def check_cast(ctx, loc: Loc, operand_expr: t.Expr, dtype_name: str):
         raise err(loc, "E09", "tila.cast operand must be a Tile or a Scalar",
                   _type_note("operand", x_ty))
     if isinstance(x_ty, TileType):
-        origin = x_ty.layout
-        ty = TileType(dtype_name, x_ty.shape, normalize(CastL(origin)))
+        origin = x_ty.dist
+        ty = TileType(dtype_name, x_ty.shape, normalize_dist(origin))
     else:
         ty = ScalarType(dtype_name)
     return ty, ctx.emit(tir.TCast(ctx.next_id("t"), ty, None, None, dtype_name, x_id)).id
@@ -250,11 +248,13 @@ def check_expand_dim(ctx, e: t.Call):
         raise err(axis_expr.loc, "E04",
                   f"expand_dim axis {axis} is out of range for rank {rank} "
                   f"(axis numbers the result tensor: 0..{rank})")
-    # layout 不变：长度 1 的轴，其元素分布是唯一的平凡映射——layout 代数对
-    # size-1 轴不可见（R13）。shape 与 layout 是独立字段，互不隐含。
+    # 分布（R13，评审 §13/§31）：Lift(D, axis)——新增的 size-1 轴不携带独立
+    # 分布，D 覆盖其余轴。shape 与 dist 是独立字段，互不隐含；Lift 不是
+    # shape broadcasting 的替身（shape 广播由 bcast 负责）。
     new_shape = t_ty.shape[:axis] + (Const(1),) + t_ty.shape[axis:]
-    ty = TileType(t_ty.dtype, new_shape, t_ty.layout)
-    return ty, ctx.emit(tir.TExpandDim(ctx.next_id("t"), ty, None, t_ty.layout,
+    d = lift(t_ty.dist, axis)
+    ty = TileType(t_ty.dtype, new_shape, d)
+    return ty, ctx.emit(tir.TExpandDim(ctx.next_id("t"), ty, None, t_ty.dist,
                                        t_id, axis)).id
 
 
@@ -321,39 +321,23 @@ def shape_str_of(d) -> str:
 
 
 # ---------------------------------------------------------------------------
-# R17  zeros（v0.4，docs/v0.4-kloop.md §2.1）
+# R17  zeros（v0.4，docs/v0.4-kloop.md §2.1）与 R25  full（v0.6b，
+# docs/v0.6-attention.md §2.4）——常量播种（zeros = full(…, 0, dt) 的既名缩写）
 # ---------------------------------------------------------------------------
 
 
-def check_zeros(ctx, e: t.Call):
-    """常量分布种子：Tile[dt, (Const,…), Zeros(Σ)]。
-
-    shape 项是 INT 字面量或 constexpr 名（静态量——累加器 shape 参与类型
-    等价判定）；dtype 走 DTypeRef 位置（cast 第二实参同款解析）。
-    """
-    if len(e.args) != 2:
-        raise err(e.loc, "E20", "tila.zeros takes exactly two positional arguments: "
-                                "tila.zeros((BM, BN), tila.float32)",
-                  subcode="ZerosForm")
-    shape_arg, dtype_arg = e.args
+def _static_shape(ctx, shape_arg, subcode: str):
+    """共享的静态 shape 元组解析（zeros/full 同款）：INT 字面量或 constexpr
+    名（静态量——累加器 shape 参与类型等价判定）。"""
     if not isinstance(shape_arg, t.ShapeLit):
         raise err(shape_arg.loc, "E20",
-                  "the zeros shape must be a tuple of integer literals or constexpr "
-                  "names: tila.zeros((BM, BN), tila.float32)",
-                  subcode="ZerosForm")
-    if not isinstance(dtype_arg, t.DTypeRef):
-        raise err(dtype_arg.loc, "E20", "the 2nd argument of tila.zeros must be a "
-                                        "dtype reference like tila.float32",
-                  subcode="ZerosForm")
+                  "the seed shape must be a tuple of integer literals or "
+                  "constexpr names",
+                  subcode=subcode)
     if len(shape_arg.items) >= 3:
         raise err(shape_arg.loc, "E20", "rank >= 3 is rejected "
                                         "(rank <= 2 as of the v0.2 2D preview)",
-                  subcode="ZerosForm")
-    if not dt.can_be_tensor_element(dtype_arg.name):
-        raise err(dtype_arg.loc, "E20", "bool cannot be a zeros element dtype "
-                                        "(masks come from comparisons; bool storage "
-                                        "has no use)",
-                  subcode="ZerosForm")
+                  subcode=subcode)
     shape_ce = []
     shape_ty = []
     for d in shape_arg.items:
@@ -363,15 +347,84 @@ def check_zeros(ctx, e: t.Call):
         else:  # SymDim：此处语义 = constexpr 名（静态量）
             if d.name not in ctx.env.constexprs:
                 raise err(d.loc, "E20",
-                          f"zeros shape entries must be integer literals or "
+                          f"seed shape entries must be integer literals or "
                           f"constexpr names; '{d.name}' is not a constexpr "
                           f"(accumulator shapes are static)",
-                          subcode="ZerosForm")
+                          subcode=subcode)
             shape_ce.append(d.name)
             shape_ty.append(Const(ctx.env.constexprs[d.name]))
-    ty = TileType(dtype_arg.name, tuple(shape_ty), Zeros(tuple(shape_ty)))
+    return shape_ce, tuple(shape_ty)
+
+
+def check_zeros(ctx, e: t.Call):
+    """常量分布种子：Tile[dt, (Const,…), Seed(Σ)]（评审 §38：Seed 是累加器
+    种子状态在类型层的载体，不是 DistExpr）。zeros = full(…, 0, dt)。
+    """
+    if len(e.args) != 2:
+        raise err(e.loc, "E20", "tila.zeros takes exactly two positional arguments: "
+                                "tila.zeros((BM, BN), tila.float32)",
+                  subcode="ZerosForm")
+    shape_arg, dtype_arg = e.args
+    if not isinstance(dtype_arg, t.DTypeRef):
+        raise err(dtype_arg.loc, "E20", "the 2nd argument of tila.zeros must be a "
+                                        "dtype reference like tila.float32",
+                  subcode="ZerosForm")
+    if not dt.can_be_tensor_element(dtype_arg.name):
+        raise err(dtype_arg.loc, "E20", "bool cannot be a seed element dtype "
+                                        "(masks come from comparisons; bool storage "
+                                        "has no use)",
+                  subcode="ZerosForm")
+    shape_ce, shape_ty = _static_shape(ctx, shape_arg, "ZerosForm")
+    ty = TileType(dtype_arg.name, shape_ty, Seed(shape_ty))
     return ty, ctx.emit(tir.TZeros(ctx.next_id("t"), ty, None, None,
                                    tuple(shape_ce), dtype_arg.name)).id
+
+
+def check_full(ctx, e: t.Call):
+    """R25 full（v0.6b，docs/v0.6-attention.md §2.4）：常量播种（任意值）。
+
+    形态与 zeros 同款（静态 shape 元组、rank ≤ 2、dt ≠ bool），多一个
+    value 实参：数值字面量或 SpecialValue（neg_inf 已脱糖为 FloatLit）。
+    value 按 full 的显式 dtype 语境定型（R24 语境来源 +1）：INT 字面量配
+    任何数值 dtype（full((BM,), 0, f32) 的 0 即 f32）；FLOAT 配浮点 dtype；
+    跨类别（FLOAT 配整型 dtype）→ E02。种子值属于指令（TFull.value）、
+    状态属于类型态（Seed(shape)）——seed 值规范化不变量：
+    full(…, 0, dt) ≡ zeros（同一 Seed(value=0) 状态）。
+    """
+    if len(e.args) != 3:
+        raise err(e.loc, "E20", "tila.full takes exactly three positional arguments: "
+                                "tila.full((BM,), tila.neg_inf, tila.float32)",
+                  subcode="FullForm")
+    shape_arg, value_arg, dtype_arg = e.args
+    if not isinstance(dtype_arg, t.DTypeRef):
+        raise err(dtype_arg.loc, "E20", "the 3rd argument of tila.full must be a "
+                                        "dtype reference like tila.float32",
+                  subcode="FullForm")
+    if not dt.can_be_tensor_element(dtype_arg.name):
+        raise err(dtype_arg.loc, "E20", "bool cannot be a seed element dtype "
+                                        "(masks come from comparisons; bool storage "
+                                        "has no use)",
+                  subcode="FullForm")
+    if not isinstance(value_arg, (t.IntLit, t.FloatLit)):
+        raise err(value_arg.loc, "E20",
+                  "the value of tila.full must be a numeric literal or a special "
+                  "value (e.g. tila.neg_inf)",
+                  subcode="FullForm")
+    is_float_el = dt.is_float(dtype_arg.name) or dt.is_storage_only(dtype_arg.name)
+    if isinstance(value_arg, t.FloatLit) and not is_float_el:
+        raise err(value_arg.loc, "E02",
+                  f"literal category mismatch for seed value: element dtype "
+                  f"{dtype_arg.name} is integer-kind; write an INT literal "
+                  f"(e.g. 0)")
+    shape_ce, shape_ty = _static_shape(ctx, shape_arg, "FullForm")
+    if isinstance(value_arg, t.IntLit) and is_float_el \
+            and value_arg.value == 0:
+        value = 0.0  # seed 值规范化：full(…, 0, float_dt) ≡ zeros（状态等同）
+    else:
+        value = value_arg.value
+    ty = TileType(dtype_arg.name, shape_ty, Seed(shape_ty))
+    return ty, ctx.emit(tir.TFull(ctx.next_id("t"), ty, None, None,
+                                  tuple(shape_ce), value, dtype_arg.name)).id
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +478,10 @@ def check_reduce(ctx, e: t.Call, op: str):
                                 f"{x_ty.dtype} (reductions follow the same capability "
                                 f"table as arithmetic/comparisons; fp8 is storage-only, "
                                 f"bool masks are not ordered values)")
-    out_layout = lay.marginal(x_ty.layout, x_ty.shape, axis, e.loc, f"'{op}'")
+    out_dist = lay.marginal(x_ty.dist, x_ty.shape, axis, e.loc, f"'{op}'")
     out_shape = x_ty.shape[:axis] + x_ty.shape[axis + 1:]
-    ty = TileType(x_ty.dtype, out_shape, out_layout)
-    return ty, ctx.emit(tir.TReduce(ctx.next_id("t"), ty, None, x_ty.layout,
+    ty = TileType(x_ty.dtype, out_shape, out_dist)
+    return ty, ctx.emit(tir.TReduce(ctx.next_id("t"), ty, None, x_ty.dist,
                                     op, x_id, axis)).id
 
 
@@ -451,9 +504,9 @@ def check_elem(ctx, e: t.Call, op: str):
                                 f"{x_ty.dtype} (elementwise math requires {domain} "
                                 f"element dtypes; cast to tila.float32 first if "
                                 f"intended)")
-    # 律 L8（记法 ElemL(L) ≡ L）：逐元素一元不改变分布——不物化任何新 term
-    ty = TileType(x_ty.dtype, x_ty.shape, x_ty.layout)
-    return ty, ctx.emit(tir.TElem(ctx.next_id("t"), ty, None, x_ty.layout,
+    # 律 L8（记法 ElemL(D) ≡ D）：逐元素一元不改变分布——不物化任何新 term
+    ty = TileType(x_ty.dtype, x_ty.shape, x_ty.dist)
+    return ty, ctx.emit(tir.TElem(ctx.next_id("t"), ty, None, x_ty.dist,
                                   op, x_id)).id
 
 
@@ -507,19 +560,64 @@ def check_where(ctx, e: t.Call):
                                 f"selects (element dtype {dtype}); hint: "
                                 f"tila.cast(x, tila.float16) first")
 
-    # shape / layout：三方广播 + merge_nontrivial（pairwise 折叠严格退化为
-    # R14 的 broadcast_layout；双侧非平凡 → equiv，否则 E05）；字面量侧
-    # 不携带 shape/分布，不参与折叠
-    shape = c_ty.shape
-    layout = c_ty.layout
+    # shape / dist：R-PT（v0.6，docs/v0.6-attention.md §2.2）——cond 是谓词，
+    # 不进入分布代数：只要求其 shape 与值侧结果 ⊗ 良式（可撑大结果 shape），
+    # 分布完全不参与推导。结果 dist = 值侧 merge(a, b)（pairwise
+    # join_distributions + R-BT；字面量侧不携带 shape/分布）。v0.5 的三方
+    # 归并在同族场景与值侧归并逐项一致（softmax 黄金逐字节不变）。
+    shape = layout = None
     for _, expr, ty, _ in tile_sides:
-        new_shape = bcast.require_broadcast(shape, ty.shape, expr.loc, "'where'")
-        layout = lay.broadcast_layout(layout, shape, ty.layout, ty.shape,
-                                      expr.loc, "'where'")
-        shape = new_shape
-    ty = TileType(dtype, shape, layout)
+        if shape is None:
+            shape, layout = ty.shape, ty.dist
+        else:
+            new_shape = bcast.require_broadcast(shape, ty.shape, expr.loc, "'where'")
+            layout = ctx._loose_join(layout, shape, ty.dist, ty.shape,
+                                     expr.loc, "'where'")
+            shape = new_shape
+    result_shape = bcast.require_broadcast(shape, c_ty.shape, cond_expr.loc,
+                                           "'where' cond")
+    if result_shape != shape:
+        layout = lay.grow_to_shape(layout, shape, result_shape, cond_expr.loc,
+                                   "'where'")
+    ty = TileType(dtype, result_shape, layout)
     return ty, ctx.emit(tir.TWhere(ctx.next_id("t"), ty, None, layout,
                                    c_id, sides[0][3], sides[1][3])).id
+
+
+# ---------------------------------------------------------------------------
+# R26  maximum（v0.6b，docs/v0.6-attention.md §2.5——max_axis ≠ maximum）
+# ---------------------------------------------------------------------------
+
+
+def check_maximum(ctx, e: t.Call):
+    """逐元素二元 max（值选择、保持分布）——与 `max(x, axis=k)`（轴归约 =
+    分布的边缘化）分属两个代数：capacity 同 max 归约（`'<'` 域）但 TIR
+    opcode 分立（maximum）。layout join 与二元算术完全同款（同形双侧
+    strict/E05、one-sided read_join）——无专设规则。零元 −∞ 与归约零元表
+    一致；minimum 未开放。"""
+    if len(e.args) != 2 or e.kwargs:
+        raise err(e.loc, "E13", "tila.maximum takes exactly two positional "
+                                "arguments: tila.maximum(a, b)")
+    a_expr, b_expr = e.args
+    a_ty, a_id = ctx.infer(a_expr)
+    b_ty, b_id = ctx.infer(b_expr)
+    notes = [f"lhs: {type_str(a_ty)}", f"rhs: {type_str(b_ty)}"]
+    if not (isinstance(a_ty, TileType) and isinstance(b_ty, TileType)):
+        raise err(e.loc, "E07", "tila.maximum operands must be Tiles", *notes)
+    if a_ty.dtype != b_ty.dtype:
+        raise err(e.loc, "E02", "maximum operand dtypes must match exactly",
+                  *notes, "no implicit conversion; write tila.cast first")
+    if "<" not in dt.cmp_ops(a_ty.dtype):
+        raise err(e.loc, "E16", f"maximum is not in the capability set of dtype "
+                                f"{a_ty.dtype} (value selection follows the "
+                                f"comparison table; fp8 is storage-only, bool "
+                                f"masks are not ordered values)")
+    shape = bcast.require_broadcast(a_ty.shape, b_ty.shape, e.loc, "'maximum'")
+    layout = ctx._loose_join(a_ty.dist, a_ty.shape, b_ty.dist, b_ty.shape,
+                             e.loc, "'maximum'")
+    ty = TileType(a_ty.dtype, shape, layout)
+    return ty, ctx.emit(tir.TMaximum(ctx.next_id("t"), ty, None, layout,
+                                     a_id, b_id)).id
 
 
 # ---------------------------------------------------------------------------

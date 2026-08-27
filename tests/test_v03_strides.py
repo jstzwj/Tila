@@ -302,7 +302,7 @@ def test_matmul_storage_offset_views(transposed):
 
 def test_strides_of_address_function_coefficients():
     from tila.types import Const, Symbol
-    from tila.types.layout import ROW_MAJOR, Strided, strides_of
+    from tila.types.memory import ROW_MAJOR, Strided, strides_of
     from tila.types.shape import const_shape
 
     shape = (Symbol("K"), Symbol("N"))

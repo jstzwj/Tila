@@ -7,7 +7,7 @@ import pytest
 from tila.driver import compile_kernel
 from tila.diagnostics import TilaError
 from tila.interp import run_kernel
-from tila.types import Mma, equiv
+from tila.types import Mma, equiv_dist
 
 ARGS = ("a: tila.Tensor[tila.float16, M, K], b: tila.Tensor[tila.float16, K, N], "
         "c: tila.Tensor[tila.float32, M, N]")
@@ -36,20 +36,22 @@ PRELUDE = """    pid_m = tila.program_id(0)
 # ---------------------------------------------------------------------------
 
 def test_mma_term_is_its_own_family():
-    assert equiv(Mma(64, 128, 64), Mma(64, 128, 64))
-    from tila.types import Identity, ProductL, Const
+    assert equiv_dist(Mma(64, 128, 64), Mma(64, 128, 64))
+    from tila.types import Const, Identity, Product
 
     l0 = Identity((Const(64),))
-    assert not equiv(Mma(64, 128, 64), l0)
-    assert not equiv(Mma(64, 128, 64), ProductL(l0, l0))
-    assert not equiv(Mma(64, 128, 64), Mma(64, 128, 32))
+    assert not equiv_dist(Mma(64, 128, 64), l0)
+    assert not equiv_dist(Mma(64, 128, 64), Product((l0, l0)))
+    assert not equiv_dist(Mma(64, 128, 64), Mma(64, 128, 32))
 
 
-def test_mma_normal_form_untouched_by_erasure_laws():
-    from tila.types import CastL, JoinL, normalize
+def test_mma_normal_form_untouched():
+    # v0.1 的擦除包装 term（CastL/JoinL）随 DistExpr 重构退役：Mma 原子
+    # 不再被任何 term 包装——normalize_dist 只做结构化简
+    from tila.types import normalize_dist
 
     m = Mma(64, 128, 64)
-    assert normalize(JoinL(CastL(m), m)) == m
+    assert normalize_dist(m) == m
 
 
 # ---------------------------------------------------------------------------

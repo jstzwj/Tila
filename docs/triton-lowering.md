@@ -94,6 +94,27 @@ dtype/shape 严格检查保证）。函数体内的发射结果即"每条源码�
 | `TZeros(shape,dt)` | `tl.zeros((⟨s₀⟩, …), dtype=tl.<dt>)`——shape 按 ConstExpr 渲染（名字/字面量）；单元素元组带尾逗号 `(64,)`（v0.4） |
 | `TFor(var,e,s)` | `for var in range(0, ⟨e⟩, ⟨s⟩):` + 嵌套体缩进 +4（v0.4；φ 不发射） |
 | `TPhi(pre,back)` | 不发射（Triton loop-carried 接管；种子/累加行以 src_name 同名渲染，如 `acc = acc + tl.dot(x, y)`）。**正确性映射**：`lower(LoopPhi) = Triton loop-carried assignment`——两侧不是逐字节对应而是语义等价，验收以同一 TIR 的 interpreter/GPU 差分为准（黄金只钉文本；v0.4-kloop §8.5） |
+| `TReduce(sum,t,k)` | `tl.sum(⟨t⟩, k, dtype=tl.<dt>)`——**dtype 恒显式**（Tila 语义钉死结果/累加 dtype；triton 3.7.1 有此形参，其默认策略 int<32 → i32/u32 提升不继承） |
+| `TReduce(max,t,k)` | bitwidth(dt) ≥ 32：`tl.max(⟨t⟩, k)`；否则 `tl.cast(tl.max(⟨t⟩, k), tl.<dt>)`——实测 3.7.1 对 <32 位 dtype 内部提升 f32/i32 并以提升后 dtype 返回，cast 恢复 Tila dtype（max 无舍入，无损） |
+| `TElem(op,t)` | abs：`tl.abs(⟨t⟩)`；exp/exp2/sqrt ∈ {f32,f64}：`tl.<op>(⟨t⟩)`；f16/bf16：`tl.cast(tl.<op>(tl.cast(⟨t⟩, tl.float32)), tl.<dt>)`——实测 3.7.1 数学一元只接受 fp32/fp64，f32 计算 + cast 恢复（v0.5） |
+| `TWhere(c,a,b)` | `tl.where(⟨c⟩, ⟨a⟩, ⟨b⟩)`（字面量按字面量发射；非有限值 → `float("-inf")`） |
+| `TNumPrograms(k)` | `tl.num_programs(k)`（v0.5；observational——不进 launch analysis） |
+
+**归约与数学一元的 dtype 适配（v0.5，docs/v0.5-reduce.md §4）**：Triton
+backend 是 Tila 语义的**实现**而非 Triton 默认策略的**继承者**——凡 Triton
+有 dtype 自由度或宽度限制的地方，lowering 显式适配：sum 恒传 `dtype=`（其
+默认策略 int<32 → i32/u32 不继承）；max 对窄 dtype cast 恢复（实测它以
+f32/i32 返回）；exp/exp2/sqrt 对 f16/bf16 经 f32 计算 + cast 回（实测 3.7.1
+数学一元只接受 fp32/fp64）。interpreter 两侧同款（`np.sum(..., dtype=D)` /
+`np.max + astype`——numpy 对 int<32 同样默认提升；f16 ufunc 内部升 f32 计算，
+陷阱与适配同源同款）。
+
+**布局透明规则不发射任何东西（v0.6a，docs/v0.6-attention.md §2.2/§4）**：
+marginal 分支六（`Slice`）、R-BT（one-sided 广播侧免检）、R-PT（where 谓词
+不进布局代数）都是 checker 侧的语义声明——lowering 对 `Slice`/透明合并
+**零新指令、零发射**（TIR 指令集不变；attention 与 v0.5 kernel 走同一套
+查表映射）。Triton 自行按需插入 `convert_layout`（读侧），其计数由 oracle
+第三轮 H3-C 定量入档（`layout-oracle-notes.md`）——语义层不依赖该计数。
 
 操作数字段是 TIR `%id`：查表得该 id 的**发射名**（有 src_name → 名字；匿名 → 递归内联其表达式）。`addptr` 是匿名指令的标准内联对象：`load %p0` → `tl.load(a + offs)`——表面语言的 `tila.load(a + offs)` 到 Triton 的展开点。
 

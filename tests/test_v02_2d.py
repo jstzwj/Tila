@@ -7,7 +7,7 @@ import pytest
 from tila.driver import compile_kernel
 from tila.diagnostics import TilaError
 from tila.interp import run_kernel
-from tila.types import Const, Identity, ProductL, normalize
+from tila.types import Const, Identity, Product, normalize_dist
 
 F32_2D = ("a: tila.Tensor[tila.float32, M, N], b: tila.Tensor[tila.float32, M, N], "
           "c: tila.Tensor[tila.float32, M, N]")
@@ -52,14 +52,15 @@ def test_batched_add_tir_matches_doc_walkthrough():
     assert lines[0] == ("func @batched_add(a: Buffer<f32, (M,N)>, b: Buffer<f32, (M,N)>, "
                         "c: Buffer<f32, (M,N)>, M: Scalar(i32), N: Scalar(i32), "
                         "BM: Constexpr(i32)=64, BN: Constexpr(i32)=128)")
-    assert lines[1:4] == ["L0 = identity(64)", "L1 = identity(128)",
-                          "L2 = product(L0,L1)"]
-    assert "%rows2 = expand_dim %rows 1 : Tile<i32, (64,1), L0> [#rows2]" in lines
-    assert "%cols2 = expand_dim %cols 0 : Tile<i32, (1,128), L1> [#cols2]" in lines
-    assert "%mask = and %m0 %m1 : Tile<bool, (64,128), L2> [#mask]" in lines
+    assert lines[1:5] == ["L0 = identity(64)", "L1 = identity(128)",
+                          "L2 = lift(L0, 1)", "L3 = lift(L1, 0)"]
+    assert lines[5] == "L4 = product(L0,L1)"
+    assert "%rows2 = expand_dim %rows 1 : Tile<i32, (64,1), L2> [#rows2]" in lines
+    assert "%cols2 = expand_dim %cols 0 : Tile<i32, (1,128), L3> [#cols2]" in lines
+    assert "%mask = and %m0 %m1 : Tile<bool, (64,128), L4> [#mask]" in lines
     # v0.3 坐标寻址：线性化不进 TIR，addptr 携带坐标元组（docs/v0.3-strides.md §3）
-    assert "%p0 = addptr %a [%rows2, %cols2] : Address<f32, (64,128), L2>" in lines
-    assert "%p2 = addptr %c [%rows2, %cols2] : Address<f32, (64,128), L2>" in lines
+    assert "%p0 = addptr %a [%rows2, %cols2] : Address<f32, (64,128), L4>" in lines
+    assert "%p2 = addptr %c [%rows2, %cols2] : Address<f32, (64,128), L4>" in lines
 
 
 def test_batched_add_triton_kernel_body_matches_doc():
@@ -124,10 +125,11 @@ def test_r13_non_tile_operand():
     assert ei.value.code == "E07"
 
 
-def test_r13_layout_unchanged_and_shape_inserted():
+def test_r13_dist_lifted_and_shape_inserted():
     res = _c(PRELUDE_1D + "    m = r2 < 8\n")
-    assert "Tile<i32, (64,1), L0>" in res.tir_dump
-    assert "Tile<bool, (64,1), L0>" in res.tir_dump
+    assert "Tile<i32, (64,1), L1>" in res.tir_dump
+    assert "Tile<bool, (64,1), L1>" in res.tir_dump
+    assert "L1 = lift(L0, 1)" in res.tir_dump
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +143,10 @@ def test_r14_broadcast_produces_product():
     s2 = tila.expand_dim(s, 0)
     z = r2 + s2
 """)
-    assert "L2 = product(L0,L1)" in res.tir_dump
-    assert "%z = add %r2 %s2 : Tile<i32, (64,128), L2> [#z]" in res.tir_dump
+    assert "L1 = lift(L0, 1)" in res.tir_dump
+    assert "L3 = lift(L2, 0)" in res.tir_dump
+    assert "L4 = product(L0,L2)" in res.tir_dump
+    assert "%z = add %r2 %s2 : Tile<i32, (64,128), L4> [#z]" in res.tir_dump
 
 
 def test_r14_broadcast_comparison_and_logic():
@@ -152,11 +156,11 @@ def test_r14_broadcast_comparison_and_logic():
     s2 = tila.expand_dim(s, 0)
     m = (r2 < M) & (s2 < N)
 """)
-    assert "%m = and %m0 %m1 : Tile<bool, (64,128), L2> [#m]" in res.tir_dump
+    assert "%m = and %m0 %m1 : Tile<bool, (64,128), L4> [#m]" in res.tir_dump
 
 
 def test_r14_same_shape_still_requires_equiv():
-    # 严格同形回到 v0.1 规则：两个独立 arange(64) 种子相同，L4 擦除后等价成立
+    # 严格同形走 strict_join（L5）：两个独立 arange(64) 种子相同 → 等价成立
     res = _c("""    r1 = tila.arange(0, 64)
     r2 = tila.arange(0, 64)
     z = r1 + r2
@@ -167,10 +171,10 @@ def test_r14_same_shape_still_requires_equiv():
 def test_product_l5_in_types():
     """乘 L5：Product 结构在正规形式中保持可见（诊断能说清行/列来源）。"""
     res = compile_kernel(BATCHED)
-    assert "L2 = product(L0,L1)" in res.tir_dump
+    assert "L4 = product(L0,L1)" in res.tir_dump
     # 正规形式真正分支：不再是 v0.1 的"恒为 Identity"
-    assert normalize(ProductL(Identity((Const(64),)), Identity((Const(128),)))) == \
-        ProductL(Identity((Const(64),)), Identity((Const(128),)))
+    assert normalize_dist(Product((Identity((Const(64),)), Identity((Const(128),))))) == \
+        Product((Identity((Const(64),)), Identity((Const(128),))))
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +194,8 @@ def test_batched_add_interp_matches_numpy(M, N):
 
 def test_batched_add_constexpr_specialization():
     res = compile_kernel(BATCHED, {"BM": 8, "BN": 16})
-    assert "Tile<i32, (8,1), L0>" in res.tir_dump
-    assert "Tile<f32, (8,16), L2>" in res.tir_dump
+    assert "Tile<i32, (8,1), L2>" in res.tir_dump
+    assert "Tile<f32, (8,16), L4>" in res.tir_dump
     assert "tl.arange(0, BM)" in res.triton_source  # 发射保留名字（模型 B）
     rng = np.random.default_rng(2)
     a = rng.standard_normal((19, 45)).astype(np.float32)

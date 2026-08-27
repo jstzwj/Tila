@@ -159,23 +159,61 @@ def _convert_dim(d, loc: Loc, what: str):
     raise err(_loc(d), "E12", f"{what} must be integer literals or symbol names (e.g. N)")
 
 
-def _convert_zeros_shape(a: py.Tuple) -> t.ShapeLit:
-    """zeros 的静态 shape 元组（v0.4-kloop §1.2）：INT 字面量或 constexpr 名。"""
+def _convert_zeros_shape(a: py.Tuple, name: str = "zeros") -> t.ShapeLit:
+    """zeros/full 的静态 shape 元组（v0.4-kloop §1.2；v0.6b full 同款）：
+    INT 字面量或 constexpr 名。"""
     if not a.elts:
-        raise err(_loc(a), "E20", "the zeros shape tuple must not be empty",
-                  subcode="ZerosForm")
+        raise err(_loc(a), "E20", f"the {name} shape tuple must not be empty",
+                  subcode="ZerosForm" if name == "zeros" else "FullForm")
     items = []
     for x in a.elts:
         if isinstance(x, py.Constant) and isinstance(x.value, int) \
                 and not isinstance(x.value, bool):
             items.append(t.StaticDim(_loc(x), x.value))
-        elif isinstance(x, py.Name):
+        elif isinstance(x, py.Name) and x.id not in RESERVED_NAMES:
             items.append(t.SymDim(_loc(x), x.id))
         else:
-            raise err(_loc(x), "E20", "zeros shape entries must be integer literals "
-                                      "or constexpr names (static extents only)",
-                      subcode="ZerosForm")
+            raise err(_loc(x), "E20", f"{name} shape entries must be integer "
+                                      f"literals or constexpr names",
+                      subcode="ZerosForm" if name == "zeros" else "FullForm")
     return t.ShapeLit(_loc(a), tuple(items))
+
+
+_LAUNCH_BINOPS = {py.Add: "+", py.Sub: "-", py.Mult: "*",
+                  py.FloorDiv: "//", py.Mod: "%"}
+_LAUNCH_CMPOPS = {py.Eq: "==", py.NotEq: "!="}
+
+
+def _convert_launch_cond(node: py.expr) -> t.Expr:
+    """launch_assert 的实参（v0.6b）：host 侧断言的延迟表达式——符号维名 /
+    constexpr 名 / 字面量经 `+ - * // %` 与 `== !=` 组合。其余形态 → E11。
+    checker 再做符号合法性核验（名字必须已绑定）。"""
+    loc = _loc(node)
+    if isinstance(node, py.Constant) and isinstance(node.value, int) \
+            and not isinstance(node.value, bool):
+        return t.IntLit(loc, node.value)
+    if isinstance(node, py.Name):
+        if node.id in RESERVED_NAMES:
+            raise err(loc, "E12", f"reserved name '{node.id}' cannot appear in an expression")
+        return t.NameRef(loc, node.id)
+    if isinstance(node, py.BinOp):
+        op = _LAUNCH_BINOPS.get(type(node.op))
+        if op is None:
+            raise _not_in_subset(node, f"binary operator {type(node.op).__name__} "
+                                       "in launch_assert")
+        return t.BinOp(loc, op, _convert_launch_cond(node.left),
+                       _convert_launch_cond(node.right))
+    if isinstance(node, py.Compare):
+        if len(node.ops) != 1 or len(node.comparators) != 1:
+            raise _not_in_subset(node, "chained comparison in launch_assert")
+        op = _LAUNCH_CMPOPS.get(type(node.ops[0]))
+        if op is None:
+            raise _not_in_subset(node, "comparison operator in launch_assert "
+                                       "(only == and !=)")
+        return t.BinOp(loc, op, _convert_launch_cond(node.left),
+                       _convert_launch_cond(node.comparators[0]))
+    raise _not_in_subset(node, "launch_assert operand (symbols/constexpr/literals "
+                               "combined by + - * // % and == !=)")
 
 
 def _convert_tensor_ann(ann: py.Subscript, loc: Loc) -> t.TensorAnn:
@@ -233,14 +271,20 @@ def _convert_stmt(s: py.stmt) -> t.Stmt:
         value = convert_expr(s.value)
         return t.Assign(_loc(s), s.targets[0].id, value)
     if isinstance(s, py.AugAssign):
-        # v0.4（docs/v0.4-kloop.md §1.3）：只有 '+=' 进子集——累加器的显式标记
+        # v0.4 += / v0.6b *=（docs/v0.4-kloop.md §1.3、v0.6-attention §1.4）：
+        # AccumulatorUpdate 的 Reduce/Scale 形态——累加器的显式标记
         if not isinstance(s.target, py.Name):
             raise _not_in_subset(s, "augmented assignment to a non-name target")
-        if not isinstance(s.op, py.Add):
-            raise err(_loc(s), "E20", f"only '+=' exists in the Tila v0.4 subset "
-                                      f"(accumulator update); {type(s.op).__name__} "
-                                      f"is rejected", subcode="AccumForm")
-        return t.AugAssign(_loc(s), s.target.id, convert_expr(s.value))
+        if isinstance(s.op, py.Add):
+            op = "+"
+        elif isinstance(s.op, py.Mult):
+            op = "*"
+        else:
+            raise err(_loc(s), "E20", f"only '+=' and '*=' exist in the Tila "
+                                      f"v0.6b subset (accumulator updates); "
+                                      f"{type(s.op).__name__} is rejected",
+                      subcode="AccumForm")
+        return t.AugAssign(_loc(s), op, s.target.id, convert_expr(s.value))
     if isinstance(s, py.For):
         if s.orelse:
             raise _not_in_subset(s, "for ... else")
@@ -378,11 +422,13 @@ def _convert_call(node: py.Call) -> t.Expr:
                 raise err(_loc(kw), "E13",
                           f"unknown keyword argument '{kw.arg}' (only 'mask', "
                           f"'other' and 'axis' exist)")
-    if func.attr in ("range", "zeros") and node.keywords:
-        # 先于通用 kwarg 门：range/zeros 不接受任何关键字实参（v0.4-kloop §7）
+    if func.attr in ("range", "zeros", "full") and node.keywords:
+        # 先于通用 kwarg 门：range/zeros/full 不接受任何关键字实参
+        # （v0.4-kloop §7；full 同款）
+        sub = {"range": "RangeForm", "zeros": "ZerosForm", "full": "FullForm"}
         raise err(_loc(node.keywords[0]), "E20",
                   f"tila.{func.attr} takes no keyword arguments",
-                  subcode="RangeForm" if func.attr == "range" else "ZerosForm")
+                  subcode=sub[func.attr])
     kwargs = tuple(
         (kw.arg, convert_expr(kw.value)) for kw in node.keywords
     )
@@ -403,6 +449,10 @@ def _convert_call(node: py.Call) -> t.Expr:
                     and isinstance(a.value, py.Name) and a.value.id == "tila" \
                     and a.attr in SURFACE_DTYPE_NAMES:
                 args.append(t.DTypeRef(_loc(a), SURFACE_DTYPE_NAMES[a.attr]))
+            elif name == "full" and i == 2 and isinstance(a, py.Attribute) \
+                    and isinstance(a.value, py.Name) and a.value.id == "tila" \
+                    and a.attr in SURFACE_DTYPE_NAMES:
+                args.append(t.DTypeRef(_loc(a), SURFACE_DTYPE_NAMES[a.attr]))
             elif name in ("load", "store") and i == 1 and isinstance(a, py.Tuple):
                 # v0.3 定稿：坐标元组只作为 load/store 的第 2 位置实参
                 # （tila.load(buffer, (c0, …))）；其余位置的元组一律 E11
@@ -411,9 +461,11 @@ def _convert_call(node: py.Call) -> t.Expr:
                                               "non-empty tuple of index tiles")
                 args.append(t.IndexTuple(_loc(a),
                                          tuple(convert_expr(x) for x in a.elts)))
-            elif name == "zeros" and i == 0 and isinstance(a, py.Tuple):
+            elif name in ("zeros", "full") and i == 0 and isinstance(a, py.Tuple):
                 # v0.4：静态 shape 元组——INT 字面量或 constexpr 名（§1.2）
-                args.append(_convert_zeros_shape(a))
+                args.append(_convert_zeros_shape(a, name))
+            elif name == "launch_assert" and i == 0:
+                args.append(_convert_launch_cond(a))
             else:
                 args.append(convert_expr(a, const_ctx))
         args = tuple(args)

@@ -10,8 +10,8 @@ from __future__ import annotations
 # dataflow 内建（值指令）+ program-context query（只读观测，不参与 launch 推导；
 # 分类见 language-spec §5 与 v0.5-reduce §1.4）
 INTRINSICS = ("program_id", "arange", "load", "store", "cast", "expand_dim", "dot",
-              "range", "zeros", "sum", "max", "exp", "exp2", "sqrt", "abs",
-              "where", "num_programs")
+              "range", "zeros", "full", "maximum", "sum", "max", "exp", "exp2",
+              "sqrt", "abs", "log2", "where", "num_programs", "launch_assert")
 
 # 注解 / 装饰器名（非 intrinsic，出现在特定语法位置）
 MARKER_NAMES = ("jit", "constexpr", "Tensor")

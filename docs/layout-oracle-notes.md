@@ -113,3 +113,134 @@ python tools/dump_triton_layout.py --all --out build/oracle/
 %x_5 = tt.load %x_4, %mask_3 : tensor<128x!tt.ptr<f32>, #blocked>
 %z = arith.addf %x_5, %y_7 : tensor<128xf32, #blocked>
 ```
+
+---
+
+## 第二轮：归约的边缘化观测（H2 假说检验，v0.5-reduce §8.1）
+
+日期：2026-08-24。工具：`tools/oracle_round2_reduce.py`
+（`scripts\run_oracle_round2.bat`）。实验域（评审强化矩阵）：
+op ∈ {sum, max} × axis ∈ {0, 1} × num_warps ∈ {1, 2, 4, 8} × dtype ∈
+{fp16, fp32}，2D tile (64, 128)，triton-windows 3.7.1 / TITAN Xp（SM 6.1），
+共 32 组，产物落 `build/oracle_round2/`。
+
+**问题（H2，v0.5-reduce §2.6）**：Tila 声称 Product(L0,L1) --reduce_k-->
+L_(1-k)（幸存轴保留自身分布）。Triton 的 `tl.sum/tl.max` 结果 encoding
+是否与之相容？强形式 = 结果 encoding 与独立构造的幸存轴 1D tile
+（`tl.arange(0, L)`）同族；弱形式 = 不同族但单次 `convert_layout` 到达。
+
+### 观测（32/32 组一致）
+
+1. **reduce 结果 encoding 恒为输入分布的切片**：
+
+   ```
+   %s = "tt.reduce"(%x) <{axis = 1}> (…) : (tensor<64x128xf32, #blocked>)
+                                    -> tensor<64xf32, #ttg.slice<{dim = 1, parent = #blocked}>>
+   ```
+
+   axis=0 时 `dim = 0`。不是独立 1D 构造的 blocked 族——**强形式证伪**。
+
+2. **`expand_dims(slice, k)` 直接返回 parent**：
+
+   ```
+   %s2 = tt.expand_dims %s {axis = 1} : tensor<64xf32, #ttg.slice<…>>
+                                    -> tensor<64x1xf32, #blocked>
+   ```
+
+   L9（expand_k(marginal_k(L)) ≡ L，v0.5-reduce §2.6 的 intended law）在
+   TTGIR 层被逐字实现——"边缘化取因子、升维还原因子"是恒等往返。
+
+3. **softmax 形状轨迹 0 次 convert_layout**（全部 32 组）：load → reduce →
+   expand → 逐元素乘 → store 全链无分布转换。归约结果的 slice 布局在
+   轨迹内天然可用——**弱形式成立且升级为零转换**。
+
+4. **结果与"新鲜"幸存轴 tile 相遇时按需单次转换**：reduce kernel 中唯一
+   的 `convert_layout` 位于 1D store（`slice → #blocked1` 与 1D 指针
+   arange 对齐）。Tila 语义层判等（结果 = L0）与 concrete 按需转换相容。
+
+### 判定与含义
+
+- **H2 = 强形式证伪、弱形式成立（0-convert 轨迹）**——与 H1 的结局模式
+  同构：家族级（语义级）成立、具体 encoding 强形式不成立。
+- 证伪的方式比预期更有利：slice-of-parent 就是"幸存轴继承其在复合分布中
+  的位置"的字面具体化——Tila 的 Product-因子语义声明是它的语义影子，
+  marginal 规则按原样实现（不降级为"语义声明 + 显式 convert 层"）。
+- dtype 观测（附带，v0.5-reduce §4 的依据）：`tl.sum` 有 `dtype` 形参且
+  默认把 int<32 提升为 i32/u32 返回；`tl.max` 无 `dtype` 形参，对一切
+  <32 位 dtype（f16/bf16/i8/i16）内部提升 f32/i32 **并以提升后 dtype
+  返回**。Tila 的"结果 dtype = 输入 dtype"由 lowering 显式适配（sum 恒
+  传 `dtype=`；max 对 <32 位 cast 恢复）。
+
+### 复现
+
+```
+scripts\run_oracle_round2.bat           # 或 python tools\oracle_round2_reduce.py
+type build\oracle_round2\A_sum_axis1_w4_fp32.mlir    # reduce 结果 slice 布局
+```
+
+---
+
+## 第三轮：Mma 边缘化与 attention 轨迹（H3-S/H3-C 假说检验，v0.6-attention §2.7/§8.1）
+
+日期：2026-08-24。工具：`tools/oracle_round3_attention.py`
+（`scripts\run_oracle_round3.bat`）。实验域：kernel {A,B,C,D} × 形状
+(BM,BN,D) ∈ {(64,64,64),(64,128,64),(128,64,64)} × num_warps {1,4}
+（f16 入 / f32 累加），triton-windows 3.7.1 / TITAN Xp（SM 6.1），共 6 组，
+产物落 `build/oracle_round3/`。
+
+**问题（H3，判据分离——评审 §9/§10 采纳）**：Tila 声称 marginal(Mma, k) =
+Slice(Mma, k)（分支六）+ 读透明四规则（R-BT/R-PT）。拆两个独立判据：
+H3-S（语义）= reduce-over-dot 结果 encoding 与亲代切片同构、expand 还原
+亲代、跨矩阵稳定；H3-C（代价）= attention 正则轨迹在 dot 操作数入场之外
+的 convert 计数 ≤ 4/kernel（convert 计数不判语义生死，只判桥接质量）。
+
+四个 kernel（docs/v0.6-attention.md §1.1/§1.2 的逐行同构）：A reduce-over-dot
+（dot → tl.max(·,1) → store 1D）；B expand-join（A + expand → `qk * s2` →
+store 2D）；C fragment 全轨迹（where(-inf) → max → exp → sum → div →
+cast → 第二 dot → store）；D flash body（for n0 循环内 maximum/α 重定标
+`acc *= α₂`、`acc += dot(p,v)`，循环外终归一化除法）。
+
+### 观测（6/6 组一致）
+
+1. **H3-S 逐字成立**：reduce 结果 encoding 恒为亲代切片——
+   `tt.dot … -> tensor<64x64xf32, #blocked2>` 的 max 结果 =
+   `#ttg.slice<{dim = 1, parent = #blocked2}>`（axis=0 时 dim=0）；
+   `tt.expand_dims %s {axis=1}` 直接返回亲代 `#blocked3`。与 H2（Product
+   输入）的结构完全同构——`Slice(Mma,k)` 的 provenance 语义声明是
+   TTGIR 层行为的语义影子。
+2. **H3-C strong**：converts(A/B/C/D) = 1/1/1/1（bn128 组 D=3），而各
+   kernel 均含 2 个 dot（本机基线 = 每 dot 1 次操作数入场，H1 实测）——
+   **入场之外 0–1 次额外**：C（attention fragment 全轨迹：where-cond 跨
+   族、exp/sum、(BM,1) 广播除法、第二次 dot）与 D（跨 Mma rescale、
+   终归一化除法、maximum 链、循环携带）的全部"读透明位点"合计 ≤ 1 次
+   convert，远低于 C_max=4。
+3. **附带核实**：`tl.full((BM,), float("-inf"), dtype=tl.float32)` 编译
+   通过（flash 的 max 种子发射事实）；`tl.maximum` 以 `arith.maxnumf`
+   落地、同 dtype 进出无提升。
+
+### 判定与含义
+
+- **H3-S pass + H3-C strong = 完美档**（§2.7 决策表）：分支六与读透明
+  规则按设计实现，不降级；attention 的值级正确性由 GPU 差分独立验收
+  （`tests/test_gpu_integration.py`，11 项含极值数据）。
+- 与 H1/H2 的结局**不同且更好**：H1/H2 均为"强形式证伪、家族级成立"，
+  H3 的结构声明（切片/还原）与代价声明（有界）**双双原样成立**——因为
+  分支六从一开始就按 provenance（而非独立等价物）措辞，语义声明与
+  concrete 行为之间的缝隙在 H3 为零。
+- **SM 6.1 限定沿用**：本机 dot 以 FMA 下探（blocked 族 encoding）；结构
+  结论（切片/还原/计数）按 encoding 无关设计，mma_layout 的 encoding 级
+  复核待 TC 机器（与 H1 同款挂起项）。实验期记录：初始矩阵第三组
+  (128,128,64) 的 D kernel（双 128 维 dot 循环）在本机编译超 1 小时未
+  完成，换 (128,64,64) 覆盖 BM=128 方向；BM=BN=128 的值级正确性由 GPU
+  差分覆盖。
+- 实现期解析修正两处（工具 bug，非实验结论变化）：layout 定义行键名
+  双井号（resolve 空转，靠名字相等侥幸判对 A）；expand 选择须匹配
+  reduce 结果类型（排除先于 reduce 的坐标 expand_dims）。
+
+### 复现
+
+```
+scripts\run_oracle_round3.bat           # 或 python tools\oracle_round3_attention.py
+type build\oracle_round3\A_bm64_bn64_d64_w4.mlir    # reduce 结果 slice 布局
+type build\oracle_round3\summary.json
+```

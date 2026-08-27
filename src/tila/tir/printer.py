@@ -1,7 +1,7 @@
 """TIR canonical dump（docs/ast.md §5）。输出是黄金测试的比对物，格式必须确定。
 
 规则：token 间以单个空格分隔；指令形如 `%id = opcode operand* : type [#src_name]`；
-语句级指令（store/return）无 id 无类型；layout 打印正规形式，相同正规形式按首次
+语句级指令（store/return）无 id 无类型；dist 打印正规形式，相同正规形式按首次
 出现顺序命名 L0, L1, …，dump 首部列印 `L0 = identity(128)` 定义行。
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ..fmt import fmt_float
 from ..types import AddressType, TileType, type_str
-from ..types.layout import Identity, ProductL, BroadcastL
+from ..types.dist import Identity, Lift, Mma, Product, Seed, Slice, dist_str
 from . import ops
 
 _ARITH_OPCODE = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
@@ -17,24 +17,30 @@ _CMP_OPCODE = {"<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "
 _LOGIC_OPCODE = {"&": "and", "|": "or"}
 
 
-class LayoutNamer:
-    """正规形式 layout → L0/L1/…（首次出现顺序；子项先于复合项命名）。"""
+def _fmt_value(v) -> str:
+    if isinstance(v, int):
+        return str(v)
+    return fmt_float(v)
+
+
+class DistNamer:
+    """正规形式 dist → L0/L1/…（首次出现顺序；子项先于复合项命名）。"""
 
     def __init__(self):
         self._names = {}
 
     def register_type(self, t) -> None:
         if isinstance(t, (TileType, AddressType)):
-            self._register(t.layout)
+            self._register(t.dist)
 
     def _register(self, term) -> None:
         if term in self._names:
             return
-        if isinstance(term, ProductL):
-            self._register(term.lhs)
-            self._register(term.rhs)
-        elif isinstance(term, BroadcastL):
-            self._register(term.of)
+        if isinstance(term, Product):
+            for c in term.components:
+                self._register(c)
+        elif isinstance(term, (Lift, Slice)):
+            self._register(term.of if isinstance(term, Lift) else term.parent)
         self._names.setdefault(term, f"L{len(self._names)}")
 
     def name_of(self, term):
@@ -42,12 +48,10 @@ class LayoutNamer:
 
     def definitions(self):
         """按命名顺序返回 `L0 = identity(128)` 定义行（顶层项打印本体，子项打印名字）。"""
-        from ..types.layout import layout_str
-
         lines = []
         for term, name in self._names.items():
             sub = lambda t: None if t is term else self.name_of(t)  # noqa: E731
-            lines.append(f"{name} = {layout_str(term, sub)}")
+            lines.append(f"{name} = {dist_str(term, sub)}")
         return lines
 
 
@@ -61,7 +65,7 @@ def _params_str(kernel: ops.TKernel) -> str:
     return ", ".join(parts)
 
 
-def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
+def _op_line(op: ops.TOp, namer: DistNamer) -> str:
     toks = []
     if op.id is not None:
         toks.append(f"%{op.id} =")
@@ -105,6 +109,13 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
     elif isinstance(op, ops.TZeros):
         shape = "(" + ", ".join(ops.constexpr_str(s) for s in op.shape) + ")"
         toks += ["zeros", shape, op.dtype]
+    elif isinstance(op, ops.TFull):
+        shape = "(" + ", ".join(ops.constexpr_str(s) for s in op.shape) + ")"
+        toks += ["full", shape, _fmt_value(op.value), op.dtype]
+    elif isinstance(op, ops.TMaximum):
+        toks += ["maximum", f"%{op.lhs}", f"%{op.rhs}"]
+    elif isinstance(op, ops.TLaunchAssert):
+        toks += ["launch_assert", op.cond]
     elif isinstance(op, ops.TReduce):
         toks += [op.op, f"%{op.tile}", str(op.axis)]
     elif isinstance(op, ops.TElem):
@@ -131,7 +142,7 @@ def _op_line(op: ops.TOp, namer: LayoutNamer) -> str:
     return " ".join(toks)
 
 
-def _for_header(op: ops.TFor, namer: LayoutNamer) -> str:
+def _for_header(op: ops.TFor, namer: DistNamer) -> str:
     """`%k0 = for 0 %K BK : Scalar(i32) [#k0]`（start 隐含字面量 0）。"""
     toks = [f"%{op.id} =", "for", "0", f"%{op.end}", ops.constexpr_str(op.step)]
     if op.tila_type is not None:
@@ -141,7 +152,7 @@ def _for_header(op: ops.TFor, namer: LayoutNamer) -> str:
     return " ".join(toks)
 
 
-def _walk(ops_seq, namer: LayoutNamer, depth: int, out: list) -> None:
+def _walk(ops_seq, namer: DistNamer, depth: int, out: list) -> None:
     """平铺指令行；TFor 的 body 递归缩进 2 空格（v0.4-kloop §3）。"""
     pad = "  " * depth
     for op in ops_seq:
@@ -152,7 +163,7 @@ def _walk(ops_seq, namer: LayoutNamer, depth: int, out: list) -> None:
             out.append(pad + _op_line(op, namer))
 
 
-def _register_ops(ops_seq, namer: LayoutNamer) -> None:
+def _register_ops(ops_seq, namer: DistNamer) -> None:
     for op in ops_seq:
         if op.tila_type is not None:
             namer.register_type(op.tila_type)
@@ -162,7 +173,7 @@ def _register_ops(ops_seq, namer: LayoutNamer) -> None:
 
 def dump(kernel: ops.TKernel) -> str:
     """canonical dump（单空格分隔、LF、恰一个尾换行）。"""
-    namer = LayoutNamer()
+    namer = DistNamer()
     _register_ops(kernel.ops, namer)
 
     lines = [f"func @{kernel.name}({_params_str(kernel)})"]

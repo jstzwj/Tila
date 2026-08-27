@@ -253,7 +253,7 @@ def test_invariant_store_ptr_is_addptr_and_base_is_buffer():
 
 
 def test_invariant_anonymous_used_once_and_layout_normal():
-    from tila.types import normalize
+    from tila.types import normalize_dist as normalize
 
     res = compile_kernel(open("examples/add.tila", encoding="utf-8").read())
     uses = {}
@@ -263,9 +263,9 @@ def test_invariant_anonymous_used_once_and_layout_normal():
     for op in _ops(res):
         if op.src_name is None and not isinstance(op, (tir.TSymRef, tir.TConstParamRef)):
             assert uses.get(op.id, 0) == 1, f"匿名值 {op.id} 使用次数 != 1"
-        if op.tila_type is not None and hasattr(op.tila_type, "layout"):
-            assert normalize(op.tila_type.layout) == op.tila_type.layout, \
-                "TIR 类型中的 layout 必须已是正规形式"
+        if op.tila_type is not None and hasattr(op.tila_type, "dist"):
+            assert normalize(op.tila_type.dist) == op.tila_type.dist, \
+                "TIR 类型中的 dist 必须已是正规形式"
 
 
 def test_alias_assignment_shares_id():

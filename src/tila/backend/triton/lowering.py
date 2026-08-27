@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from ... import tir
-from ...types.layout import Strided
+from ...types.memory import Strided
 from .printer import OpRenderer
 
 
@@ -86,6 +86,12 @@ def _launcher(kernel: tir.TKernel) -> list:
         mem_conds.append(f"({p.name}.numel() == 0 or ({' and '.join(inner)}))")
     if mem_conds:
         lines.append(f"    assert {' and '.join(mem_conds)}")
+
+    # host 启动断言（v0.6b：launch_assert；条件由 checker 核验的延迟表达式，
+    # 名字 = 符号维/constexpr——launcher 作用域内已绑定）
+    for op in kernel.ops:
+        if isinstance(op, tir.TLaunchAssert):
+            lines.append(f"    assert {op.cond}")
 
     # grid（来自 launch_plan；lowering 只发射不推导）
     if plan.axes:

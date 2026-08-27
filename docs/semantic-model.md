@@ -170,6 +170,83 @@ dtype : tila.<dt₂>（DTypeRef）
 
 数值 dtype 之间任意互转（cast 矩阵全开，含 bool 与 FP8 两个端点；FP8 作为 cast 的源与目标都合法，限制只在算术侧）。语义 ≡ Triton `.to(dtype)`。**隐式转换不存在**——一切跨 dtype 都必须显式 cast，这既是静态可判性的来源也是诊断建议的标准答案（`use tila.cast(rhs, tila.float32)`）。
 
+### 5.7 v0.5：归约 sum / max（R20，`docs/v0.5-reduce.md` §2.1）
+
+```
+x    : Tile[dt, (d₀, d₁), L]     rank-2、dtype 具备对应能力（sum→'+'，max→'<'）
+axis ∈ {0, 1}
+─── tila.sum(x, axis=k) / tila.max(x, axis=k) : Tile[dt, (d_{1-k}), marginal(L, Σ, k)]
+```
+
+- **归约 = 分布的边缘化**：被归约轴积分掉，幸存轴保留自身分布（marginal
+  构造规则；非 Product 双非平凡轴 → E21——语义层未定义）。这是第一个
+  **分布销毁型**运算。
+- **结果 dtype = 输入 dtype，无隐式提升（Tila 语义合同）**：累加精度 =
+  结果 dtype（f16 行和就是 f16 累加——要 f32 累加先显式 cast，与整数
+  回环同权）。Triton 侧的默认提升（`tl.sum` 对 int<32 提升 i32/u32、
+  `tl.max` 对 <32 位一律以 f32/i32 返回——3.7.1 实测）由 lowering 显式
+  抵消：sum 恒传 `dtype=`，max 对窄 dtype cast 恢复。
+- **归约零元表**（Reduction identities）：sum→`0`（v0.4 `zeros` 种子是它
+  的物化）、max→`−∞`（`tila.neg_inf`）、min→`+∞`、prod→`1`（后两者
+  未开放，零元先入表——跨迭代 running 归约需要非 zeros 种子，v0.6）。
+
+### 5.8 v0.5：一元数学族 exp / exp2 / sqrt / abs（R21）
+
+逐元素映射：`Tile[dt, Σ, L] → Tile[dt, Σ, L]`（律 L8 记法——分布保序，
+不物化 term）。能力表：exp/exp2/sqrt → float 域；abs → int+float 双域
+（fp8/bool → E16）。语义 ≡ `tl.exp/tl.exp2/tl.sqrt/tl.abs`（interpreter
+对应 `np.exp/np.exp2/np.sqrt/np.abs`，dtype 钉死）。
+
+### 5.9 v0.5：where（R22）——select 形态的条件值
+
+```
+result_i = c_i ? a_i : b_i        （逐元素值选择）
+```
+
+**非严格语义**：只规定选中值，**不规定未选分支是否求值**——`0/0 → NaN`
+等未选侧现象不可依赖，backend 可自由优化（select/cmov/分支均可）；
+interpreter 的 `np.errstate(all="ignore")` 对应"浮点异常不可观察"。
+a/b 为 Tile 或字面量/`tila.neg_inf`（语境定型 R24）；三方广播 +
+merge_nontrivial（双侧非平凡 → equiv，否则 E05）。
+
+### 5.10 v0.5：num_programs（R23）——program-context query
+
+**observational**（正式语义句）：`num_programs` 观测 launch 配置、**永不
+参与 launch 推断**（不产生 E17、不改变 grid 判定）；grid 只由 `program_id`
+的 tiling 惯用法推导。对未被 `program_id` 建立的轴返回实际 launch 值
+（Triton 对未发射维补 1）。与 `program_id` 同属 program-context query 类
+内建——执行上下文查询，不是 dataflow 操作。
+
+### 5.11 v0.5：tila.neg_inf 与语境字面量（R24）
+
+`tila.neg_inf`：裸常量属性（非调用、非字面量语法扩展），语义 = 最小可
+表示浮点值（−∞）；语境定型同浮点字面量（float 族期望 → 该 dtype，独立
+出现 → f32）。它是 max 的归约零元与掩码 max 惯用语的正确哨兵（有限哨兵
+如 −1e30 对 f32 合法输入会污染 max，已在 v0.5-reduce §1.6 拒绝表）。
+**语境字面量定型**：字面量在期望 dtype 已知的语境中按该 dtype 参与运算
+（同域限定——跨域仍是 E02）；实现载体为弱标量（int → i32、float → f32）
++ 语境消费点类别检查，无 f64 中间态、无隐式收窄步骤。
+
+### 5.12 v0.6a：attention fragment 的合同（`docs/v0.6-attention.md` §1.1）
+
+`softmax(QK^T)·V` 单 tile（`examples/attention.tila`）：Mma 归约 =
+marginal 分支六（`Slice`）；where 谓词与 one-sided 广播按读透明合并
+（R-PT/R-BT）。语义合同四句：
+
+- **数值卫生**：`qk_ − mx ≤ 0` 恒成立（max-减法后 exp 无上溢，≤1）；
+  N ≥ 1 时每行至少一个有效列 → mx > −∞ → 掩码列 `exp(−∞ − mx) = 0`
+  天然不进 sum（无需第二个 where）；分母 s ≥ exp(mx − mx) = 1（无除零）。
+- **非活跃行**：i ≥ M 的行（load 补零 → qk = 0 → softmax 值无意义）是
+  **semantically arbitrary——所有 store 被掩码**；不承诺 M 外的行满足
+  softmax 恒等式。
+- **包络**：M 任意（grid 轴 0）；N ≤ BN（softmax 行耦合，N 不可跨
+  program 切分——N > BN 属 v0.6b online softmax）；D ≤ BD（收缩维补零
+  安全：0·0 = 0）；BM/BN/BD ≥ 16（R16）。block 组合受目标 SM 共享内存
+  约束（与手写 Triton 同款）。
+- **k 的坐标转置**：`load(k, (rn2, rd3))` 直接产生 (BD, BN) 的 kᵀ 视图
+  ——坐标可表达性原则（`docs/v0.6-attention.md` §1.5：数据访问语义可由
+  既有坐标语义表达时不新增原语）。
+
 ---
 
 ## 6. constexpr 模型

@@ -115,8 +115,12 @@ range_call     ::= "tila" "." "range" "(" "0" "," expr "," const_expr ")"
 
 call           ::= "tila" "." IDENT "(" [arg_list] ")"     # IDENT ∈ INTRINSICS（表外 E13）
 arg_list       ::= expr ("," expr)* ["," kwarg ("," kwarg)*]
-kwarg          ::= "mask" "=" expr | "other" "=" expr
+kwarg          ::= "mask" "=" expr | "other" "=" expr | "axis" "=" expr
+                                                # v0.5：axis 仅 sum/max 的归约轴
 cast           ::= "tila" "." "cast" "(" expr "," dtype_ref ")"
+neg_inf        ::= "tila" "." "neg_inf"        # v0.5：裸常量属性（非调用，调用 → E13）；
+                                                # max 的归约零元 / 掩码 max 哨兵；
+                                                # 语境定型同浮点字面量（R24）
 ```
 
 优先级（低→高）：`|` < `&` < 比较 < `+ -` < `* /` < 原子。与 Python 一致（因此 mask 合取需要括号：`(rows2 < M) & (cols2 < N)`）。
@@ -135,13 +139,22 @@ v0.1 没有用户函数。全部可调用对象：
 |---|---|---|---|---|---|
 | `program_id` | `tila.program_id(c)` | `c` 为字面量/constexpr 折叠值 ∈ {0}（v0.1；v0.2 预览扩至 {0,1}） | `Scalar(i32)` | R1 | `tl.program_id(c)` |
 | `arange` | `tila.arange(0, c₂)` | `c₁ = 0`（字面量）；`c₂` 为编译期常量表达式且特化值 = 2^k（1 ≤ k ≤ 20） | `Tile[i32, (c₂ᵛ,), …]`（取 build 期特化值） | R2 | `tl.arange(0, c₂)`（保留名字） |
-| `load` | `tila.load(buf, coords, mask=?, other=?)` | R8（§合同见语义模型 §5.3）：`buf` 为 Buffer、`coords` 为坐标元组（每轴一个 i32 tile，长度 = rank；v0.3，`docs/v0.3-strides.md` §1.2）、mask/layout 等价、`other` 为类别匹配字面量且必须与 mask 同时给出 | `Tile[dt, Σ, L]` | R8 | `tl.load(<buf + 线性化>, mask=…, other=…)` |
+| `load` | `tila.load(buf, coords, mask=?, other=?)` | R8（§合同见语义模型 §5.3）：`buf` 为 Buffer、`coords` 为坐标元组（每轴一个 i32 tile，长度 = rank；v0.3，`docs/v0.3-strides.md` §1.2）、mask/dist 等价、`other` 为类别匹配字面量且必须与 mask 同时给出 | `Tile[dt, Σ, D]`（load 保序） | R8 | `tl.load(<buf + 线性化>, mask=…, other=…)` |
 | `store` | `tila.store(buf, coords, value, mask=?)` | R9：dtype **严格相等**、shape 相等、layout 等价（R9' 放宽） | `()` | R9 | `tl.store(<buf + 线性化>, <v>, mask=…)` |
 | `cast` | `tila.cast(x, dt)` | R11：x 为 Tile 或 Scalar，dt 为 dtype_ref（17 种任意） | `Tile[dt', Σ, L]` / `Scalar[dt']` | R11 | `<x>.to(tl.<dt>)` |
 | `expand_dim` | `tila.expand_dim(t, axis)` | R13（v0.2 预览）：axis 编号结果张量轴 | `Tile[dt, Σ+1, L]` | R13 | `tl.expand_dims(<t>, axis)` |
 | `dot` | `tila.dot(x, y)` | R16（v0.2 fragment）：rank-2、收缩维相等、dtype ∈ {f16,bf16}、各维 ≥ 16 | `Tile[f32, (M,N), Mma]` | R16 | `tl.dot(<x>, <y>)` |
-| `zeros` | `tila.zeros(shape, dt)` | R17（v0.4）：shape 为静态元组（INT/constexpr 名，rank ≤ 2）、dt ≠ bool | `Tile[dt, Σ, Zeros(Σ)]` | R17 | `tl.zeros(<shape>, dtype=tl.<dt>)` |
+| `zeros` | `tila.zeros(shape, dt)` | R17（v0.4）：shape 为静态元组（INT/constexpr 名，rank ≤ 2）、dt ≠ bool | `Tile[dt, Σ, Seed(Σ)]`（v0.6a 更名自 Zeros） | R17 | `tl.zeros(<shape>, dtype=tl.<dt>)` |
 | `range` | `for k in tila.range(0, e, s):` | R18（v0.4）：仅 for 的 iterable 位置（其它位置 E20）；start 恒 0、e 为 i32 标量、s 为 ConstExpr ≥ 1 | 绑定 `k : Scalar(i32)` | R18 | `for k in range(0, <e>, <s>):` |
+| `sum` / `max` | `tila.sum(t, k)` / `tila.max(t, axis=k)` | R20（v0.5）：t 为 rank-2 Tile、k ∈ {0,1}（字面量/constexpr）；dtype 能力 sum→`+`、max→`<`；归约 = 分布的边缘化（Mma → Slice，分支六） | `Tile[dt, Σ∖k, marginal(D, Σ, k)]` | R20 | `tl.sum(<t>, k, dtype=tl.<dt>)`；max 对 <32 位 dtype `tl.cast(tl.max(<t>, k), tl.<dt>)` |
+| `exp` / `exp2` / `sqrt` / `abs` | `tila.exp(t)` … | R21（v0.5）：exp 族 float-only、abs int+float（UNARY 能力表，E16） | `Tile[dt, Σ, L]`（L8 记法保序） | R21 | `tl.exp(<t>)` / `tl.exp2` / `tl.sqrt` / `tl.abs` |
+| `where` | `tila.where(c, a, b)` | R22（v0.5）：c 为 Tile[bool]；a/b 为 Tile 或字面量/neg_inf（不得同为字面量）；三方广播 E03、merge 双侧非平凡 E05；语义非严格 | `Tile[dt, Σ, merge(…)>` | R22 | `tl.where(<c>, <a>, <b>)` |
+| `num_programs` | `tila.num_programs(c)` | R23（v0.5）：c ∈ {0,1}（字面量/constexpr）；**observational**——只读观测，不参与 launch 推导 | `Scalar(i32)` | R23 | `tl.num_programs(c)` |
+
+**内建分类**（v0.5 起，评审 §22）：`program_id` / `num_programs` 是
+**program-context query**（执行上下文查询，不是 dataflow 操作）；其余为
+dataflow 内建（值指令）。裸常量 `tila.neg_inf` 同属 `tila` 命名空间的合法
+表面名字（CONSTANT_NAMES；非调用）。
 
 运算符（作用于 Tile/Scalar 的二进制运算）：`+ - * / < <= > >= == != & |`。dtype 能力表见 `type-system.md` §1.1：bool 只能 `== != & |`；整数 `+ - *` 与全部比较；浮点另加 `/`；FP8 一切算术与比较 → E16。
 
@@ -220,3 +233,7 @@ launcher 模板与 grid 推导规则见 `triton-lowering.md` §7；launch analys
 - 规范内最大合法程序：`examples/add.tila`。
 - 期望 lowering 产物：`examples/add.lowered.py`（带注释的参考版；字节级黄金文件见 `triton-lowering.md` §9）。
 - 非法程序集（每个诊断码一个最小复现）：见 `type-checker.md` §9。
+- 里程碑参考程序：`examples/softmax.tila`（v0.5 归约/where/neg_inf）、
+  `examples/attention.tila`（v0.6a Mma 归约分支六/R-PT/R-BT——**零新表面
+  原语**：attention fragment 在 v0.5 文法内完整可写，v0.6a 的全部改动是
+  checker 侧的两条裁定与一条新布局 term；详见 `docs/v0.6-attention.md`）。

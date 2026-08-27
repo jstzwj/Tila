@@ -14,10 +14,11 @@ EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 GOLDEN = Path(__file__).resolve().parent / "golden"
 
 # add 的黄金内容取自规范文档；fp8_add / saxpy / masked_add / batched_add /
-# matmul 为经与文档走查人工核对后的快照；matmul_loop（v0.4 K-loop）与
-# softmax（v0.5 归约/where/neg_inf）同人工核对
+# matmul 为经与文档走查人工核对后的快照；matmul_loop（v0.4 K-loop）、
+# softmax（v0.5 归约/where/neg_inf）、attention（v0.6a 分支六/R-PT/R-BT）
+# 同人工核对
 PROGRAMS = ["add", "fp8_add", "saxpy", "masked_add", "batched_add", "matmul",
-            "matmul_loop", "softmax"]
+            "matmul_loop", "softmax", "attention"]
 
 
 def _compile(name: str, overrides=None):

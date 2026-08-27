@@ -1,6 +1,7 @@
 """v0.4 K 循环与累加器（docs/v0.4-kloop.md）：R17 zeros / R18 range / R19 累加
-与 φ、L7 join 单位元律、E20 矩阵（subcode）、作用域三围栏、任意 K 的
-interpreter 差分（含 K=0 零迭代、非连续 b、多段累加）——最后一批是验收主场。"""
+与 φ、Seed 状态载体（评审 §38：种子物化是 checker 状态机而非纯层律）、
+E20 矩阵（subcode）、作用域三围栏、任意 K 的 interpreter 差分（含 K=0
+零迭代、非连续 b、多段累加）——最后一批是验收主场。"""
 
 import numpy as np
 import pytest
@@ -8,8 +9,7 @@ import pytest
 from tila.driver import compile_kernel
 from tila.diagnostics import TilaError
 from tila.interp import run_kernel
-from tila.types import JoinL
-from tila.types.layout import Identity, Mma, Zeros, equiv, normalize
+from tila.types.dist import Identity, Mma, Seed, equiv_dist, normalize_dist
 from tila.types.shape import Const
 
 MATMUL_LOOP = open("examples/matmul_loop.tila", encoding="utf-8").read()
@@ -37,30 +37,29 @@ def _expect(body, params="", subcode=None, code="E20", overrides=None):
 
 
 # ---------------------------------------------------------------------------
-# L7：join 的单位元（layout 代数单元）
+# Seed：累加器种子状态载体（评审 §38——种子物化 = checker 状态机，
+# 不再是旧 L7 的"join 单位元"纯层律）
 # ---------------------------------------------------------------------------
 
-def test_l7_join_neutral_mma():
-    z = Zeros((Const(64), Const(128)))
+def test_seed_join_neutral_is_checker_behavior():
+    # "Seed(Σ) + Tile[D] → Materialized(D)" 由 check_augassign 实现
+    # （test_e20 之后与 matmul_loop 差分天然覆盖）；纯层断言：
+    # Seed 不被 normalize 化简、也不混入 DistExpr 等价世界
+    z = Seed((Const(64), Const(128)))
     m = Mma(64, 128, 64)
-    assert normalize(JoinL(z, m)) == m
-    assert normalize(JoinL(m, z)) == m
+    assert normalize_dist(z) == z
+    assert not equiv_dist(z, m)
 
 
-def test_l7_zeros_zeros():
-    z = Zeros((Const(64), Const(128)))
-    assert normalize(JoinL(z, Zeros((Const(64), Const(128))))) == z
+def test_seed_zeros_self_equal():
+    z = Seed((Const(64), Const(128)))
+    assert equiv_dist(z, Seed((Const(64), Const(128))))
+    assert not equiv_dist(z, Seed((Const(64),)))
 
 
-def test_l7_not_in_equiv():
-    z = Zeros((Const(64), Const(128)))
-    assert not equiv(z, Mma(64, 128, 64))
-    assert equiv(z, Zeros((Const(64), Const(128))))
-
-
-def test_l7_join_identity():
-    z = Zeros((Const(64),))
-    assert normalize(JoinL(z, Identity((Const(64),)))) == Identity((Const(64),))
+def test_seed_not_in_equiv_with_identity():
+    z = Seed((Const(64),))
+    assert not equiv_dist(z, Identity((Const(64),)))
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +72,7 @@ def test_zeros_type_and_layout_term():
 """)
     res = _c(body, "c: tila.Tensor[tila.float32, N], B: tila.constexpr = 64")
     assert "zeros (B) f32 : Tile<f32, (64,), L1>" in res.tir_dump
-    assert "L1 = zeros(64)" in res.tir_dump
+    assert "L1 = seed(64)" in res.tir_dump
 
 
 def test_zeros_literal_shape():
@@ -187,11 +186,11 @@ def test_phi_forward_reference_and_exit_type():
     res = compile_kernel(MATMUL_LOOP)
     dump = res.tir_dump
     # φ：body 顶部，前向引用 back；类型 = 出口类型（Mma）
-    assert "%acc.loop = phi %acc %acc.next : Tile<f32, (64,128), L4>" in dump
-    assert "%acc.next = add %acc.loop %t6 : Tile<f32, (64,128), L4>" in dump
+    assert "%acc.loop = phi %acc %acc.next : Tile<f32, (64,128), L7>" in dump
+    assert "%acc.next = add %acc.loop %t6 : Tile<f32, (64,128), L7>" in dump
     # 循环后名字绑定出口值
     assert "%c16 = cast %acc.next f16" in dump
-    assert "L4 = mma(64,128,64)" in dump
+    assert "L7 = mma(64,128,64)" in dump
 
 
 def test_double_accumulate_naming_and_equiv():
@@ -259,23 +258,42 @@ def test_e20_accumulate_unbound():
     _expect(body, "b: tila.Tensor[tila.float32, N]", subcode="AccumForm")
 
 
-def test_e20_accumulator_read_in_body():
+def test_accumulator_read_in_body_v06b():
+    # v0.6b：体内读解禁（StateRead——纯值表达式位合法）；v0.4 的整体
+    # AccumRead 禁令由逃逸位检查取代（store 追溯，见 stored_in_body）
     body = (_PRELUDE_1D + """    acc = tila.zeros((64,), tila.float32)
     x = tila.load(b, (offs,), mask=offs < N)
     for k0 in tila.range(0, N, 64):
         acc += x
         y = acc + x
+        z = y * 2.0
+    tila.store(c, (offs,), acc, mask=offs < N)
 """)
-    _expect(body, "b: tila.Tensor[tila.float32, N]", subcode="AccumRead")
+    res = _c(body, "b: tila.Tensor[tila.float32, N], c: tila.Tensor[tila.float32, N]")
+    # 读引用 φ（%acc.loop）；链式消费（y → z）不构成逃逸（无 store 触达）
+    assert "%y = add %acc.loop %x" in res.tir_dump
+    assert "%z = mul %y %t" in res.tir_dump
 
 
-def test_e20_accumulator_read_in_rhs():
+def test_accumulator_read_in_rhs_v06b():
+    # v0.6b：update RHS 读累加器（纯表达式位）合法：acc += (acc_in + x)
     body = (_PRELUDE_1D + """    acc = tila.zeros((64,), tila.float32)
     x = tila.load(b, (offs,), mask=offs < N)
     for k0 in tila.range(0, N, 64):
         acc += acc + x
+    tila.store(c, (offs,), acc, mask=offs < N)
 """)
-    _expect(body, "b: tila.Tensor[tila.float32, N]", subcode="AccumRead")
+    res = _c(body, "b: tila.Tensor[tila.float32, N], c: tila.Tensor[tila.float32, N]")
+    assert "%acc.next = add %acc.loop %t" in res.tir_dump or \
+           "%acc.next = add" in res.tir_dump
+    # 值语义差分：acc_n = 2·acc_{n-1} + x（N=64 单迭代 → acc = x）
+    import numpy as np
+    from tila.interp import run_kernel
+    rng = np.random.default_rng(5)
+    b = rng.standard_normal(64).astype(np.float32)
+    c = np.zeros(64, dtype=np.float32)
+    run_kernel(res.kernel, {"b": b, "c": c}, {"N": 64})
+    np.testing.assert_allclose(c, b, rtol=1e-6)
 
 
 def test_e20_accumulator_stored_in_body():
@@ -417,16 +435,27 @@ def test_e16_fp8_accumulator_rejected():
     _expect(body, "b: tila.Tensor[tila.fp8e4m3fn, N]", code="E16")
 
 
-def test_accumread_message_names_primitive_update():
+def test_accumread_v06b_escape_and_compound():
+    # v0.6b AccumRead 重新定位 = 逃逸位；复合重写 → HandoffForm（附分解提示）
     body = (_PRELUDE_1D + """    acc = tila.zeros((64,), tila.float32)
     x = tila.load(b, (offs,), mask=offs < N)
     for k0 in tila.range(0, N, 64):
         acc += x
         y = acc + x
+        tila.store(c, (offs,), y, mask=offs < N)
 """)
-    e = _expect(body, "b: tila.Tensor[tila.float32, N]", subcode="AccumRead")
-    assert "ordinary expression value" in e.message
-    assert "left-hand target" in e.message
+    e = _expect(body, "b: tila.Tensor[tila.float32, N], c: tila.Tensor[tila.float32, N]",
+                subcode="AccumRead")
+    assert "pure value expressions" in e.message
+    assert "read it after the loop" in e.message
+
+    body = (_PRELUDE_1D + """    l = tila.zeros((64,), tila.float32)
+    x = tila.load(b, (offs,), mask=offs < N)
+    for k0 in tila.range(0, N, 64):
+        l = l * x + x
+""")
+    e = _expect(body, "b: tila.Tensor[tila.float32, N]", subcode="HandoffForm")
+    assert "decompose into updates" in e.message
 
 
 def test_two_loops_accumulate_differential():
