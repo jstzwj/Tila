@@ -1,70 +1,51 @@
-"""黄金测试：生成产物与 tests/golden/ 逐字节一致（含空行/缩进/换行符）。
+"""Golden：lowered Triton 源码与 TIR dump 逐字节比对（roadmap §8）。"""
 
-add 的黄金文件内容取自规范文档（type-checker.md §8 / triton-lowering.md §2），
-是 v0.1 的正式验收物；fp8_add / saxpy / masked_add 为经人工核对的快照。
-"""
-
-from pathlib import Path
+import os
 
 import pytest
 
-from tila.driver import compile_kernel
+import tila as ti
 
-EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-GOLDEN = Path(__file__).resolve().parent / "golden"
-
-# add 的黄金内容取自规范文档；fp8_add / saxpy / masked_add / batched_add /
-# matmul 为经与文档走查人工核对后的快照；matmul_loop（v0.4 K-loop）、
-# softmax（v0.5 归约/where/neg_inf）、attention（v0.6a 分支六/R-PT/R-BT）
-# 同人工核对
-PROGRAMS = ["add", "fp8_add", "saxpy", "masked_add", "batched_add", "matmul",
-            "matmul_loop", "softmax", "attention"]
+N = ti.Dim("N")
 
 
-def _compile(name: str, overrides=None):
-    source = (EXAMPLES / f"{name}.tila").read_text(encoding="utf-8")
-    return compile_kernel(source, overrides)
+@ti.jit
+def add_kernel(
+    x: ti.Buffer[ti.f32, (N,), ti.ReadOnly],
+    y: ti.Buffer[ti.f32, (N,), ti.ReadOnly],
+    out: ti.Buffer[ti.f32, (N,), ti.WriteOnly],
+    BLOCK: ti.Const[int, ti.PowerOfTwo] = 128,
+):
+    pid = ti.program_id(0)
+    offs = pid * BLOCK + ti.arange(0, BLOCK)
+    mask = offs < N
+    a = ti.load(x, offs, mask=mask)
+    b = ti.load(y, offs, mask=mask)
+    ti.store(out, offs, a + b, mask=mask)
 
 
-@pytest.mark.parametrize("name", PROGRAMS)
-def test_triton_source_byte_exact(name):
-    res = _compile(name)
-    golden = (GOLDEN / f"{name}.triton.py").read_bytes()
-    assert res.triton_source.encode() == golden, f"{name}: Triton 源码与黄金不一致"
+GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 
 
-@pytest.mark.parametrize("name", PROGRAMS)
-def test_tir_dump_byte_exact(name):
-    res = _compile(name)
-    golden = (GOLDEN / f"{name}.tir.txt").read_bytes()
-    assert res.tir_dump.encode() == golden, f"{name}: TIR dump 与黄金不一致"
+def test_add_triton_source_golden():
+    src, tir = add_kernel.materialize({})
+    with open(os.path.join(GOLDEN_DIR, "add_kernel.triton.py"),
+              encoding="utf-8") as f:
+        assert src == f.read()
 
 
-@pytest.mark.parametrize("name", PROGRAMS)
-def test_golden_files_are_lf(name):
-    for f in (GOLDEN / f"{name}.triton.py", GOLDEN / f"{name}.tir.txt"):
-        raw = f.read_bytes()
-        assert b"\r" not in raw, f"{f.name} 含 CR"
-        assert raw.endswith(b"\n") and not raw.endswith(b"\n\n"), \
-            f"{f.name} 必须恰好一个尾换行"
+def test_add_tir_dump_golden():
+    src, tir = add_kernel.materialize({})
+    with open(os.path.join(GOLDEN_DIR, "add_kernel.tir.txt"),
+              encoding="utf-8") as f:
+        assert tir == f.read()
 
 
-def test_add_golden_matches_docs_block():
-    """add 黄金 TIR 与规范文档 §8 走查块逐行对应（防黄金文件被无意改动）。"""
-    lines = (GOLDEN / "add.tir.txt").read_text(encoding="utf-8").splitlines()
-    assert lines[0].startswith("func @add(a: Buffer<f32, (N,)>")
-    assert lines[1] == "L0 = identity(128)"
-    assert lines[2] == ""
-    assert lines[3] == "%pid = program_id 0 : Scalar(i32) [#pid]"
-    assert lines[-1] == "return"
-    assert sum(1 for l in lines if l.startswith("store ")) == 1
-
-
-def test_constexpr_specialization_changes_shapes_only():
-    """BLOCK=64 特化：类型里的 shape 取特化值，发射仍保留名字（模型 B）。"""
-    res = _compile("add", {"BLOCK": 64})
-    assert "Tile<i32, (64,), L0>" in res.tir_dump
-    assert "%r0 = arange 0 BLOCK : Tile<i32, (64,), L0>" in res.tir_dump
-    assert "tl.arange(0, BLOCK)" in res.triton_source
-    # TIR 是特化产物、跨值不复用：默认编译与 64 特化的 dump 不同
-    assert res.tir_dump != _compile("add").tir_dump
+def test_golden_source_contains_expected_markers():
+    src, _ = add_kernel.materialize({})
+    assert "@triton.jit" in src
+    assert "tl.max_contiguous(offs, BLOCK)" in src   # 事实自动发射
+    assert "tl.multiple_of(offs_base, BLOCK)" in src  # 整除事实（§4）
+    assert "mask=mask" in src
+    assert "other=0.0" in src                        # masked other 缺省零
+    assert "BLOCK: tl.constexpr" in src

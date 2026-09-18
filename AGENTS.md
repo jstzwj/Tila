@@ -1,0 +1,1 @@
+请用移动文件到./trash下面代替删除文件，并放入./trash/YYYY-MM-DD_HH-MM-SS_文件夹

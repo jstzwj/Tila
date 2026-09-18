@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tila-lang"
-version = "0.1.0"
-description = "Tila: a strongly-typed, shape-safe, layout-aware tile-based GPU programming DSL that compiles to Triton"
-requires-python = ">=3.9"
-dependencies = []
+version = "0.2.0"
+description = "Tila: a statically strongly-typed GPU kernel DSL (shape + refinement + effects + pointer capabilities) that compiles to Triton"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
 
 [project.optional-dependencies]
-dev = ["pytest", "numpy"]
+dev = ["pytest", "numpy", "ml_dtypes"]
 interp = ["numpy", "ml_dtypes"]
+triton = ["triton"]
+
+[project.scripts]
+tila = "tila.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
