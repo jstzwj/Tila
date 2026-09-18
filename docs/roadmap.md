@@ -1,6 +1,6 @@
 # Tila 路线图
 
-状态：执行路线摘要（2026-09-18）
+状态：执行路线摘要（2026-09-19；M2 按 ADR-011 更新）
 
 当前能力事实来源：[status.md](status.md)
 
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | M0 | 已完成 | 基线冻结与文档/API 对账 | 当前语法可构造，所有能力有唯一状态，文档不超前承诺 |
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
-| M2 | 计划中 | CPU 正确性与静态证明闭环 | proof 分层、可选 SMT、interpreter 语义和审计稳定 |
+| M2 | 计划中 | CPU 正确性与静态证明闭环 | 整数语义、默认 SMT、信任来源、预算、interpreter 和审计稳定 |
 | M3 | 计划中 | Triton/CUDA 后端闭环 | 固定支持矩阵、GPU CI、CPU/GPU differential、hint 验证 |
 | M4 | 计划中 | Effect、Atomic、Race、Uniformity | per-instruction effect 与最小并发安全闭环 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
@@ -151,15 +151,24 @@ M0 不负责扩充语言表面积。发现文档超前时，默认先降为 `Par
 
 主要工作：
 
-- proof 规范化、fast path、mask implication、grid tactic 和 trace 分层；
-- 定义可选 Presburger/SMT solver protocol、超时和 Unknown 回退；
+- 先固定 ADR-007 的整数溢出/除法/移位/cast 语义，数学整数与有限位宽分开；
+- 按 [ADR-011](adr/011-smt-proof-and-trust.md) 建立 predicate DAG 与统一结果，
+  拆分 verdict 和静态/契约/用户假设来源，unsafe 表示为 Exempted；
+- Z3 作为默认通用证明引擎，保留小型快速路径，替代强制 DNF 展开；
+- 查询/累计资源预算、语义与信任来源缓存、sat 反例可达性和 Unknown 原因；
 - 完善分支/循环的数据流与 facts sound intersection；
 - 明确整数、归约、NaN、bf16 等 interpreter 语义；
 - 为所有 Implemented intrinsic 提供 interpreter 路径；
 - 增加 property/metamorphic tests 和 explain golden。
 
-退出标准：CPU 环境零 skipped；每个 bounds 结论可解释；fast/slow solver 四态
-覆盖；interpreter 成为稳定的规范 oracle。
+测试期间审计新旧证明路径差异，再切换默认并退役复杂手写推理。独立推进
+布尔 tile mask 设计；Const bool、宿主整数白名单和显式舍入常量先评审再开放，
+不随 SMT 自动改变 ADR-005 的 0.2.x 边界。提前衔接固定 GPU 环境的小型
+整数/cast/mask/归约对照，无环境时保持 GPU 未验证，完整支持承诺仍归 M3。
+
+退出标准：CPU 环境零 skipped；默认 SMT 与小型快速路径结果可解释，信任来源、
+豁免、反例与预算覆盖；完成新旧差异审计和整数边界测试；interpreter 成为稳定的
+规范 oracle。SMT 是已接受的待实现设计，不是当前能力。
 
 ---
 

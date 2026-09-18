@@ -65,7 +65,8 @@ python -m pytest -q
 
 M1 无遗留退出阻塞项。以下仍是明确的后续范围，不影响本次 PASS：
 
-- proof 分层、四态结论、统一 proof trace 与可选 slow solver：M2；
+- proof、统一 trace 与求解器：M2；交接后的 ADR-011 已将原可选 slow solver
+  路线更新为默认 Z3、布尔 DAG、整数语义及信任来源分离（尚未实现）；
 - 固定 GPU/Triton 支持矩阵和真实 GPU differential：M3；
 - per-instruction effect、atomic、race、uniformity：M4；
 - TypeVar、target capability 与完整 FP8：M5；

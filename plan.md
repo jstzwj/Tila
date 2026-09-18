@@ -1,8 +1,8 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划草案 v1
+状态：执行计划 v2；2026-09-19 按 ADR-011 更新 M2 证明架构
 
-基线日期：2026-09-17
+基线日期：2026-09-19（M0/M1 已完成，M2 尚待实施）
 
 适用范围：语言规范、前端、类型系统、静态证明、TIR、Triton 后端、运行时、解释器、测试与文档。
 
@@ -51,15 +51,15 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 
 ### 2.2 当前主要缺口
 
-- 文档把 `Implemented / Partial / Designed` 混在一起；
-- Ptr、Buffer、Range、MultipleOf、TypeVar、cast 等公开语法与代码不一致；
-- Region 同时承担别名身份和 bounds extent，概念需要拆分；
-- intrinsic 声称表驱动，实际为手写分派；
+- M0/M1 已完成状态表、公共语法对账、RegionId/Extent 拆分和 intrinsic registry；
+- 整数溢出、负数除法/取模、移位及索引转换尚需统一规范与执行语义；
+- 证明仍依赖手写区间/DNF/grid；默认 SMT、布尔 DAG 和资源预算尚未实现；
+- 证明结论与信任来源尚未正交，unsafe 的内部安全状态及 assume 依赖需迁移；
 - alignment 只验证，没有完整反馈到 lowering；
 - GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
-- bf16/FP8 支持范围和路线图不一致；
+- 完整 FP8、target capability 与泛型仍是未来能力；
 - effect 只有聚合记录和局部 warning，race/uniformity/atomic 尚未形成系统；
-- Windows CLI/示例存在输出编码失败；
+- 系统 property/fuzz、explain golden 和 Mask/Const 易用性设计仍待推进。
 
 ---
 
@@ -294,34 +294,43 @@ target requirements
 
 目标：在不依赖 GPU 的环境中，把语言语义、proof 和 interpreter 做成高可信基线。
 
-### M2.1 Bounds proof 分层接口
+### M2.1 整数语义与统一证明接口（先行）
 
-将 proof 明确拆成：
+先完成 ADR-007：固定溢出、负数除法/取模、除零、移位、cast 和 shape/grid
+到索引类型转换的语义，再统一 checker、interpreter 与 lowering。数学整数
+与有限位宽整数分别建模；只有证明中间运算不溢出后才能使用数学整数推理。
+显式 i64 不能替代范围证明，未定义或未覆盖语义返回 Unknown。
 
-1. 表达式规范化；
-2. interval/divisibility fast path；
-3. mask DNF implication；
-4. grid/launch contract 战术；
-5. 可选 slow solver 接口；
-6. 四态结论与 proof trace。
+按 [ADR-011](docs/adr/011-smt-proof-and-trust.md) 建立统一 predicate DAG、
+obligation、ProofResult 和 provenance 接口。结论为 ProvenSafe / ProvenUnsafe /
+Unknown / Exempted，独立记录静态事实、已检查 launch 契约和用户 assume 依赖。
+SafeUnderContract 保留显示兼容；unsafe 不再伪装成 ProvenSafe。
 
 要求：
 
-- 每个 ProvenSafe/SafeUnderContract 都能输出最小证明链；
-- 每个 Unknown 指明缺失事实；
-- ProvenUnsafe 给出具体反例区间（能算出时）；
-- slow solver 超时只能返回 Unknown；
-- solver 结果按规范化 obligation + facts fingerprint 缓存。
+- 每个安全结论输出可复核依据与信任来源，不承诺最小证明；
+- Unknown 区分缺事实、不支持、超时及资源耗尽；
+- ProvenUnsafe 需要精确模型或已确认可达的反例；保守近似下未确认的 sat 为 Unknown；
+- assume 的派生事实/hint 继承依赖，unsafe 只局部豁免；
+- 路径不可达、矛盾用户假设和无条件安全在报告中明确区分。
 
-### M2.2 引入可选 SMT/Presburger slow path
+### M2.2 Z3 作为默认通用引擎
 
-- 定义独立 solver protocol，不让 checker 直接依赖 Z3；
-- 首个实现可用 Z3 optional extra；
-- 覆盖 fast path 无法处理的嵌套整除、min/max 和部分线性组合；
-- 设置严格超时和资源上限；
-- proof report 标注结论来自 fast path 还是 solver。
+- 定义独立 solver protocol，Z3 为默认实现；切换时纳入标准依赖及锁文件，
+  缺失时报告配置错误，不静默回落到较弱的默认验证；
+- 保留 And/Or/Not 及共享子表达式，不强制 DNF 展开；正确保留 lane/broadcast
+  关系、路径条件和符号身份；仅保留常量折叠/直接事实匹配等小型快速路径；
+- 查询 `facts ∧ path ∧ mask ∧ ¬in_bounds`；Const/shape 使用 Int，kernel
+  有限位宽运算按 ADR-007 编码；需要绑定的 Const/launch 事实延迟到 Stage 2；
+- 设置单查询 timeout/rlimit、kernel 累计预算和公式构建大小限制；默认数值以
+  基准确定，超预算返回 Unknown，不裁剪析取分支后宣称安全；
+- 缓存包含义务、事实及信任来源、path/mask、Const/launch 绑定、整数编码版本、
+  求解器版本/配置；命中仍重验 launch 契约，Unknown 不跨更高预算永久复用；
+- 测试期双跑新旧路径并审计差异，尤其“旧拒绝、新判安全”；验证后切换默认
+  并退役复杂手写 DNF 逻辑，避免长期双实现。
 
-验收：准备一组 fast-Unknown/SMT-Proven、fast-Unknown/SMT-Unsafe、timeout-Unknown 用例。
+验收：覆盖 unsat、可达 sat、近似伪反例、unknown、timeout、总预算耗尽、
+布尔组合压力、整数边界/中间溢出及缓存隔离；所有新安全结论可追溯到执行语义。
 
 ### M2.3 控制流数据流分析
 
@@ -346,7 +355,7 @@ target requirements
 - dtype conversion matrix；
 - shape/broadcast 对称性和结合场景；
 - DimExpr canon/equality；
-- mask DNF implication；
+- 布尔 DAG/SMT implication、否定、共享表达式与预算压力；
 - grid/cdiv/尾块；
 - reshape numel；
 - interpreter 与 NumPy reference；
@@ -362,16 +371,34 @@ target requirements
 - facts 及来源；
 - effects；
 - obligations；
-- 每个 obligation 的 proof state/trace；
+- 每个 obligation 的 verdict、信任依赖、求解路径和候选反例/Unknown 原因；
 - unsafe/assume/launch-contract 汇总；
 - 将要发射的 optimization hints 及依据。
 
 为 explain 建立 golden，避免“证明结果正确但解释漂移或缺事实”。
 
+### M2.7 独立的公共接口设计
+
+- 在 SMT 和信任模型稳定后，设计并实现布尔 tile 的 `mask=`/组合支持；
+  比较携带边界谓词，加载的布尔值通常不给边界事实；保持 shape 检查与
+  scalar-if 限制，不直接合并整个 Mask/Block bool 类型体系。
+- 优先评审 Const bool 的独立参数域及带类型标签缓存键；开放前修订 ADR-005
+  的版本边界，当前 0.2.x ExactInt 承诺保持有效。
+- 较低优先级评估 NumPy integer 白名单、范围检查与规范化，拒绝任意 `__int__`。
+- 保持严格浮点字面量规则，先设计明确 dtype/舍入的常量构造，再按实际 kernel
+  体验评估默认规则；这些便利性设计不阻塞核心 SMT 迁移，也不自动变为已实现。
+
+### M2.8 提前衔接 GPU 语义验证
+
+推进 ADR-009 固定最小 GPU 环境，针对整数/cast/mask/归约增加小型 CPU/GPU
+对照；不必等 M3 全部完成才验证。无 runner 时记录未验证与阻塞，不用 CPU
+通过替代 GPU 证据；完整 GPU CI、示例 differential 与支持承诺仍归 M3。
+
 ### M2 退出标准
 
 - CPU 环境安装 dev extra 后零 skipped；
-- fast/slow proof 四态都有系统测试；
+- 默认 SMT 与小型快速路径遵守同一语义和信任规则；各结论、豁免及预算有系统测试；
+- 新旧差异已审计，复杂 DNF 迁移完成；整数边界、假设污染、缓存重验均有反例测试；
 - interpreter 覆盖所有 Implemented intrinsic；
 - examples、CLI、explain、golden 全绿；
 - fuzz/property 测试没有已知 soundness 缺陷。
@@ -627,7 +654,7 @@ Layout 进入用户类型语法前必须完成：
 | cpu-latest | 最新支持 Python、文档示例、CLI |
 | windows | UTF-8 CLI、路径、examples smoke |
 | gpu | 固定 Triton/PyTorch/CUDA，golden + differential |
-| optional-solver | Z3 slow path 与 timeout 测试 |
+| solver | 默认 Z3、Int/BitVec 语义、反例可达性、timeout/资源预算与缓存测试 |
 
 ### 12.2 测试分层
 
@@ -669,7 +696,8 @@ Layout 进入用户类型语法前必须完成：
 
 ## 13. 近期执行批次
 
-以下顺序适合作为接下来连续实施的工作包。
+Batch A/B 和 C 的核心内存模型已在 M0/M1 完成，以下保留历史范围；C 中的
+device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔接 E 的最小 GPU 验证。
 
 ### Batch A：状态与可用性修复
 
@@ -705,11 +733,11 @@ Layout 进入用户类型语法前必须完成：
 
 ### Batch D：证明与解释
 
-1. proof 层接口化；
-2. proof trace/provenance；
-3. 可选 SMT slow path；
-4. explain golden；
-5. property-based bounds/shape 测试。
+1. ADR-007 整数语义和有限位宽边界测试；
+2. predicate DAG、ProofResult 与信任来源接口；
+3. 默认 Z3、资源预算、缓存和新旧差异审计；
+4. explain golden、property-based bounds/shape 测试与小型 GPU 语义对照；
+5. 独立推进布尔 tile mask 和 Const/字面量易用性评审。
 
 退出：每个内存访问结论可复核，Unknown 的原因清晰。
 
@@ -751,7 +779,7 @@ Layout 进入用户类型语法前必须完成：
 | Region/Extent 不拆分 | race/alias 模型先天错误 | 在 M4 前完成 M1.1 |
 | 只测生成文本、不测 GPU | Triton API 或数值语义错误长期隐藏 | M3 固定 GPU CI + differential |
 | checker 单文件继续膨胀 | 规则互相污染、难以验证 | registry + 分模块重构，行为由 golden 锁定 |
-| SMT 被当成万能证明器 | 编译变慢、超时、不可解释 | fast path 默认、严格 timeout、Unknown 保守回退 |
+| SMT 被当成万能证明器 | 编码错误、编译变慢、伪反例 | 整数语义先行，默认 SMT 配合小型快速路径、总预算、信任来源与可达性审查 |
 | 过早开放 Layout/FP8 | target 组合爆炸 | capability 表与真实 GPU 测试作为开放门槛 |
 | interpreter 与 GPU 语义漂移 | differential 不可信 | 明确 dtype/归约/溢出语义，逐 intrinsic 对齐 |
 
@@ -770,7 +798,7 @@ Layout 进入用户类型语法前必须完成：
 
 - 完成 M1–M2；
 - RegionId/Extent 定型；
-- proof trace 与 optional SMT；
+- 默认 SMT、整数语义、信任来源、预算与 proof trace；
 - CPU 测试零 skipped。
 
 ### 0.4.0：GPU 验证版
@@ -795,15 +823,12 @@ Layout 进入用户类型语法前必须完成：
 
 ## 17. 下一步
 
-立即从 **Batch A** 开始，建议首个变更集严格限制为：
+M0/M1 已完成。立即从 **Batch D / M2-01** 开始：先完成 ADR-007 的运算
+语义矩阵及整数边界测试，再实施 ADR-011 的信任结果和默认 SMT。依次推进
+M2-02 至 M2-06；Mask/Const 易用性使用独立变更，不混入求解器迁移。
 
-1. 修复 CLI/example UTF-8；
-2. 补齐 dev 依赖并确认全量测试零 skipped；
-3. 创建 `docs/status.md`；
-4. 对 README、roadmap 和现有规范做一次状态对账；
-5. 添加文档当前示例 smoke test。
-
-该变更集不调整核心语言语义。完成后再进入 Batch B，对 Ptr/Buffer/Region 等会影响兼容性的设计作集中决策，避免一边修文档、一边继续扩大不稳定 API。
+同时推进 M3-01 的固定 GPU 环境，使 M2-08 的小型语义对照尽早可执行。
+本次文档更新只冻结架构方向，所有新增实现任务仍为 TODO。
 
 ---
 
@@ -823,6 +848,7 @@ Layout 进入用户类型语法前必须完成：
 | ADR-008 | Proposed | reduction 精度 | M3 differential 前 | 输入、累加、返回 dtype 分开建模，不依赖后端隐式提升 |
 | ADR-009 | Proposed | target 支持矩阵 | GPU CI 建立前 | 首先固定一套 NVIDIA + Triton/PyTorch/CUDA 组合 |
 | ADR-010 | Proposed | effect/race 严格度 | M4 开始前 | bounds、effects、race 使用独立策略开关 |
+| [ADR-011](docs/adr/011-smt-proof-and-trust.md) | Accepted | 默认 SMT 与信任来源 | M2 证明迁移前 | Z3 + 布尔 DAG + 小型快速路径；Int/BitVec 分离、Exempted、预算及反例可达性 |
 
 每份 ADR 至少回答：
 
@@ -863,6 +889,14 @@ Layout 进入用户类型语法前必须完成：
 | M1-05 | DONE | intrinsic registry 完整元数据 | ADR-006 已接受 | 不可变 catalog 派生导出/表面形式；统一 arity/keyword 门禁；显式 checker map；effect/bounds、TIR backend、target、status/docs 与缓存 revision 自动一致性检查 |
 | M1-06 | DONE | 诊断契约与 Const 边界收口 | ADR-005/M1-05 | 机器诊断 registry；统一 location/phase/fix 渲染；ExactInt 全入口门禁；deferred static_assert；CLI 非 debug 无 traceback |
 | M1-07 | DONE | M1 Exit Audit | M1-01..06 | 四项退出标准逐项通过；审计中移除字符串/`None` 哨兵类型协议并收回 `p - offset` 超前声明；`docs/m1-exit-audit.md` 记录证据与 M2 交接边界 |
+| M2-01 | TODO | ADR-007 与整数语义对齐 | M1 完成 | 溢出、负数除法/取模、移位、cast、索引窄化规则与边界反例；CPU/lowering 同语义 |
+| M2-02 | TODO | DAG 与 ProofResult/信任来源 | ADR-011、M2-01 | path/mask/lane 身份保留；Exempted 局部性、assume 依赖传播、契约重验 |
+| M2-03 | TODO | 默认 Z3、预算与缓存 | M2-02 | unsat/sat/unknown、近似反例可达性、超时/累计预算、编码及缓存隔离；纳入标准依赖 |
+| M2-04 | TODO | 数据流与 interpreter 收口 | M2-01/02 | 分支交集、循环不变量、数值语义与 non-contiguous 用例 |
+| M2-05 | TODO | 差异审计与性质测试 | M2-03/04 | 新旧结论差异逐项核查、布尔压力/溢出/假设污染测试；退役复杂 DNF |
+| M2-06 | TODO | explain 与审计 golden | M2-03/05 | 信任来源、候选反例、不可达路径、Unknown 原因及 hint 依据可复核 |
+| M2-07 | TODO | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | 布尔 tile mask 语义与实现；Const bool、宿主整数白名单、显式舍入常量分别评审，开放前新增 ADR |
+| M2-08 | TODO | 小型 CPU/GPU 语义对照 | M2-01、M3-01 | 整数/cast/mask/归约在固定环境对照；无 runner 明确未验证，不阻塞 CPU 检查 |
 | M3-01 | BLOCKED | GPU 支持矩阵 | ADR-009 | 依赖版本和 CI runner 明确 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。

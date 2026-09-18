@@ -37,7 +37,8 @@ Tila 与 Triton 的分工：
 | 优化 hint（multiple_of 等） | 用户手工 | 类型系统推导并自动发射 |
 
 **编译目标锁定 Triton**：Tila 不直接生成 PTX，Triton 是唯一后端。
-这保证 Tila kernel 的性能下限等于手写 Triton 的性能下限。
+性能仍取决于生成代码、特化、布局和目标硬件，须通过真实 GPU benchmark 验证，
+不能仅凭后端相同承诺与手写 Triton 等效。
 
 ---
 
@@ -82,10 +83,12 @@ Tila 与 Triton 的分工：
 - **Type-level predicates**：`PowerOfTwo / Aligned[k] / MultipleOf[k]` 等
   有限公共谓词；`Contiguous / StrideEq[axis, value]` 是 launch 推导的内部事实。
 
-判定性来自两个限制：**谓词限定为 Presburger（线性 + 整除）算术**，
-**求解分层（区间抽象解释 fast path + 可插拔 Presburger/SMT slow path）**。
-GPU kernel 的索引计算 90% 是 `a*x + b`、比较、取模、整除——这个子集
-足够覆盖，且可判定、可给出人话错误信息。
+当前符号推理主要限制在线性、常量乘及整除子集。M2 按
+[ADR-011](adr/011-smt-proof-and-trust.md) 采用 **Z3 默认通用引擎 + 小型快速路径**，
+保留布尔 DAG，不强制展开 DNF。数学整数与有限位宽整数分开编码，不能用
+无界整数结论替代可能溢出的实际执行。可判定不等于快速：单查询和 kernel
+总预算耗尽均返回 Unknown。SMT 不自动扩大语言子集，也不消除契约和用户
+假设的信任边界；当前尚未集成 Z3。
 
 ---
 

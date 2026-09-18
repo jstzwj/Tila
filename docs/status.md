@@ -8,6 +8,10 @@
 
 验证基线：`pytest -q` = 427 passed、零 skipped
 
+2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
+通用证明引擎、布尔 DAG、整数编码与信任来源分离。以下新增项仍为 Designed；
+本次文档更新不改变当前 DNF/fast path、ExactInt 或 Mask 的实现边界。
+
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
 [`m1-exit-audit.md`](m1-exit-audit.md)。当其他文档的阶段描述与本文冲突时，
@@ -269,7 +273,12 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | grid cdiv/exact-dim contract | `Implemented` | Launch | 显式 grid 和 launch_auto 均可登记事实 |
 | 四态结论 | `Implemented` | Check / Launch | ProvenSafe、SafeUnderContract、Unknown、ProvenUnsafe |
 | `--safety strict/warn` | `Implemented` | CLI / Launch | Unknown 可降 warning；ProvenUnsafe 永远 error |
-| Presburger/SMT slow path | `Designed` | — | 文档设计存在，当前没有 solver protocol 或 Z3 集成 |
+| 默认 Z3 通用证明引擎 | `Designed` | — | ADR-011 替代可选 slow path 路线；尚无 solver protocol、Z3 集成或依赖 |
+| 布尔 DAG 与否定谓词 SMT 编码 | `Designed` | — | 将替代强制 DNF 展开；需保留 path/lane/broadcast 关系 |
+| 有限位宽 proof 与执行语义对齐 | `Designed` | — | ADR-007 待定；Int/BitVec、溢出/除法/移位及索引窄化需统一 |
+| ProofResult 信任来源与 Exempted | `Designed` | — | 结论和静态/契约/用户假设来源分开；当前 unsafe 内部结果仍需迁移 |
+| SMT 预算与完整证明缓存 | `Designed` | — | 查询及 kernel 总预算、公式大小、语义/信任依赖缓存和反例可达性待实现 |
+| 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
 | kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
 | per-instruction effect IR | `Designed` | — | TLoad/TStore 尚无统一原生 effect 字段 |
 | `where` eager memory warning | `Implemented` | Check | `TILA-EFFECT-007` 已生成；完整 effect/并发系统归 M4 |

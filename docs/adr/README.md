@@ -11,6 +11,10 @@
 | [ADR-004](004-refinement-construction-syntax.md) | Accepted | Refinement 构造语法与契约 |
 | [ADR-005](005-const-type-domain.md) | Accepted | Const 类型域与 staged bool 边界 |
 | [ADR-006](006-intrinsic-registry.md) | Accepted | Intrinsic registry 架构与完整性门禁 |
+| [ADR-011](011-smt-proof-and-trust.md) | Accepted | SMT 默认证明引擎、整数编码边界与信任来源；待 M2 实现 |
+
+ADR-007 至 ADR-010 的议题仍在 `plan.md` 中处于 Proposed，尚未形成独立决策文件；
+ADR-011 不替代 ADR-007 对具体整数运算语义的决策。
 
 状态含义：
 

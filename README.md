@@ -104,9 +104,11 @@ Python 子集 + ti.* 命名空间
     └─ Triton source lowering（GPU 支持矩阵与 CUDA CI 尚待完成）
 ```
 
-Bounds 默认采用无第三方依赖的区间、谓词和 grid-contract fast path。文档中
-描述的可插拔 Presburger/SMT slow path 尚未实现；无法证明的访问保持
-`Unknown`，在默认 strict 模式下拒绝。
+Bounds 当前采用无第三方依赖的区间、谓词和 grid-contract fast path。
+[ADR-011](docs/adr/011-smt-proof-and-trust.md) 已决定在 M2 将 Z3 作为默认通用
+证明引擎，保留小型快速路径并用布尔 DAG 替代强制 DNF 展开；尚未实现或新增
+求解器依赖。新设计仍要求整数语义对齐、信任来源追踪及资源预算；无法证明
+的访问保持 `Unknown`，在默认 strict 模式下拒绝。
 
 ---
 
@@ -209,10 +211,10 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 近期工作优先级是：
 
-1. 使 README、状态表和规范完全对齐；
-2. 定型 Ptr/Buffer 与 Region/Extent 内存模型；
-3. 强化 proof、interpreter 和诊断；
-4. 建立固定 Triton/CUDA 支持矩阵与真实 GPU differential；
+1. 在已完成的 M0/M1 上固定整数运算与证明的共同语义；
+2. 拆分证明结论与信任来源，接入默认 Z3、布尔 DAG、预算和缓存；
+3. 强化 interpreter、explain 与性质测试，独立评审 Mask/Const 易用性；
+4. 尽早验证小型 CPU/GPU 语义对照，并在 M3 完成固定支持矩阵与 GPU CI；
 5. 再推进 effect/race、泛型、target capability 和性能层。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

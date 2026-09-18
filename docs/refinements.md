@@ -15,8 +15,9 @@ Refinement 是 Tila 的第二根支柱（design-principles.md §2）：它把
 2. **优化方向**：把 Triton 的手工 hint（`multiple_of` /
    `max_contiguous`）从用户接口升级为编译器自动推导的静态事实。
 
-谓词域刻意限定为 **Presburger 算术**（线性 + 整除 + 常量乘），
-外加有限的一组类型级谓词。超出域的谓词一律不可写、不可推导。
+当前可提取的符号谓词域主要为 **Presburger 算术**（线性 + 整除 + 常量乘），
+外加有限的一组类型级谓词。M2 按 [ADR-011](adr/011-smt-proof-and-trust.md)
+引入默认 SMT 与有限位宽整数编码；不会因为 Z3 支持某种理论就自动扩展公共语法。
 
 ---
 
@@ -95,12 +96,13 @@ checker 在类型环境 Γ 中为每个值同时维护**类型**与**事实集**
 | launch 契约注解 | `Positive/NonNegative/Range` 注入区间事实；`MultipleOf` 注入模等式事实；声明均由 launcher 先验证 |
 | `tila.assume(pred)` | `pred` 本身 |
 | Const 精化 | `BLOCK` 的 PowerOfTwo / Range |
-| 比较产生的 Mask | 谓词随 Mask 类型携带（`Mask[S] { offs < N }`），按 DNF 子句组织 |
+| 比较产生的 Mask | 谓词随 Mask 类型携带（`Mask[S] { offs < N }`）；当前 DNF，M2 迁移到布尔 DAG |
 | 加载/计算的 int 值 | 每个值获得符号身份（`__vN`），使 `assume` 与义务证明能作用于数据依赖值（gather 工作流） |
 
 ### 3.2 传播规则（事实如何流动）
 
-Presburger 子集内闭合：
+以下为数学整数传播规则；用于 kernel 有限位宽值时，M2 必须先证明相关中间
+运算不溢出，或按 BitVec 语义求解，不能直接套用：
 
 ```text
 0 <= a < A,  0 <= b < B        ⇒  0 <= a+b < A+B
@@ -110,8 +112,9 @@ x ≡ y (mod k), y % k == 0      ⇒  x % k == 0
 0 <= lane < B, contiguous      ⇒  idx = base + lane 是长度 B 的连续段
 ```
 
-事实单调增长、永不撤销；分支合并处取**交**（then 事实与 else 事实
-只保留共同可推出的部分——保守正确优先）。
+事实绑定值身份和作用域；赋值产生的新值不得继承旧值的不适用事实。分支合并
+处取**交**（只保留共同可推出的部分），循环使用保守不变量。M2 派生事实必须
+传递静态来源、已检查契约及用户假设依赖，避免作用域或缓存中的假设污染。
 
 ### 3.3 示例
 
@@ -143,12 +146,13 @@ lowering 阶段把已证明的事实自动发射为 Triton 原语：
 
 规范要点：
 
-- **只有 Proven 的事实可以发射 hint**——Unknown 永远不产生 hint
+- **只有 Proven 的事实可以发射 hint**——Unknown/Exempted 永远不产生 hint
   （错误 hint 比没有 hint 危险）；
 - 发射的 hint 集合在 `--explain` 输出中完整列出（哪个值、哪条事实、
   发射成什么），可审计；
-- 用户在 v0 仍可直接写 `tl.multiple_of` 等价物（`tila.hint.*`，
-  调试用），但正常路径是编译器自动发射；v2 评估后移除用户接口。
+- 当前没有公开 `tila.hint.*`；未来接口仍需独立设计。M2 起 hint 的依据需记录
+  用户 assume 和契约依赖，不能将受信任前提包装成无条件静态事实；完整优化
+  消费点覆盖仍归 M3/M6。
 
 ---
 
@@ -173,6 +177,9 @@ x = tila.load(data, idx)                  # 现在 bounds 可证 ✓
 约束：`pred` 必须是 Presburger 域内谓词；assume 的谓词本身不检查
 真伪（那是 device_assert 的事），但**每个 assume 都出现在诊断汇总里**。
 
+M2 目标：assume 注入带源码位置的 UserAssumption，其派生证明及 hint 继承
+依赖。debug 执行检查不使它自动成为 release 的无条件事实；矛盾假设不得隐藏。
+
 ### 5.2 `tila.unsafe_load / tila.unsafe_store`
 
 放弃单次访问的 proof obligation：
@@ -185,6 +192,9 @@ x = tila.unsafe_load(data, idx)     # 义务转移给程序员，报告汇总可
 与 assume 的区别：assume 给出**正向事实**（可复用于后续证明），
 unsafe 只是**局部豁免**（不产生任何事实）。两者都不可嵌套、不可
 全局开启。
+
+M2 目标：unsafe 的结果为 Exempted，不再用 ProvenSafe 表示；当前实现的
+内部结果与信任来源尚待迁移，见 ADR-011。
 
 ### 5.3 严格度模式
 

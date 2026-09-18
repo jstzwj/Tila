@@ -97,7 +97,7 @@ q    = p + offs                    # Block[Ptr[f16, ...], (BLOCK,)]
 - **构造**：只来自同形（可广播）Block 的比较、以及 `& / | / ~`
   的 Mask 组合；比较的操作数可以是符号表达式或字面量（字面量比较数
   同样产生谓词）；
-- **谓词按 DNF 子句组织**：`&` 对两侧子句做笛卡尔积、`|` 拼接子句、
+- **当前谓词按 DNF 子句组织**：`&` 对两侧子句做笛卡尔积、`|` 拼接子句、
   `~` 保守地产生空子句（不携带可证信息）；bounds 证明要求目标谓词
   在**每个**子句下都可证（bounds-safety.md §3.2）；
 - **流动**：只允许流入 `load/store` 的 `mask=`、`where` 的谓词位、
@@ -109,6 +109,12 @@ Mask 在 IR 内部携带谓词信息（`Mask[(BLOCK,)] { offs < N }`），
 供 bounds 证明消费（`bounds-safety.md` §3）。
 
 `if mask:` → `TILA-TYPE-0xx: expected scalar bool, found Mask[(BLOCK,)]`。
+
+M2 按 [ADR-011](adr/011-smt-proof-and-trust.md) 将谓词迁移到保留 And/Or/Not
+的 DAG，由 SMT 求解。随后独立设计允许布尔 tile 用于 `mask=` 和布尔组合：
+比较 mask 可以携带边界谓词，内存加载的布尔值通常只有未知谓词；可作为执行
+掩码不意味着能证明边界。该接口尚未实现，不改变当前 Mask/Block bool 边界，
+也不允许 `if mask` 隐式归约。
 
 ### 3.4 Unit
 
@@ -240,6 +246,15 @@ if pid == 0:            # pid : i32 → runtime if
 ---
 
 ## 6. 数值转换：比 Triton 严格得多
+
+M2 数值语义先行任务：ADR-007 将明确溢出、负数除法/取模、除零、移位、
+转换和 shape/grid 到索引类型的边界；当前的 dtype 检查不等价于完整的溢出
+安全保证。ADR-011 要求 proof 与 CPU/GPU 使用一致语义，有限位宽表达式
+只有在无溢出依据成立时才可采用数学整数推理。
+
+易用性后续任务：先设计明确 dtype/舍入的常量构造，不直接放宽当前字面量
+规则；Const bool 与 NumPy integer 白名单需要独立 ADR/版本评审，当前
+0.2.x 的 ExactInt 和隐式转换规则不因这次设计更新而改变。
 
 ### 6.1 隐式转换只允许安全 widening
 
