@@ -1,0 +1,26 @@
+kernel @add_kernel
+  buffer x : Buffer[f32, (N,), ReadOnly, UnknownAlignment]  region=BufferRegion[0:x]
+  buffer y : Buffer[f32, (N,), ReadOnly, UnknownAlignment]  region=BufferRegion[1:y]
+  buffer out : Buffer[f32, (N,), WriteOnly, UnknownAlignment]  region=BufferRegion[2:out]
+  scalar N : i32
+  scalar x_stride0 : i32
+  scalar y_stride0 : i32
+  scalar out_stride0 : i32
+  const  BLOCK : Const[int] = 128
+  {
+  pid = program_id(0)
+  offs = ((pid * BLOCK) + arange(0, BLOCK))
+  mask = (offs < N)
+  a = load(x[offs], mask=mask)
+  b = load(y[offs], mask=mask)
+  store out[offs] <- (a + b), mask=mask
+  }
+  obligation load[x] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+  obligation load[y] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+  obligation store[out] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+  effect Read[BufferRegion[0:x]]
+  effect Read[BufferRegion[1:y]]
+  effect Write[BufferRegion[2:out]]
+  alias MayAlias[BufferRegion[0:x], BufferRegion[1:y]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:x], BufferRegion[2:out]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:y], BufferRegion[2:out]] (distinct external parameters are conservatively MayAlias)

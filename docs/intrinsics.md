@@ -153,6 +153,12 @@ max 传播 NaN，窄 dtype 显式恢复；浮点 sum 不保证归约树或位级
 bool 使用 `.any()`/`.all()`；FP8 先 cast。axis 仅接受非负范围内 exact int 字面量。
 masked load 的 other 正常参与归约，max 的默认零不适合全负输入。
 
+`exp/exp2` 的 f16/bf16 输入先转换为 f32 计算，再在该操作结果处舍入回输入 dtype；
+后续 cast 到 f32 不能恢复这次舍入丢失的位。f32/f64 保持各自计算和结果 dtype。
+浮点指数函数不承诺跨后端逐位一致，已测误差范围见 [GPU 操作审计](gpu-operation-audit.md)。
+FP8 的上述 cast 路径目前仅为前端类型设计；固定 SM86 target 的 build/launch 明确拒绝
+FP8 storage/cast（包括中间值），不能通过先 cast 绕过 target 门禁。
+
 ### 2.8 形状操作
 
 ```text

@@ -1,0 +1,600 @@
+kernel @fused_attention_kernel — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: BD=64, BM=64, BN=64, CAUSAL=1
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+integer launch contracts (must pass before execution):
+  integer operands must fit i32 before arithmetic
+  cannot prove intermediate index '*' does not overflow i32
+  cannot prove intermediate index '+' does not overflow i32
+  range start/end/positive step must fit i32
+parameters:
+  BD : Const[int, PowerOfTwo]
+  BM : Const[int, PowerOfTwo]
+  BN : Const[int, PowerOfTwo]
+  CAUSAL : Const[int]
+  H : i32
+  L : i32
+  k : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  k_stride0 : i32
+  k_stride1 : i32
+  k_stride2 : i32
+  o : Buffer[f32, (H, L, BD), WriteOnly, UnknownAlignment]
+  o_stride0 : i32
+  o_stride1 : i32
+  o_stride2 : i32
+  q : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  q_stride0 : i32
+  q_stride1 : i32
+  q_stride2 : i32
+  sm_scale : f32 | Positive
+  v : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  v_stride0 : i32
+  v_stride1 : i32
+  v_stride2 : i32
+types:
+  BD : i32
+  BM : i32
+  BN : i32
+  CAUSAL : i32
+  H : i32
+  L : i32
+  acc : Block[f32, (BM, BD)]
+  k : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  k_stride0 : i32
+  k_stride1 : i32
+  k_stride2 : i32
+  m_ok : Mask[(BM)]
+  o : Buffer[f32, (H, L, BD), WriteOnly, UnknownAlignment]
+  o_stride0 : i32
+  o_stride1 : i32
+  o_stride2 : i32
+  ph : i32
+  pid : i32
+  q : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  q_stride0 : i32
+  q_stride1 : i32
+  q_stride2 : i32
+  q_tile : Block[f16, (BM, BD)]
+  qs : f32
+  rd : Block[i32, (BD)]
+  rm : Block[i32, (BM)]
+  rn : Block[i32, (BN)]
+  row_max : Block[f32, (BM, 1)]
+  row_sum : Block[f32, (BM, 1)]
+  sm_scale : f32
+  v : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]
+  v_stride0 : i32
+  v_stride1 : i32
+  v_stride2 : i32
+facts:
+  BD ∈ [1, +inf)
+  BM ∈ [1, +inf)
+  BN ∈ [1, +inf)
+  __lane1 ∈ [0, BM)
+  __lane1@-2 ∈ [0, BM)
+  __lane2 ∈ [0, BN)
+  __lane3 ∈ [0, BD)
+  pid0 ∈ [0, __grid0)
+  pid1 ∈ [0, __grid1)
+  BD = 64 (Const)
+  BM = 64 (Const)
+  BN = 64 (Const)
+  CAUSAL = 1 (Const)
+  nonneg symbols: BD, BM, BN, H, L, __i_n0_4, __i_n0_5, __i_n0_6, __lane1, __lane1@-2, __lane2, __lane2@-2, __lane3, __lane3@-2, pid0, pid1
+obligations:
+  - load[q] axis 0: 0 <= pid1 < H
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 20, line 21
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 20: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 1); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - load[q] axis 1: 0 <= (BM * pid0) + __lane1@-2 < L
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 20, line 21
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 20: comparison
+      proof route:
+        - direct predicate `(BM * pid0) + __lane1@-2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[q] axis 2: 0 <= __lane3 < BD
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 21
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 0: 0 <= pid1 < H
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 30, line 34, line 35
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 34: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 2); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - load[k] axis 1: 0 <= __i_n0_4 + __lane2 < L
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 34, line 35
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 34: comparison
+      proof route:
+        - direct predicate `__i_n0_4 + __lane2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 2: 0 <= __lane3@-2 < BD
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 35
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3@-2 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 0: 0 <= pid1 < H
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2@-2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 30, line 34, line 43
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 34: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 2); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - load[v] axis 1: 0 <= __i_n0_4 + __lane2@-2 < L
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 34, line 43
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 34: comparison
+      proof route:
+        - direct predicate `__i_n0_4 + __lane2@-2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 2: 0 <= __lane3 < BD
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_4 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 43
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 0: 0 <= pid1 < H
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 30, line 54, line 57
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 54: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 2); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - load[k] axis 1: 0 <= __i_n0_5 + __lane2 < L
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 54, line 57
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 54: comparison
+      proof route:
+        - direct predicate `__i_n0_5 + __lane2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 2: 0 <= __lane3@-2 < BD
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 57
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3@-2 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 0: 0 <= pid1 < H
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2@-2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 30, line 54, line 65
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 54: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 2); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - load[v] axis 1: 0 <= __i_n0_5 + __lane2@-2 < L
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 54, line 65
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 54: comparison
+      proof route:
+        - direct predicate `__i_n0_5 + __lane2@-2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 2: 0 <= __lane3 < BD
+      path: CAUSAL == 1
+      mask: mapped(mapped(__i_n0_5 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 65
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 0: 0 <= pid1 < H
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 30, line 77, line 78
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 77: comparison
+      proof route:
+        - (none)
+      counterexample:
+        (none)
+      unknown/pending:
+        reason: unreachable access: Z3 proved premises unsatisfiable
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        (none)
+  - load[k] axis 1: 0 <= __i_n0_6 + __lane2 < L
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 77, line 78
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 77: comparison
+      proof route:
+        - direct predicate `__i_n0_6 + __lane2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[k] axis 2: 0 <= __lane3@-2 < BD
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 78
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3@-2 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 0: 0 <= pid1 < H
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 30, line 77, line 87
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 30: comparison
+        - StaticFact line 77: comparison
+      proof route:
+        - (none)
+      counterexample:
+        (none)
+      unknown/pending:
+        reason: unreachable access: Z3 proved premises unsatisfiable
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        (none)
+  - load[v] axis 1: 0 <= __i_n0_6 + __lane2@-2 < L
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 77, line 87
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 77: comparison
+      proof route:
+        - direct predicate `__i_n0_6 + __lane2@-2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[v] axis 2: 0 <= __lane3 < BD
+      path: not (CAUSAL == 1)
+      mask: mapped(mapped(__i_n0_6 + __lane2@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 87
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[o] axis 0: 0 <= pid1 < H
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 20, line 95
+      trust sources:
+        - StaticFact
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 20: comparison
+      proof route:
+        - no upper-bound predicate `pid1 < H` in scope (fact set: 0 pred(s); access-point snapshot: 3; entailed DAG atoms: 1); numeric interval not decisive (coord ∈ [0, ?], bound ∈ [?, ?]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+  - store[o] axis 1: 0 <= (BM * pid0) + __lane1@-2 < L
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 20, line 95
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 20: comparison
+      proof route:
+        - direct predicate `(BM * pid0) + __lane1@-2 < L` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[o] axis 2: 0 <= __lane3 < BD
+      path: true
+      mask: mapped(mapped((BM * pid0) + __lane1@-2 < L))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 95
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane3 ∈ [0, 63], extent BD ∈ [64, 64] ⇒ 63 < 64; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+hints:
+  multiple_of(rm_base, BM)
+    dependency: StaticFact at line 16: structural pid * step; integer launch guards required
+  max_contiguous(rm, BM)
+    dependency: StaticFact at line 16: structural contiguous span; integer launch guards required
+  max_contiguous(rn, BN)
+    dependency: StaticFact at line 17: structural contiguous span; integer launch guards required
+  max_contiguous(rd, BD)
+    dependency: StaticFact at line 18: structural contiguous span; integer launch guards required
+  max_contiguous(rv, BN)
+    dependency: StaticFact at line 33: structural contiguous span; integer launch guards required
+  max_contiguous(rv, BN)
+    dependency: StaticFact at line 53: structural contiguous span; integer launch guards required
+  max_contiguous(rv, BN)
+    dependency: StaticFact at line 76: structural contiguous span; integer launch guards required
+effects:
+  Read[BufferRegion[0:q]]
+  Read[BufferRegion[1:k]]
+  Read[BufferRegion[2:v]]
+  Read[BufferRegion[1:k]]
+  Read[BufferRegion[2:v]]
+  Read[BufferRegion[1:k]]
+  Read[BufferRegion[2:v]]
+  Write[BufferRegion[3:o]]
+aliases:
+  scope: static conservative defaults
+  MayAlias[BufferRegion[0:q], BufferRegion[1:k]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[0:q], BufferRegion[2:v]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[0:q], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[1:k], BufferRegion[2:v]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[1:k], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[2:v], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)
+warnings:
+  (none)
+notes:
+  line 30: static-if on Const parameters (resolved at specialization)
+deferred constraints:
+  step: loop step BN >= 1
+  step: loop step BN >= 1
+  step: loop step BN >= 1

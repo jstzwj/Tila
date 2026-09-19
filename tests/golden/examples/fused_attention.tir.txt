@@ -1,0 +1,128 @@
+kernel @fused_attention_kernel
+  buffer q : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]  region=BufferRegion[0:q]
+  buffer k : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]  region=BufferRegion[1:k]
+  buffer v : Buffer[f16, (H, L, BD), ReadOnly, UnknownAlignment]  region=BufferRegion[2:v]
+  buffer o : Buffer[f32, (H, L, BD), WriteOnly, UnknownAlignment]  region=BufferRegion[3:o]
+  scalar sm_scale : f32 | Positive
+  scalar H : i32
+  scalar L : i32
+  scalar q_stride0 : i32
+  scalar q_stride1 : i32
+  scalar q_stride2 : i32
+  scalar k_stride0 : i32
+  scalar k_stride1 : i32
+  scalar k_stride2 : i32
+  scalar v_stride0 : i32
+  scalar v_stride1 : i32
+  scalar v_stride2 : i32
+  scalar o_stride0 : i32
+  scalar o_stride1 : i32
+  scalar o_stride2 : i32
+  const  CAUSAL : Const[int] = 1
+  const  BM : Const[int] = 64
+  const  BN : Const[int] = 64
+  const  BD : Const[int] = 64
+  {
+  pid = program_id(0)
+  ph = program_id(1)
+  rm = ((pid * BM) + arange(0, BM))
+  rn = arange(0, BN)
+  rd = arange(0, BD)
+  m_ok = (rm < L)
+  q_tile = load(q[ph, expand(rm, axis=1), expand(rd, axis=0)], mask=expand(m_ok, axis=1))
+  qs = (sm_scale * 1.4426950408889634)
+  row_max = (zeros((BM, 1), f32) - 1000000000000000019884624838656.0)
+  row_sum = zeros((BM, 1), f32)
+  acc = zeros((BM, BD), f32)
+  static_if (CAUSAL == 1):  # both branches present pre-specialization
+    for n0 in range(0, (pid * BM), BN):
+      rv = (n0 + rn)
+      n_ok = (rv < L)
+      k_t = load(k[ph, expand(rv, axis=0), expand(rd, axis=1)], mask=expand(n_ok, axis=0))
+      s = (dot(q_tile, k_t) * qs)
+      row = max(s, axis=1)
+      m_tile = expand(row, axis=1)
+      m_new = where((m_tile > row_max), m_tile, row_max)
+      alpha = (exp2(row_max - m_new))
+      p = (exp2(s - m_new))
+      v_tile = load(v[ph, expand(rv, axis=1), expand(rd, axis=0)], mask=expand(n_ok, axis=1))
+      l_ij = sum(p, axis=1)
+      acc = (acc * alpha)
+      acc = dot(cast[f16](p), v_tile, acc=acc)
+      row_sum = ((row_sum * alpha) + expand(l_ij, axis=1))
+      row_max = m_new
+    for n0 in range((pid * BM), ((pid * BM) + BM), BN):
+      rv = (n0 + rn)
+      n_ok = (rv < L)
+      causal = (expand(rm, axis=1) >= expand(rv, axis=0))
+      keep = (causal & expand(n_ok, axis=0))
+      k_t = load(k[ph, expand(rv, axis=0), expand(rd, axis=1)], mask=expand(n_ok, axis=0))
+      s = ((dot(q_tile, k_t) * qs) + where(keep, 0.0, -1000000.0))
+      row = max(s, axis=1)
+      m_tile = expand(row, axis=1)
+      m_new = where((m_tile > row_max), m_tile, row_max)
+      alpha = (exp2(row_max - m_new))
+      p = (exp2(s - m_new))
+      v_tile = load(v[ph, expand(rv, axis=1), expand(rd, axis=0)], mask=expand(n_ok, axis=1))
+      l_ij = sum(p, axis=1)
+      acc = (acc * alpha)
+      acc = dot(cast[f16](p), v_tile, acc=acc)
+      row_sum = ((row_sum * alpha) + expand(l_ij, axis=1))
+      row_max = m_new
+  else:
+    for n0 in range(0, L, BN):
+      rv = (n0 + rn)
+      n_ok = (rv < L)
+      k_t = load(k[ph, expand(rv, axis=0), expand(rd, axis=1)], mask=expand(n_ok, axis=0))
+      s = ((dot(q_tile, k_t) * qs) + where(expand(n_ok, axis=0), 0.0, -1000000.0))
+      row = max(s, axis=1)
+      m_tile = expand(row, axis=1)
+      m_new = where((m_tile > row_max), m_tile, row_max)
+      alpha = (exp2(row_max - m_new))
+      p = (exp2(s - m_new))
+      v_tile = load(v[ph, expand(rv, axis=1), expand(rd, axis=0)], mask=expand(n_ok, axis=1))
+      l_ij = sum(p, axis=1)
+      acc = (acc * alpha)
+      acc = dot(cast[f16](p), v_tile, acc=acc)
+      row_sum = ((row_sum * alpha) + expand(l_ij, axis=1))
+      row_max = m_new
+  store o[ph, expand(rm, axis=1), expand(rd, axis=0)] <- (acc / row_sum), mask=expand(m_ok, axis=1)
+  }
+  obligation load[q] axis 0: 0 <= pid1 < H
+  obligation load[q] axis 1: 0 <= (BM * pid0) + __lane1@-2 < L
+  obligation load[q] axis 2: 0 <= __lane3 < BD
+  obligation load[k] axis 0: 0 <= pid1 < H
+  obligation load[k] axis 1: 0 <= __i_n0_4 + __lane2 < L
+  obligation load[k] axis 2: 0 <= __lane3@-2 < BD
+  obligation load[v] axis 0: 0 <= pid1 < H
+  obligation load[v] axis 1: 0 <= __i_n0_4 + __lane2@-2 < L
+  obligation load[v] axis 2: 0 <= __lane3 < BD
+  obligation load[k] axis 0: 0 <= pid1 < H
+  obligation load[k] axis 1: 0 <= __i_n0_5 + __lane2 < L
+  obligation load[k] axis 2: 0 <= __lane3@-2 < BD
+  obligation load[v] axis 0: 0 <= pid1 < H
+  obligation load[v] axis 1: 0 <= __i_n0_5 + __lane2@-2 < L
+  obligation load[v] axis 2: 0 <= __lane3 < BD
+  obligation load[k] axis 0: 0 <= pid1 < H
+  obligation load[k] axis 1: 0 <= __i_n0_6 + __lane2 < L
+  obligation load[k] axis 2: 0 <= __lane3@-2 < BD
+  obligation load[v] axis 0: 0 <= pid1 < H
+  obligation load[v] axis 1: 0 <= __i_n0_6 + __lane2@-2 < L
+  obligation load[v] axis 2: 0 <= __lane3 < BD
+  obligation store[o] axis 0: 0 <= pid1 < H
+  obligation store[o] axis 1: 0 <= (BM * pid0) + __lane1@-2 < L
+  obligation store[o] axis 2: 0 <= __lane3 < BD
+  effect Read[BufferRegion[0:q]]
+  effect Read[BufferRegion[1:k]]
+  effect Read[BufferRegion[2:v]]
+  effect Read[BufferRegion[1:k]]
+  effect Read[BufferRegion[2:v]]
+  effect Read[BufferRegion[1:k]]
+  effect Read[BufferRegion[2:v]]
+  effect Write[BufferRegion[3:o]]
+  alias MayAlias[BufferRegion[0:q], BufferRegion[1:k]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:q], BufferRegion[2:v]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:q], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:k], BufferRegion[2:v]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:k], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[2:v], BufferRegion[3:o]] (distinct external parameters are conservatively MayAlias)

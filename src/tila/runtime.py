@@ -32,6 +32,8 @@ from .facts import (Facts, Pred, _decompose_linear, evaluate_obligation,
 from .intrinsics import INTRINSIC_REGISTRY_SEMANTIC_REVISION
 from . import types as TY
 from . import tir as T
+from . import target as target_policy
+from .verifier import verify
 
 try:
     import torch
@@ -136,10 +138,17 @@ class JITFunction:
         self.__doc__ = fn.__doc__
         hir = frontend.compile_stage1(fn)
         self.tk: T.TKernel = check_kernel(hir)     # Stage 1（装饰期）
+        import hashlib
+        import inspect
+        self.source_fingerprint = hashlib.sha256(inspect.getsource(fn).encode()).hexdigest()
+        self.tila_source = hir.source
+        self.source_start_line = inspect.getsourcelines(fn)[1]
         self.assume_launch = None                  # (preds, ast) 由装饰器注入
         self._kern_cache: dict = {}
         self.last_report: str = ""
         self.last_proof_results: tuple = ()
+        self.last_backend_resources = None
+        self.last_alignment_facts = ()
 
     # ------------------------------------------------------------------
 
@@ -172,6 +181,7 @@ class JITFunction:
         cenv = self._resolve_consts(consts)
         self._check_consts(cenv)
         self._check_deferred(cenv)
+        verify(self.tk, cenv)
         numeric_pending = numeric.validate(self.tk, cenv)
         # check/build 无 launch 数值：以符号 grid 契约代位（纯 pid 坐标 +
         # 维符号上界 ⇒ grid_ax == bound, step 1）。launch 期以数值复核
@@ -299,8 +309,9 @@ class JITFunction:
         L.append("hints:")
         # A private lowering instance records exactly the hints it would emit;
         # it neither mutates TKernel nor compiles/executes generated code.
-        hint_emitter = lowering.Lowering(tk)
+        hint_emitter = lowering.Lowering(tk, alignment_facts=self.last_alignment_facts)
         hint_emitter.stmts(tk.body, 1)
+        hint_emitter.alignment_prefix()
         if hint_emitter.hint_audit:
             for hint, origins in hint_emitter.hint_audit:
                 L.append(f"  {hint}")
@@ -642,21 +653,36 @@ def _debug() -> bool:
     return os.environ.get("TILA_DEBUG", "") == "1"
 
 
-def _triton_cache_key(jf, consts: dict):
+def _triton_cache_key(jf, consts: dict, *, target=None, num_warps=4, source=None, bindings=(), alignment_facts=()):
     """Semantic cache key; registry changes invalidate compiled kernels."""
+    import hashlib
+    if source is None and hasattr(jf, "tk"):
+        source = lowering.Lowering(jf.tk, _debug()).kernel_source()
+    fingerprint = hashlib.sha256((source or "").encode()).hexdigest()
     return (INTRINSIC_REGISTRY_SEMANTIC_REVISION, id(jf),
             tuple((k, "Bool" if type(v) is bool else "Int", v)
-                  for k, v in sorted(consts.items())), _debug(),
+                  for k, v in sorted(consts.items())), _debug(), target, num_warps,
+            getattr(jf, "source_fingerprint", None), fingerprint, bindings, tuple(alignment_facts),
             T.constant_signature(jf.tk.body) if hasattr(jf, "tk") else ())
 
 
 class _Launcher:
-    def __init__(self, jf: JITFunction, grid):
+    def __init__(self, jf: JITFunction, grid, num_warps=4):
         self.jf = jf
         self.grid = grid
+        self.num_warps = num_warps
+
+    def with_options(self, *, num_warps=4):
+        """Launch options live outside kernel argument/Const namespaces."""
+        target_policy.validate_options(num_warps)
+        return _Launcher(self.jf, self.grid, num_warps)
 
     def __call__(self, *args, **kwargs):
         jf = self.jf
+        jf.last_backend_resources = None
+        jf.last_alignment_facts = ()
+        jf.tk.runtime_alignments = {}
+        target_policy.validate_options(self.num_warps)
         tk = jf.tk
         dim_vals: dict[str, int] = {}
         stride_vals: dict[str, int] = {}
@@ -748,6 +774,7 @@ class _Launcher:
                 f"unknown keyword argument(s): {', '.join(sorted(unknown_kw))}")
 
         # ---- 张量绑定：dtype/shape/strides/data_ptr（surface-language.md §6）
+        _validate_devices(tensors)
         tk.runtime_alignments = {}
         for b in tk.buffers:
             t = tensors[b.name]
@@ -924,15 +951,37 @@ class _Launcher:
 
         # ---- Stage 2：延迟约束 + 义务四态（strict/warn 由 TILA_SAFETY 决定）
         jf._check_deferred(consts)
-        if any(type(g) is not int or not 0 <= g <= (1 << 31) - 1 for g in grid):
-            raise TilaLaunchContractError("TILA-TYPE-104", "auto grid must fit nonnegative i32")
+        target_policy.validate_grid(grid)
+        # Resolve target even for empty launches. A zero grid does not bypass
+        # binding, alignment, refinement, Const or assume_launch contracts.
+        self.target = self._resolve_target(tensors)
+        verify(tk, consts, capability=self.target.capability if self.target is not None else None)
+        if 0 in grid:
+            jf.last_report = "launch: no-op (zero grid axis); host contracts checked; no program executed"
+            jf.last_proof_results = ()
+            return
         numeric.validate(tk, consts, scalar_vals, grid + (1,) * (3 - len(grid)))
         jf._evaluate_obligations(consts, grid_facts, extra_preds,
             launch_bindings=tuple(sorted(meta.items())) +
                 (("grid", tuple(grid)),))
 
         # ---- 执行：torch+cuda+triton → GPU；否则 interp
+        from .alignment import collect
+        self.alignment_facts = collect(tk, tensors, _tensor_info)
         self._execute(tensors, scalar_vals, stride_vals, consts, grid)
+        jf.last_alignment_facts = self.alignment_facts
+
+    def _resolve_target(self, tensors):
+        t0 = next(iter(tensors.values()), None)
+        if torch is None or not isinstance(t0, torch.Tensor) or not t0.is_cuda:
+            return None
+        if os.environ.get("TILA_INTERP") == "1":
+            raise TilaError("TILA-TARGET-005", "CUDA tensor cannot use the forced CPU interpreter")
+        try:
+            import triton
+        except ImportError:
+            raise TilaError("TILA-TARGET-004", "tensor is on CUDA but triton is not installed")
+        return target_policy.resolve_cuda(torch, triton, t0.device)
 
     def _execute(self, tensors, scalar_vals, stride_vals, consts, grid):
         jf, tk = self.jf, self.jf.tk
@@ -950,15 +999,34 @@ class _Launcher:
                 raise TilaError(
                     "TILA-TARGET-004",
                     "tensor is on CUDA but triton is not installed")
-            key = _triton_cache_key(jf, consts)
+            device = next(iter(tensors.values())).device
+            emitter = lowering.Lowering(tk, _debug(), alignment_facts=self.alignment_facts)
+            src = emitter.kernel_source()
+            bindings = _binding_signature(tk, tensors)
+            from .backend import preflight, failure
+            from dataclasses import asdict
+            context = {"kernel": tk.name, "tila_source": jf.tila_source,
+                       "source_file": jf.fn.__code__.co_filename,
+                       "source_start_line": jf.source_start_line,
+                       "consts": consts, "scalars": scalar_vals,
+                       "grid": grid, "num_warps": self.num_warps,
+                       "debug": _debug(), "target": asdict(self.target),
+                       "bindings": bindings, "argument_order": emitter.launch_args(),
+                       "alignment_facts": [asdict(f) for f in self.alignment_facts]}
+            key = _triton_cache_key(jf, consts, target=self.target, num_warps=self.num_warps,
+                                    source=src, bindings=bindings, alignment_facts=self.alignment_facts)
             if key not in jf._kern_cache:
-                src = lowering.Lowering(tk, _debug()).kernel_source()
                 # Triton retrieves Python source with inspect, including helpers.
                 import linecache
-                filename = f"<tila:{tk.name}:{id(jf)}:{_debug()}>"
+                import hashlib
+                filename = f"<tila:{tk.name}:{hashlib.sha256(src.encode()).hexdigest()}>"
                 linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
                 ns: dict = {"__name__": "tila_generated"}
-                exec(compile(src, filename, "exec"), ns)
+                try:
+                    exec(compile(src, filename, "exec"), ns)
+                except Exception as exc:
+                    raise failure(exc, phase="source", source=src,
+                                  source_map=emitter.source_map, context=context) from exc
                 jf._kern_cache[key] = ns[tk.name]
             kern = jf._kern_cache[key]
             # 实参序 = 签名序：buffer 张量 → ptr 参数张量 → 标量 → Const
@@ -966,7 +1034,10 @@ class _Launcher:
             args += [tensors[p.name] for p in tk.ptr_params]
             args += [scalar_vals[s.name] for s in tk.scalars]
             args += [consts[c.name] for c in tk.consts]
-            kern[grid](*args, num_warps=4)
+            with torch.cuda.device(device):
+                jf.last_backend_resources = preflight(kern, args, grid, self.num_warps,
+                    source=src, source_map=emitter.source_map, context=context)
+                kern[grid](*args, num_warps=self.num_warps)
             return
         # interp：numpy 视图（torch CPU 张量共享内存）；ptr 参数以自身名
         # 注册为 interp buffer（指针值 = ("ptr", name, offset)）。
@@ -1070,9 +1141,34 @@ def _check_index_metadata(shape, strides):
         raise TilaLaunchContractError("TILA-NUM-001", "linear element offset must fit i64")
 
 
+def _validate_devices(tensors):
+    devices = {str(t.device) if torch is not None and isinstance(t, torch.Tensor) else "cpu"
+               for t in tensors.values()}
+    if len(devices) > 1:
+        raise TilaError("TILA-TARGET-008", "all tensor arguments must be on the same device",
+                        details=["devices: " + ", ".join(sorted(devices))])
+    if any(d != "cpu" and not d.startswith("cuda:") for d in devices):
+        raise TilaError("TILA-TARGET-007", "only CPU and the validated CUDA target are supported")
+
+
+def _binding_signature(tk, tensors):
+    """ABI + view metadata, without exact addresses or mutable proof state."""
+    result = []
+    for p in tk.buffers + tk.ptr_params:
+        value = tensors[p.name]
+        dt, shape, strides, ptr = _tensor_info(value)
+        offset = value.storage_offset() if torch is not None and isinstance(value, torch.Tensor) else 0
+        alignment = min(ptr & -ptr, 256) if ptr else 0
+        result.append((p.name, dt.name, shape, strides, offset, alignment, p.vtype.describe()))
+    result.extend((s.name, s.dtype.name) for s in tk.scalars)
+    return tuple(result)
+
+
 def _tensor_info(t):
     """dtype/shape/strides(元素)/data_ptr，torch 与 numpy 双协议。"""
     if torch is not None and isinstance(t, torch.Tensor):
+        if str(t.dtype) in ("torch.float8_e4m3fn", "torch.float8_e5m2"):
+            raise TilaError("TILA-TARGET-009", "FP8 storage/cast execution is not validated; use f16/bf16/f32")
         dt = _TORCH_DT.get(str(t.dtype).removeprefix("torch."))
         strides = tuple(t.stride())
         return dt, tuple(t.shape), strides, t.data_ptr()

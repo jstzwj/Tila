@@ -1,0 +1,27 @@
+kernel @softmax_kernel
+  buffer x : Buffer[f32, (M, N), ReadOnly, UnknownAlignment]  region=BufferRegion[0:x]
+  buffer o : Buffer[f32, (M, N), WriteOnly, UnknownAlignment]  region=BufferRegion[1:o]
+  scalar M : i32
+  scalar N : i32
+  scalar x_stride0 : i32
+  scalar x_stride1 : i32
+  scalar o_stride0 : i32
+  scalar o_stride1 : i32
+  const  BN : Const[int] = 256
+  {
+  row = program_id(0)
+  offs = arange(0, BN)
+  m = (offs < N)
+  v = load(x[row, offs], mask=m, other=-1000000000000000019884624838656.0)
+  mx = max(v, axis=0)
+  e = (exp(v - mx))
+  s = sum(e, axis=0)
+  store o[row, offs] <- (e / s), mask=m
+  }
+  obligation load[x] axis 0: 0 <= pid0 < M
+  obligation load[x] axis 1: 0 <= __lane1 < N
+  obligation store[o] axis 0: 0 <= pid0 < M
+  obligation store[o] axis 1: 0 <= __lane1 < N
+  effect Read[BufferRegion[0:x]]
+  effect Write[BufferRegion[1:o]]
+  alias MayAlias[BufferRegion[0:x], BufferRegion[1:o]] (distinct external parameters are conservatively MayAlias)

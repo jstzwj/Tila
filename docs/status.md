@@ -6,7 +6,27 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 832 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 926 passed、零 skipped
+
+M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；专用 GPU runner 和 workflow 已配置，
+当前覆盖 160 个 GPU 测试节点/304 个语义案例，初始支持仅 RTX 3090/SM86。
+GPU workflow 随 main 发布，配置 push 与每日定时验收；操作与运行记录见 [GPU 支持](gpu-support.md)。
+
+M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
+源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
+本阶段已通过本地严格验收；不将此前远端 CI 结果视为当前修改的 CI 证据。
+
+M3-03 已增加语句级 source map、编译/加载诊断与重放附件、shared-memory/线程硬门禁，
+寄存器/spill 仅记录性能信息；边界与使用方式见 [后端诊断](backend-diagnostics.md)。
+
+M3-04 已建立逐 intrinsic 的 [操作/dtype 证据清单](gpu-capabilities.json) 与
+[退出条件核查](gpu-operation-audit.md)，新增 36 个 GPU 节点和五个示例的 15 份 golden。
+修复窄浮点 exp/exp2 发射与中间舍入；FP8 storage/cast 收紧为 Stage 1 类型规则，
+固定 target 的 build/launch 明确拒绝。未认证的 dtype/shape 组合不因清单存在而获得支持承诺。
+
+M3-05 已接入 [alignment 契约到 hint](alignment-hints.md)：显式声明且经本次绑定
+校验的一维 stride-1 Buffer/Ptr 可发射基地址字节整除提示；explain 标注 checked
+来源，缓存隔离，失败/空启动不保留旧发射证据。非连续布局和无证据的派生地址仍不发射。
 
 M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节点、214 个语义
 案例通过，零 skipped。统一命令 `PYTHONPATH=src python tools/gpu_audit.py`，
@@ -14,7 +34,7 @@ M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节�
 [ADR-008](adr/008-reduction-precision.md) 固定归约输入/累加/输出精度及 NaN 传播，
 [ADR-009](adr/009-gpu-validation-baseline.md) 固定本地组合。已修复宽无符号
 PyTorch dtype 绑定、窄整数 max 恢复、浮点 max NaN 一致性与 bool/FP8 归约门禁。
-正式 GPU CI、跨架构/版本支持矩阵仍未建立，归 M3。
+跨架构/版本支持仍未验证，归 M3 后续。
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -76,8 +96,8 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 - `Triton`：可生成 Triton 源码；
 - `GPU verified`：已在固定 CUDA/Triton 环境持续执行验证。
 
-当前没有 GPU CI，因此本文没有任何能力标为 `GPU verified`。`Triton` 只表示有
-lowering 路径或源码 golden，不等价于真实 GPU 支持承诺。
+当前 GPU CI 已从验证分支推进至 main，默认分支配置持续验收。暂不批量升级为
+`GPU verified`；已验证的操作、dtype、形状范围以 gpu-support.md 为准。
 
 M2-01 新增可显式运行的 `tests/gpu_integer_smoke.py`，已在 RTX 3090 /
 PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照。
@@ -94,9 +114,9 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | Stage 1 定义期检查 | `Implemented` | Check | 装饰函数时完成子集、类型、shape、capability 和 obligation 生成 |
 | Stage 2 Const 特化 | `Implemented` | Check | 默认值/CLI const/launch const、延迟 shape 约束和 bounds 求值 |
 | NumPy reference interpreter | `Implemented` | CPU | add、matmul、attention、控制流、Ptr 1D 等路径有测试 |
-| Triton 源码 lowering | `Partial` | Triton | 核心 TIR 可生成；只有 add 有逐字节 golden，尚无 GPU CI 和完整 target verifier |
-| CUDA 自动后端选择 | `Partial` | Triton | torch CUDA tensor 会选择 Triton；设备一致性、版本矩阵和真实 GPU 回归未闭环 |
-| 特化缓存 | `Partial` | Triton | 当前键覆盖函数身份、Const、debug；未覆盖完整 dtype/target/alignment/source fingerprint |
+| Triton 源码 lowering | `Partial` | Triton | 结构/静态 target verifier、语句 source map、编译诊断及 shared-memory/线程硬门禁已实现；其他架构与完整性能分析待续 |
+| CUDA 自动后端选择 | `Partial` | Triton | 集中检查同设备、RTX 3090/SM86、Triton 3.6.0、grid/tile/dot 限制；完整组合由严格审计认证 |
+| 特化缓存 | `Implemented` | Triton | 进程内 JIT callable 缓存含源码、Const/位模式、debug、target UUID/软件版本、num_warps、dtype/布局/alignment；不承诺持久化或容量上限 |
 | Source map/后端错误回映射 | `Designed` | — | 尚无 Tila 源位置到 Triton 编译错误的完整映射 |
 | 多后端/直接 PTX | `Deferred` | — | Triton 是当前唯一计划后端 |
 
@@ -131,7 +151,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | `u8/u16/u32/u64` | `Implemented` | Check / CPU / Triton | signed/unsigned 隐式混算拒绝 |
 | `f16/f32/f64` | `Implemented` | Check / CPU / Triton | 基础算术、cast、load/store；真实 GPU 组合未验证 |
 | `bf16` 基础值语义 | `Implemented` | Check / CPU / Triton | `ml_dtypes` 为 dev/interp 依赖；masked load 和加法有端到端测试 |
-| `f8e4m3fn/f8e5m2` storage gate | `Partial` | Check / Triton | 可声明、load/store/cast，直接算术会拒绝；CPU storage 和真实 GPU/FP8 dot 未闭环 |
+| `f8e4m3fn/f8e5m2` storage gate | `Partial` | Check | Stage 1 可声明和检查 load/store/cast，直接算术拒绝；固定 target build/launch 拒绝 storage/cast 及中间 FP8 值，尚无执行支持 |
 | FP8 完整 load→compute→store | `Designed` | — | 目标能力、舍入和 GPU 验证待 M5 |
 | dtype capability 公共对象（`Float` 等） | `Designed` | — | 当前只有内部 tuple，没有公共 `tila.Float`/`DotInput` 类型 |
 
@@ -286,12 +306,12 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | bool tile 消费 | `Implemented` | Check / CPU / Triton | load/store mask、where 支持 Block bool；不自动取得 bounds 事实，不合并 Mask/Block 类型 |
 | `mask.any()/mask.all()` | `Implemented` | Check / CPU / Triton | Mask/Block bool，仅方法形式，归约为 scalar bool |
 | `where` | `Implemented` | Check / CPU / Triton | eager 两侧；dtype 必须一致，shape 可广播 |
-| `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；无真实 GPU CI |
+| `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；固定 RTX 3090 示例 GPU 对照覆盖 f32 acc，完整矩阵待续 |
 | `dot` bf16/FP8 输入 | `Designed` | — | 当前 `DOT_INPUT` 仅 f16 |
 | `sum/max` | `Implemented` | Check / CPU / Triton | ADR-008：exact int axis；显式累加与输出 dtype、NaN 传播；12 dtype 双轴 GPU 对照；bool/FP8 先拒绝或 cast |
 | `min` reduction | `Deferred` | — | 尚未实现 |
 | `exp` | `Implemented` | Check / CPU / Triton | Float 域逐元素 |
-| `exp2` | `Implemented` | Check / CPU / Triton | 公共占位符、frontend、checker、interpreter 与 lowering 已对齐 |
+| `exp2` | `Implemented` | Check / CPU / Triton | 四种浮点 GPU 对照；与 exp 一样，f16/bf16 经 f32 计算后立即舍入回输入 dtype；f32/f64 保持精度 |
 | `log/sqrt/rsqrt/abs/floor/ceil` | `Deferred` | — | 尚未实现 |
 
 ### 8.4 断言与提示
@@ -302,7 +322,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `static_assert(pred)` | `Implemented` | Check / Specialize / Launch | Stage 1 谓词立即检查；只依赖 Const 参数的 staged bool 每次 specialization 复查，保留 `and/or` 短路语义 |
 | `static_assert(pred, msg)` | `Designed` | — | Python 子集不接受字符串，消息形式尚未实现 |
 | 手工 multiple-of/max-contiguous hint | `Deferred` | — | 不暴露隐形扁平入口；未来若加入，仅采用经过设计的 `tila.hint.*` 表面 API |
-| 自动 optimization hint | `Partial` | Triton | contiguous/multiple-of 已有；alignment 与完整 provenance 尚缺 |
+| 自动 optimization hint | `Partial` | Triton | 静态 contiguous/multiple-of 与经 launch 校验的一维连续 Buffer/Ptr 基地址 alignment 均记录来源；无证据的派生地址和其他布局不新增提示 |
 
 ---
 
@@ -348,7 +368,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 显式整数 smoke 已在固定本地环境运行；官方示例全覆盖、CI 与支持矩阵仍待 M3 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 160 节点/304 案例，五个官方示例多配置；逐 intrinsic 证据见 gpu-capabilities.json，main 配置持续验收、未覆盖组合不作承诺 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

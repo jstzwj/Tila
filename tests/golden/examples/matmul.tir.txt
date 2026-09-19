@@ -1,0 +1,44 @@
+kernel @matmul_kernel
+  buffer a : Buffer[f16, (M, K), ReadOnly, UnknownAlignment]  region=BufferRegion[0:a]
+  buffer b : Buffer[f16, (K, N), ReadOnly, UnknownAlignment]  region=BufferRegion[1:b]
+  buffer c : Buffer[f32, (M, N), WriteOnly, UnknownAlignment]  region=BufferRegion[2:c]
+  scalar M : i32
+  scalar K : i32
+  scalar a_stride0 : i32
+  scalar a_stride1 : i32
+  scalar N : i32
+  scalar b_stride0 : i32
+  scalar b_stride1 : i32
+  scalar c_stride0 : i32
+  scalar c_stride1 : i32
+  const  BM : Const[int] = 64
+  const  BN : Const[int] = 64
+  const  BK : Const[int] = 32
+  {
+  pid_m = program_id(0)
+  pid_n = program_id(1)
+  rm = ((pid_m * BM) + arange(0, BM))
+  rn = ((pid_n * BN) + arange(0, BN))
+  rk = arange(0, BK)
+  m_mask = (rm < M)
+  n_mask = (rn < N)
+  acc = zeros((BM, BN), f32)
+  for k0 in range(0, K, BK):
+    k_mask = ((k0 + rk) < K)
+    a_tile = load(a[expand(rm, axis=1), expand((k0 + rk), axis=0)], mask=(expand(m_mask, axis=1) & expand(k_mask, axis=0)))
+    b_tile = load(b[expand((k0 + rk), axis=1), expand(rn, axis=0)], mask=(expand(k_mask, axis=1) & expand(n_mask, axis=0)))
+    acc = dot(a_tile, b_tile, acc=acc)
+  store c[expand(rm, axis=1), expand(rn, axis=0)] <- acc, mask=(expand(m_mask, axis=1) & expand(n_mask, axis=0))
+  }
+  obligation load[a] axis 0: 0 <= (BM * pid0) + __lane1@-2 < M
+  obligation load[a] axis 1: 0 <= __i_k0_4 + __lane3 < K
+  obligation load[b] axis 0: 0 <= __i_k0_4 + __lane3@-2 < K
+  obligation load[b] axis 1: 0 <= (BN * pid1) + __lane2 < N
+  obligation store[c] axis 0: 0 <= (BM * pid0) + __lane1@-2 < M
+  obligation store[c] axis 1: 0 <= (BN * pid1) + __lane2 < N
+  effect Read[BufferRegion[0:a]]
+  effect Read[BufferRegion[1:b]]
+  effect Write[BufferRegion[2:c]]
+  alias MayAlias[BufferRegion[0:a], BufferRegion[1:b]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:a], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:b], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
