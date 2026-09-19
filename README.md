@@ -7,8 +7,10 @@ bounds obligation。
 
 Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typed TIR
 可以生成 Triton 源码，也可以交给 NumPy reference interpreter 执行。Triton
-和 CUDA 路径已有 RTX 3090 固定组合、GPU CI 验证分支及
-[launch/target 门禁](docs/launch-target.md)、[编译诊断与资源检查](docs/backend-diagnostics.md)；跨架构验证仍未闭环，
+和 CUDA 路径已有 RTX 3090 / SM86 固定支持组合，GPU CI 随 main 发布，配置为
+push 验收与每日定时验收。已实现 [launch/target 门禁](docs/launch-target.md)、
+[编译诊断与资源检查](docs/backend-diagnostics.md)、[操作/dtype 审计](docs/gpu-operation-audit.md)
+及 [alignment hint 来源与缓存隔离](docs/alignment-hints.md)。跨架构验证仍未闭环，
 因此后端整体状态仍为 `Partial`。
 
 > 类型不只描述“值是什么”，还描述 tile shape、编译期常量、读写能力和
@@ -190,7 +192,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 以下能力不是当前完整承诺。精确状态和边界见 [docs/status.md](docs/status.md)：
 
-- Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；默认分支定时 CI 待合并，
+- Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；CI 的环境锁、重放与运行记录见
+  [GPU 支持](docs/gpu-support.md)。
   编译资源门禁和语句级 source map 已实现，其他架构及完整性能分析仍未验证；
 - Ptr 公共语法与 RegionId/Extent/alias 模型已定型；Buffer v0 不公开
   Strides/AddressSpace，`buf.ptr` 只允许 rank-1、stride-1；显式多维 flatten
@@ -200,7 +203,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 - effect 目前有聚合记录和 `where` eager-memory warning；atomic、race、
   uniformity 尚未实现；
 - TypeVar、公开 capability 集合、target database 和性能诊断尚未实现；
-- 可插拔 SMT solver、完整 hint provenance 和多示例 Triton golden 尚未实现；
+- 默认证明器为 Z3，尚无公开可插拔 solver 接口；已发射 hint 记录来源，五个官方
+  示例已有 TIR、Triton source 和 explain golden，M3 最终退出审计仍待完成；
 - `full/trans/cat/min/log/sqrt/rsqrt/abs/floor/ceil` 等内建尚未实现。
 
 这些限制是显式的工程状态，不会被默认为“由 Triton 自动支持”。
