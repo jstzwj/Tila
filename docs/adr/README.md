@@ -28,6 +28,14 @@ M2-07 独立决策（ADR-012 至 ADR-015 均已接受并实现）：
 | [ADR-014](014-host-integer-normalization.md) | Accepted | 显式 host_int 白名单转换已实现，保留 ExactInt |
 | [ADR-015](015-rounded-typed-constants.md) | Accepted | 显式目标 dtype、RNE 舍入与按位常量表示；M2-07d 已实现 |
 
+M4-01 设计准备：
+
+| ADR | 状态 | 主题 |
+|---|---|---|
+| [ADR-016](016-instruction-effect-ir.md) | Proposed | 逐 load/store 的 effect、RegionId、定义引用与派生 path/mask/loop 上下文；从 TIR 汇总，尚未实现 |
+
+ADR-016 不替代 ADR-010 的诊断严格度决策，不引入 atomic/race/uniformity 功能。
+
 状态含义：
 
 - `Proposed`：讨论中，不能作为兼容性承诺；

@@ -67,9 +67,9 @@ JUnit 保留在 `artifacts/cpu/results.xml`。CPU workflow 已检查 YAML/命令
    dtype。按用户确认的“不扩充新功能、不支持的组合明确限制”，计划 §8 已明确
    FP8 执行及 bf16/f32 dot 输入仍拒绝；它们不是当前执行支持项。更广 shape/rank/
    stride 组合仍未认证，具体范围见 [补测记录](m3-matrix-followup.md)。
-3. **CPU 托管运行已通过，更广平台仍无证据。** b269aba 的首次托管 run 及附件
-   已核实；不能充当后续修改的远端证据。最低 Python、Windows 和其他 Python CI
-   尚未建立，见 [CPU CI](cpu-ci.md)。
+3. **CPU 托管运行已通过，更广平台仍无证据。** b269aba 的首次 run 与矩阵提交
+   4774194 的 937 项 run 均已通过并核实附件。最低 Python、Windows 和其他
+   Python CI 尚未建立，见 [CPU CI](cpu-ci.md)。
 
 其他架构/版本、完整 FP8、race/atomic/uniformity、泛型和性能层保持未验证/后续阶段，
 不因本次通过扩大支持范围。`--exploratory` 只放宽审计环境门禁，不绕过 runtime 的

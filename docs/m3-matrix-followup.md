@@ -8,7 +8,10 @@
 首个 [GitHub 托管 CPU run](https://github.com/jstzwj/Tila/actions/runs/35448123253)
 已成功，对应 `b269aba7c24b00028b5c1cd45e5da17c870a6905`：926 项全部通过，失败 0、
 跳过 0。下载 `cpu-test-report` 附件后核对 JUnit，包含 15 个官方示例 golden。
-这是提交 b269aba 的证据，不冒充后续代码修改的远端验收。当前修改另行本地复验。
+这是提交 b269aba 的证据。后续矩阵提交 `4774194` 的
+[托管 run](https://github.com/jstzwj/Tila/actions/runs/35448947430)已取得 **937 项
+全通过、零跳过** 的独立记录，JUnit 附件已下载核对，包括新增 dot 回归与 15 个
+官方示例 golden。
 runner 为 GitHub 托管 Ubuntu；没有注册或连接开发者机器。附件有保存期限，流程
 与本地重跑命令见 [CPU CI](cpu-ci.md)。
 

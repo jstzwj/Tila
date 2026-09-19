@@ -18,6 +18,10 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 [GitHub 托管 CPU CI](cpu-ci.md)首个 run 已成功，运行回归/golden；不将 CPU
 结果视为 GPU 证据，未测的 shape/stride/架构组合不作支持承诺。
 
+提交 `4774194` 的托管 CPU CI 已通过 937 项回归，JUnit 附件与 15 个示例 golden
+已核实。M4-01 仅完成 [ADR-016 提案](adr/016-instruction-effect-ir.md)：逐访问元数据、
+定义引用、控制流组合及派生汇总；状态 Proposed，未增加 effect IR 或并发检查实现。
+
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
 本阶段已通过本地严格验收；不将此前远端 CI 结果视为当前修改的 CI 证据。
@@ -350,7 +354,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | SAT 反例可达性 | `Partial` | Check / Launch | 首次访问的精确整数标量/常量/条件路径可确认；加载、phi、lane、循环及前序内存效果仍为 Unknown 候选 |
 | 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
 | kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
-| per-instruction effect IR | `Designed` | — | TLoad/TStore 尚无统一原生 effect 字段 |
+| per-instruction effect IR | `Designed` | — | ADR-016 为 Proposed；TLoad/TStore 尚无统一原生 effect 字段，控制流上下文与 TIR 派生汇总待实现 |
 | `where` eager memory warning | `Implemented` | Check | `TILA-EFFECT-007` 已生成；完整 effect/并发系统归 M4 |
 | alias 声明/运行时 alias 检查 | `Designed` | — | `tila.alias`、`--check-alias` 尚不存在 |
 | atomic | `Designed` | — | 无公共名字、checker、TIR 或后端实现 |

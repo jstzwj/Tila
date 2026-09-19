@@ -6,6 +6,11 @@ workflow_dispatch。[首次托管运行](https://github.com/jstzwj/Tila/actions/
 已通过：提交 b269aba 的 926 项回归、零 skipped，JUnit 附件已下载核对，包含 15 个
 官方示例 golden。后续修改必须取得各自的验收证据，不能沿用旧提交的成功状态。
 
+矩阵补测提交 `47741941cc9fd5603b41883f7b4801f126eae408` 的
+[托管运行](https://github.com/jstzwj/Tila/actions/runs/35448947430)也已成功：**937 项
+全部通过，失败/错误/跳过均为 0**。`cpu-test-report` 附件已下载核实，包含新增
+f16 dot 舍入回归与全部 15 个官方示例 golden。本轮 ADR 文档不改变这些测试行为。
+
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
 contents:read，checkout 不保留凭据；第三方 action 固定到 commit。PR 使用普通
