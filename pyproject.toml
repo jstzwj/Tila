@@ -12,7 +12,7 @@ dependencies = ["numpy", "z3-solver==4.16.0.0"]
 [project.optional-dependencies]
 dev = ["pytest", "numpy", "ml_dtypes"]
 interp = ["numpy", "ml_dtypes"]
-triton = ["triton"]
+triton = ["triton==3.6.0"]
 
 [project.scripts]
 tila = "tila.cli:main"

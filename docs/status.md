@@ -6,7 +6,11 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 832 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 842 passed、零 skipped
+
+M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；专用 GPU runner 和 workflow 已配置，
+当前覆盖 104 个 GPU 测试节点/248 个语义案例，初始支持仅 RTX 3090/SM86。
+默认分支定时验收须合并验证分支后启用；操作与边界见 [GPU 支持](gpu-support.md)。
 
 M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节点、214 个语义
 案例通过，零 skipped。统一命令 `PYTHONPATH=src python tools/gpu_audit.py`，
@@ -14,7 +18,7 @@ M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节�
 [ADR-008](adr/008-reduction-precision.md) 固定归约输入/累加/输出精度及 NaN 传播，
 [ADR-009](adr/009-gpu-validation-baseline.md) 固定本地组合。已修复宽无符号
 PyTorch dtype 绑定、窄整数 max 恢复、浮点 max NaN 一致性与 bool/FP8 归约门禁。
-正式 GPU CI、跨架构/版本支持矩阵仍未建立，归 M3。
+跨架构/版本支持仍未验证，归 M3 后续。
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -76,8 +80,8 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 - `Triton`：可生成 Triton 源码；
 - `GPU verified`：已在固定 CUDA/Triton 环境持续执行验证。
 
-当前没有 GPU CI，因此本文没有任何能力标为 `GPU verified`。`Triton` 只表示有
-lowering 路径或源码 golden，不等价于真实 GPU 支持承诺。
+当前 GPU CI 在验证分支建立，默认分支持续验收尚待合并。暂不批量升级为
+`GPU verified`；已验证的操作、dtype、形状范围以 gpu-support.md 为准。
 
 M2-01 新增可显式运行的 `tests/gpu_integer_smoke.py`，已在 RTX 3090 /
 PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照。
@@ -95,7 +99,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | Stage 2 Const 特化 | `Implemented` | Check | 默认值/CLI const/launch const、延迟 shape 约束和 bounds 求值 |
 | NumPy reference interpreter | `Implemented` | CPU | add、matmul、attention、控制流、Ptr 1D 等路径有测试 |
 | Triton 源码 lowering | `Partial` | Triton | 核心 TIR 可生成；只有 add 有逐字节 golden，尚无 GPU CI 和完整 target verifier |
-| CUDA 自动后端选择 | `Partial` | Triton | torch CUDA tensor 会选择 Triton；设备一致性、版本矩阵和真实 GPU 回归未闭环 |
+| CUDA 自动后端选择 | `Partial` | Triton | 已检查同设备、RTX 3090/SM86、Triton 3.6.0；完整 target verifier 仍待完成 |
 | 特化缓存 | `Partial` | Triton | 当前键覆盖函数身份、Const、debug；未覆盖完整 dtype/target/alignment/source fingerprint |
 | Source map/后端错误回映射 | `Designed` | — | 尚无 Tila 源位置到 Triton 编译错误的完整映射 |
 | 多后端/直接 PTX | `Deferred` | — | Triton 是当前唯一计划后端 |
@@ -348,7 +352,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 显式整数 smoke 已在固定本地环境运行；官方示例全覆盖、CI 与支持矩阵仍待 M3 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 104 节点/248 案例，五个官方示例多配置；默认分支调度待合并、完整 dtype/target 矩阵仍待 M3 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

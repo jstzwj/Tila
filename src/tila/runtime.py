@@ -642,18 +642,25 @@ def _debug() -> bool:
     return os.environ.get("TILA_DEBUG", "") == "1"
 
 
-def _triton_cache_key(jf, consts: dict):
+def _triton_cache_key(jf, consts: dict, *, target=None, num_warps=4):
     """Semantic cache key; registry changes invalidate compiled kernels."""
     return (INTRINSIC_REGISTRY_SEMANTIC_REVISION, id(jf),
             tuple((k, "Bool" if type(v) is bool else "Int", v)
-                  for k, v in sorted(consts.items())), _debug(),
+                  for k, v in sorted(consts.items())), _debug(), target, num_warps,
             T.constant_signature(jf.tk.body) if hasattr(jf, "tk") else ())
 
 
 class _Launcher:
-    def __init__(self, jf: JITFunction, grid):
+    def __init__(self, jf: JITFunction, grid, num_warps=4):
         self.jf = jf
         self.grid = grid
+        self.num_warps = num_warps
+
+    def with_options(self, *, num_warps=4):
+        """Launch options live outside kernel argument/Const namespaces."""
+        if type(num_warps) is not int or num_warps not in (4, 8):
+            raise TilaError("TILA-TARGET-006", "num_warps must be exact int 4 or 8 on the validated target")
+        return _Launcher(self.jf, self.grid, num_warps)
 
     def __call__(self, *args, **kwargs):
         jf = self.jf
@@ -748,6 +755,7 @@ class _Launcher:
                 f"unknown keyword argument(s): {', '.join(sorted(unknown_kw))}")
 
         # ---- 张量绑定：dtype/shape/strides/data_ptr（surface-language.md §6）
+        _validate_devices(tensors)
         tk.runtime_alignments = {}
         for b in tk.buffers:
             t = tensors[b.name]
@@ -950,7 +958,14 @@ class _Launcher:
                 raise TilaError(
                     "TILA-TARGET-004",
                     "tensor is on CUDA but triton is not installed")
-            key = _triton_cache_key(jf, consts)
+            device = next(iter(tensors.values())).device
+            capability = torch.cuda.get_device_capability(device)
+            if capability != (8, 6) or torch.cuda.get_device_name(device) != "NVIDIA GeForce RTX 3090":
+                raise TilaError("TILA-TARGET-007", "unvalidated CUDA target; current support is RTX 3090 / SM86")
+            if triton.__version__ != "3.6.0":
+                raise TilaError("TILA-TARGET-007", "unvalidated Triton version; current support requires 3.6.0")
+            target = ("cuda", device.index, capability, triton.__version__)
+            key = _triton_cache_key(jf, consts, target=target, num_warps=self.num_warps)
             if key not in jf._kern_cache:
                 src = lowering.Lowering(tk, _debug()).kernel_source()
                 # Triton retrieves Python source with inspect, including helpers.
@@ -966,7 +981,8 @@ class _Launcher:
             args += [tensors[p.name] for p in tk.ptr_params]
             args += [scalar_vals[s.name] for s in tk.scalars]
             args += [consts[c.name] for c in tk.consts]
-            kern[grid](*args, num_warps=4)
+            with torch.cuda.device(device):
+                kern[grid](*args, num_warps=self.num_warps)
             return
         # interp：numpy 视图（torch CPU 张量共享内存）；ptr 参数以自身名
         # 注册为 interp buffer（指针值 = ("ptr", name, offset)）。
@@ -1068,6 +1084,14 @@ def _check_index_metadata(shape, strides):
         raise TilaLaunchContractError("TILA-NUM-001", "element strides must fit i32")
     if sum(max(0, n - 1) * abs(s) for n, s in zip(shape, strides)) > (1 << 63) - 1:
         raise TilaLaunchContractError("TILA-NUM-001", "linear element offset must fit i64")
+
+
+def _validate_devices(tensors):
+    devices = {str(t.device) if torch is not None and isinstance(t, torch.Tensor) else "cpu"
+               for t in tensors.values()}
+    if len(devices) > 1:
+        raise TilaError("TILA-TARGET-008", "all tensor arguments must be on the same device",
+                        details=["devices: " + ", ".join(sorted(devices))])
 
 
 def _tensor_info(t):

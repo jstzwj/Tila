@@ -128,6 +128,9 @@ M2-08 统一验收入口：`PYTHONPATH=src python tools/gpu_audit.py`，固定�
 归约契约、覆盖范围及失败重放见 [GPU 语义审计](docs/m2-gpu-audit.md)。
 完整本地通过仍不代表已有持续 GPU CI。
 
+M3 的固定依赖重建、专用 GPU CI、官方示例覆盖与 launch 选项见
+[GPU 支持矩阵](docs/gpu-support.md)；初始组合仅 RTX 3090 / SM86。
+
 ---
 
 ## 安装与验证

@@ -20,7 +20,7 @@ BASELINE = {
     "cuda": "12.8", "numpy": "1.24.3", "ml_dtypes": "0.5.4",
     "gpu": "NVIDIA GeForce RTX 3090", "capability": [8, 6], "driver": "595.84",
 }
-EXPECTED_TESTS = 70
+EXPECTED_TESTS = 104  # 70 semantic nodes + 32 examples + device/hint checks
 
 
 def command(args):
@@ -71,6 +71,8 @@ def main():
               "exploratory": args.exploratory, "selection": args.case,
               "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
               "platform": platform.platform()}
+    report["ci"] = {key: os.environ.get(key) for key in
+                    ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA", "GITHUB_REF", "RUNNER_NAME")}
     try:
         report["revision"] = command(["git", "rev-parse", "HEAD"])
         report["worktree"] = command(["git", "status", "--porcelain"])
@@ -102,7 +104,7 @@ def main():
         report["execution_env"] = replay_env
         from importlib.metadata import distributions
         report["packages"] = {dist.metadata["Name"]: dist.version for dist in distributions() if dist.metadata["Name"]}
-        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "-v", "-s",
+        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "tests/gpu_examples.py", "-v", "-s",
                 "--tb=long", "--showlocals", f"--junitxml={run / 'results.xml'}"]
         if args.case:
             argv += ["-k", args.case]

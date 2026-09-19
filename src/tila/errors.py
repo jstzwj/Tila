@@ -200,6 +200,9 @@ _DIAGNOSTICS = {
     **_specs("TARGET", (DiagnosticPhase.TARGET,), {
         "004": "required backend package is unavailable",
         "005": "backend compilation or execution failed",
+        "006": "unsupported launch option",
+        "007": "unvalidated CUDA target or backend version",
+        "008": "tensor arguments use different devices",
     }, default_fix="检查 target、设备和 Triton/CUDA 支持矩阵"),
     **_specs("INTERNAL", (DiagnosticPhase.INTERNAL,), {
         "001": "unexpected internal failure at a user-facing boundary",
