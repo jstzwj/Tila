@@ -1,0 +1,74 @@
+kernel @reductions — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: (none)
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  flags : Buffer[bool, (4,), ReadOnly, UnknownAlignment]
+  flags_stride0 : i32
+  out : Buffer[i32, (1,), WriteOnly, UnknownAlignment]
+  out_stride0 : i32
+  toggle : bool
+types:
+  enabled : Block[bool, (4)]
+  flags : Buffer[bool, (4,), ReadOnly, UnknownAlignment]
+  flags_stride0 : i32
+  i : Block[i32, (4)]
+  out : Buffer[i32, (1,), WriteOnly, UnknownAlignment]
+  out_stride0 : i32
+  toggle : bool
+  value : i32
+facts:
+  __lane1 ∈ [0, 4)
+  nonneg symbols: __lane1
+obligations:
+  - load[flags] axis 0: 0 <= __lane1 < 4
+      path: true
+      mask: true
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 5
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord __lane1 ∈ [0, 3], extent 4 ∈ [4, 4] ⇒ 3 < 4; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[out] axis 0: 0 <= 0 < 1
+      path: (((unknown#1) and (__v2 == 1)) or ((not (unknown#1)) and (__v2 == 0))) and (((unknown#0) and (__v3 == 2)) or ((not (unknown#0)) and (__v3 == __v2)))
+      mask: mapped(not (false))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 11
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord 0 ∈ [0, 0], extent 1 ∈ [1, 1] ⇒ 0 < 1; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+hints:
+  max_contiguous(i, 4)
+    dependency: StaticFact at line 4: structural contiguous span; integer launch guards required
+effects:
+  Read[BufferRegion[0:flags]]
+  Write[BufferRegion[1:out]]
+aliases:
+  scope: static conservative defaults
+  MayAlias[BufferRegion[0:flags], BufferRegion[1:out]] (distinct external parameters are conservatively MayAlias)
+warnings:
+  (none)
+notes:
+  (none)

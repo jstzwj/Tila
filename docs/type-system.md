@@ -94,12 +94,12 @@ q    = p + offs                    # Block[Ptr[f16, ...], (BLOCK,)]
 
 `Mask[Shape]` **不是** `Block[bool, Shape]`：
 
-- **构造**：只来自同形（可广播）Block 的比较、以及 `& / | / ~`
-  的 Mask 组合；比较的操作数可以是符号表达式或字面量（字面量比较数
+- **构造**：来自同形（可广播）Block 的比较、以及 `& / | / ~`
+  的 Mask/Block[bool] 组合（可混合 scalar bool）；比较的操作数可以是符号表达式或字面量（字面量比较数
   同样产生谓词）；
-- **当前谓词按 DNF 子句组织**：`&` 对两侧子句做笛卡尔积、`|` 拼接子句、
-  `~` 保守地产生空子句（不携带可证信息）；bounds 证明要求目标谓词
-  在**每个**子句下都可证（bounds-safety.md §3.2）；
+- **当前谓词使用共享 DAG**：保留 And/Or/Not，不展开 DNF；快速路径与默认
+  Z3 在路径和 mask 下证明边界，结论与信任来源分别记录；资源耗尽或无法
+  确认可达性的候选反例保持 Unknown（见 bounds-safety.md）；
 - **流动**：只允许流入 `load/store` 的 `mask=`、`where` 的谓词位、
   `mask.any()/mask.all()`；
 - **禁止**：算术、位运算之外的任何运算、作为 `if` 条件（见 §10.4）、
@@ -110,11 +110,13 @@ Mask 在 IR 内部携带谓词信息（`Mask[(BLOCK,)] { offs < N }`），
 
 `if mask:` → `TILA-TYPE-0xx: expected scalar bool, found Mask[(BLOCK,)]`。
 
-M2 按 [ADR-011](adr/011-smt-proof-and-trust.md) 将谓词迁移到保留 And/Or/Not
-的 DAG，由 SMT 求解。随后独立设计允许布尔 tile 用于 `mask=` 和布尔组合：
+M2 已按 [ADR-011](adr/011-smt-proof-and-trust.md) 实现 DAG 与 SMT。
+[ADR-012](adr/012-boolean-tile-mask.md) 已允许布尔 tile 用于 `mask=`、where 和布尔组合：
 比较 mask 可以携带边界谓词，内存加载的布尔值通常只有未知谓词；可作为执行
-掩码不意味着能证明边界。该接口尚未实现，不改变当前 Mask/Block bool 边界，
-也不允许 `if mask` 隐式归约。
+掩码不意味着能证明边界。Mask/Block bool 类型保持独立；tile 的 `& | ~` 返回
+Mask，纯 scalar bool 组合返回 scalar bool。两种 tile 均支持 `.any()/.all()`；
+`and/or/not` 和 if 仍只接受标量，不允许隐式归约。mask 可广播到访问 shape，
+不能增加访问 rank；不开放 Mask cast 或 Mask 作为 bool Buffer 的存储值。
 
 ### 3.4 Unit
 
@@ -254,11 +256,13 @@ M2-01 已按 [ADR-007](adr/007-integer-semantics.md) 固定整数语义：runtim
 i32 范围限制，Buffer 地址线性化与循环内部步进使用 i64。
 
 索引的数学推理必须逐个通过中间运算无溢出门禁；普通数据算术保留回绕语义，
-不能继承未经证明的数学等价/contiguous 事实。当前使用保守区间和每次 launch
-验证，完整 BitVec/SMT 仍待 M2-03。
+不能继承未经证明的数学等价/contiguous 事实。当前使用保守区间、每次 launch
+验证及 Int/BitVec SMT 编码；加载内容和复杂数据流可达性仍保守近似，
+详见 [证明器实现边界](smt-prover.md)。
 
-易用性后续任务：先设计明确 dtype/舍入的常量构造，不直接放宽当前字面量
-规则；Const bool 与 NumPy integer 白名单需要独立 ADR/版本评审，当前
+易用性提案分别见 [显式舍入常量](adr/015-rounded-typed-constants.md)、
+[Const bool](adr/013-const-bool-domain.md) 与
+[宿主整数转换](adr/014-host-integer-normalization.md)，均尚未实现。当前
 0.2.x 的 ExactInt 和隐式转换规则不因这次设计更新而改变。
 
 ### 6.1 隐式转换只允许安全 widening

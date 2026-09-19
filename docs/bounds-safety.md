@@ -89,6 +89,12 @@ mask ⇒ 0 <= offs < N
 判定方式：mask 谓词合取进入事实环境后，义务的可满足性检查。
 对 `offs < N` 与已有的 `offs >= 0`：成立 ✓。
 
+ADR-012 允许加载的 `Block[bool]` 直接用于 mask 或与比较组合，但它默认只有
+未知谓词身份。`enabled & (offs < N)` 可以保留比较的边界事实；单独 enabled、
+`enabled | (offs < N)` 通常不能证明安全。复制保留身份，不同 load 不自动等同；
+行列展开保留各自 lane 轴，`.any()/.all()` 不产生逐 lane 边界事实。
+masked bool load 的 `other=False` 是执行语义，当前证明器不推导其值蕴含加载 mask。
+
 ### 3.1 逐轴证明与"错误维度的 mask"
 
 二维访问逐轴独立证明：

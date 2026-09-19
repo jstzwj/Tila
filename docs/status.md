@@ -6,7 +6,7 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 628 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 671 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -16,7 +16,17 @@
 零次循环出口和 CPU 内存访问语义，边界见 [数据流与解释器](dataflow-interpreter.md)。
 M2-05 已补小位宽穷举、性质测试、差异审计和失败重放，覆盖范围见
 [证明审计](m2-proof-audit.md)。M2-06 已固定 [audit explain v1](explain-audit.md)、
-CLI/关键错误 golden、反例与重放附件边界。ExactInt 和 Mask 的公开边界不变。
+CLI/关键错误 golden、反例与重放附件边界。ExactInt 边界不变。
+
+M2-07 已形成四份独立提案：[布尔 tile/Mask](adr/012-boolean-tile-mask.md)、
+[Const bool](adr/013-const-bool-domain.md)、[宿主整数转换](adr/014-host-integer-normalization.md)、
+[显式舍入常量](adr/015-rounded-typed-constants.md)。M2-07a / ADR-012 已实现；
+其余三份仍为 Proposed，尚未实现；
+`host_int`、`constant` 尚非公共 API，Const[bool] 提案面向 0.3.x。
+
+布尔 tile 的 39 项专项包含身份/广播、分支/循环、Ptr、debug assume 与 explain golden。
+68 组 CPU/GPU 对照已通过 RTX 3090 + PyTorch 2.10.0+cu128 / Triton 3.6.0 / CUDA 12.8，
+命令为 `PYTHONPATH=src python tests/gpu_boolean_smoke.py`；不替代正式 GPU 支持矩阵。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
@@ -251,8 +261,9 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | ADR-007 基础整数语义与数值门禁 | `Implemented` | Check / Specialize / Launch / CPU / Triton | runtime 回绕、floor 商余数、MIN/-1、移位/转换定义域；每次验证中间索引溢出及 i32 ABI，未知数据域保守拒绝 |
 | 整数位运算/移位 | `Implemented` | Check / CPU / Triton | 操作数须为兼容 Int dtype |
 | 比较与 Mask 谓词 | `Implemented` | Check / CPU / Triton | Block 比较生成 Mask 与可提取谓词 |
-| Mask `& | ~` | `Implemented` | Check / CPU / Triton | DAG 保留组合与否定；快速路径只提取必然成立的原子 |
-| `mask.any()/mask.all()` | `Implemented` | Check / CPU / Triton | 仅方法形式，归约为 scalar bool |
+| Mask `& | ~` | `Implemented` | Check / CPU / Triton | 可混合 Block bool 与 scalar bool；tile 返回 Mask，DAG 保留未知身份与相对 lane 轴 |
+| bool tile 消费 | `Implemented` | Check / CPU / Triton | load/store mask、where 支持 Block bool；不自动取得 bounds 事实，不合并 Mask/Block 类型 |
+| `mask.any()/mask.all()` | `Implemented` | Check / CPU / Triton | Mask/Block bool，仅方法形式，归约为 scalar bool |
 | `where` | `Implemented` | Check / CPU / Triton | eager 两侧；dtype 必须一致，shape 可广播 |
 | `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；无真实 GPU CI |
 | `dot` bf16/FP8 输入 | `Designed` | — | 当前 `DOT_INPUT` 仅 f16 |

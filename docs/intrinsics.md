@@ -101,12 +101,17 @@ cast[U](x: T | Block[T, S] | Mask?—否)            → U | Block[U, S]
 
 ### 2.5 选择与逻辑
 
+ADR-012：下文和 load/store 签名中的 mask 位置接受 `Mask[S]`、`Block[bool,S]`
+或 scalar bool。布尔 tile 支持 `& | ~`，可混合标量 bool；结果为 Mask，
+纯标量组合仍为 bool。mask 只能广播到既定访问形状，不能扩大访问 rank。
+加载的 bool 内容默认是未知谓词；执行 mask 与可证明边界事实分别处理。
+
 ```text
 where(m: Mask[S], a: Block[T, Sa], b: Block[T, Sb])   → Block[T, S]
     约束: a/b 同 dtype（无提升）；S = broadcast(S, Sa, Sb)
     值侧纯函数；效应侧见 effects.md §3
-any(m: Mask[S]) → bool        # 归约到标量，可用作 runtime-if 条件
-all(m: Mask[S]) → bool
+any(m: Mask[S] | Block[bool,S]) → bool  # 仅 .any() 方法，归约到标量
+all(m: Mask[S] | Block[bool,S]) → bool  # 仅 .all() 方法，不生成逐 lane 事实
 ```
 
 ### 2.6 点积
@@ -182,7 +187,7 @@ hint.multiple_of / hint.max_contiguous                   调试用；常规路�
 | `/` | 浮点除法（Float 域）；Int 域不存在 `/`（用 `//`） |
 | `// %` | 整除/取模（Int 域；符号语义按 dtype） |
 | `< <= > >= == !=` | 标量→bool；Block→Mask[S]（谓词入类型） |
-| `& \| ~` | Mask 组合（仅 Mask 域）；bool 标量逻辑 |
+| `& \| ~` | Mask/Block[bool] 可混合 scalar bool；tile 结果为 Mask，纯标量结果为 bool |
 | `<< >> & \| ^ ~`（Int） | 位运算，同 dtype 要求 |
 | `p + offs` | 指针元素 offset 算术（type-system.md §8.3）；`p - offs` 不属于 v0 |
 | 一元 `-` | neg |

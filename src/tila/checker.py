@@ -1142,29 +1142,43 @@ class Checker:
         return isinstance(vt, TY.PtrT) or (isinstance(vt, TY.BlockT) and
                                            isinstance(vt.elem, TY.PtrT))
 
+    def _is_boolean(self, v):
+        return (type(v.lit) is bool or isinstance(v.vtype, TY.MaskT)
+                or self._dtype_of(v) is D.bool_)
+
+    def _boolean_operand(self, v, e, out, code="TILA-TYPE-026"):
+        """ADR-012: adapt consumers without converting the public value type."""
+        if not self._is_boolean(v):
+            raise TilaError(code,
+                            "expected Scalar[bool], Mask or Block[bool], found "
+                            f"{TY.describe(v.vtype)}", e.loc)
+        if type(v.lit) is bool:
+            v.vtype = TY.ScalarT(D.bool_)
+            v.predicate = P.TRUE if v.lit else P.FALSE
+        return shape_of(v), self._operand_of(v, e, out), v.predicate
+
     def _binop(self, e: BinOp, out) -> VarInfo:
         l = self.synth(e.left, out)
         r = self.synth(e.right, out)
 
-        # Mask 组合（type-system.md §3.3）
-        if isinstance(l.vtype, TY.MaskT) or isinstance(r.vtype, TY.MaskT):
+        # Boolean consumers retain each operand's predicate identity and axes.
+        if (isinstance(l.vtype, TY.MaskT) or isinstance(r.vtype, TY.MaskT)
+                or e.op in ("&", "|") and
+                (self._is_boolean(l) or self._is_boolean(r))):
             if e.op not in ("&", "|"):
                 raise TilaError("TILA-TYPE-026",
                                 f"masks only support & | ~, found '{e.op}'",
                                 e.loc)
-            if not (isinstance(l.vtype, TY.MaskT) and
-                    isinstance(r.vtype, TY.MaskT)):
-                raise TilaError("TILA-TYPE-026",
-                                "mask combination requires two masks", e.loc)
-            sh = self._broadcast(l.vtype.dims, r.vtype.dims, e.loc,
+            ls, lo, lp = self._boolean_operand(l, e.left, out)
+            rs, ro, rp = self._boolean_operand(r, e.right, out)
+            sh = self._broadcast(ls, rs, e.loc,
                                  "mask combination shapes")
             combine = P.conjunction if e.op == "&" else P.disjunction
-            clauses = combine(l.predicate, r.predicate)
-            vt = TY.MaskT(sh)
+            clauses = combine(lp, rp)
+            tile = any(isinstance(v.vtype, (TY.BlockT, TY.MaskT)) for v in (l, r))
+            vt = TY.MaskT(sh) if tile else TY.ScalarT(D.bool_)
             return VarInfo(vtype=vt, predicate=clauses,
-                           tir=T.TBin(vt, e.op,
-                                      self._operand_of(l, e.left, out),
-                                      self._operand_of(r, e.right, out)))
+                           tir=T.TBin(vt, e.op, lo, ro))
 
         # 指针元素 offset（+，type-system.md §8.3）
         if e.op == "+" and (self._is_ptrish(l.vtype) or
@@ -1326,11 +1340,13 @@ class Checker:
             return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate), tir=T.TUna(
                 v.vtype, "not", self._operand_of(v, e.operand, out)))
         if e.op == "~":
-            if isinstance(v.vtype, TY.MaskT):
+            if self._is_boolean(v):
                 # Preserve negation and shared identity for the general solver.
-                return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate),
-                               tir=T.TUna(v.vtype, "~",
-                                          self._operand_of(v, e.operand, out)))
+                sh, operand, predicate = self._boolean_operand(v, e.operand, out)
+                vt = (TY.MaskT(sh) if isinstance(v.vtype, (TY.BlockT, TY.MaskT))
+                      else TY.ScalarT(D.bool_))
+                return VarInfo(vtype=vt, predicate=P.negate(predicate),
+                               tir=T.TUna(vt, "~", operand))
             dt = self._dtype_of(v)
             if dt is not None and dt.is_int:
                 expr = self._integer_expr("~", dt, v.expr) if v.expr is not None else None
@@ -1678,12 +1694,7 @@ class Checker:
         m = self.synth(e.args[0], out)
         a = self.synth(e.args[1], out)
         b = self.synth(e.args[2], out)
-        if not isinstance(m.vtype, (TY.MaskT,)) and not (
-                isinstance(m.vtype, TY.ScalarT) and
-                m.vtype.dtype is D.bool_):
-            raise TilaError("TILA-TYPE-032",
-                            f"where predicate must be Mask, found "
-                            f"{TY.describe(m.vtype)}", e.loc)
+        self._boolean_operand(m, e.args[0], out, "TILA-TYPE-032")
         da, db = self._dtype_of(a), self._dtype_of(b)
         if a.lit is not None and b.lit is not None:
             dt0 = _lit_default_dtype(a.lit if isinstance(a.lit, float) or
@@ -1943,7 +1954,7 @@ class Checker:
     def _mask_reduce(self, e, op, out) -> VarInfo:
         """mask.any()/mask.all()（type-system.md §3.3、intrinsics.md §2.5）。
 
-        Mask → ScalarT(bool) 的 lane 归约：结果是运行期标量，不携带
+        Mask/Block[bool] → ScalarT(bool) 的 lane 归约：结果是运行期标量，不携带
         符号 expr / mask 谓词（逐 lane 值的归约无法进入证明器），
         可作 runtime-if 条件、and/or 操作数。
         """
@@ -1951,18 +1962,20 @@ class Checker:
             raise TilaError("TILA-SYN-036",
                             f"{op}(mask) takes exactly one mask argument", e.loc)
         v = self.synth(e.args[0], out)
-        if not isinstance(v.vtype, TY.MaskT):
+        if not (isinstance(v.vtype, (TY.MaskT, TY.BlockT))
+                and self._is_boolean(v)):
             found = TY.describe(v.vtype) if v.vtype is not None else \
                 f"literal {v.lit!r}"
             raise TilaError(
                 "TILA-TYPE-019",
-                f"{op}() requires a Mask (block predicate), found {found}",
+                f"{op}() requires a Mask or Block[bool], found {found}",
                 e.loc, [f"    found: {found}"],
-                ["标量 bool 直接用于 if / and / or；只有块谓词（如 m = offs < N）"
+                ["标量 bool 直接用于 if / and / or；布尔 tile 或块谓词（如 m = offs < N）"
                  f"才有 .{op}()"])
         vt = TY.ScalarT(D.bool_)
+        _, operand, _ = self._boolean_operand(v, e.args[0], out)
         return VarInfo(vtype=vt, tir=T.TUna(
-            vt, op, self._operand_of(v, e.args[0], out)))
+            vt, op, operand))
 
     # -- 内存访问 ----------------------------------------------------------
 
@@ -2045,11 +2058,11 @@ class Checker:
         if "mask" not in kw:
             return None, P.TRUE
         mv = self.synth(kw["mask"], out)
-        if not isinstance(mv.vtype, TY.MaskT):
-            raise TilaError("TILA-SHAPE-010",
-                            f"mask must be a Mask, found "
-                            f"{TY.describe(mv.vtype)}", e.loc)
-        b = self._broadcast(mv.vtype.dims, expect_shape, e.loc, "mask shape")
+        shape, _, predicate = self._boolean_operand(
+            mv, kw["mask"], out, "TILA-SHAPE-010")
+        b = self._broadcast(shape, expect_shape, e.loc, "mask shape")
+        if len(b) != len(expect_shape):
+            raise TilaError("TILA-SHAPE-010", "mask shape does not match access", e.loc)
         for i, (x, y) in enumerate(zip(b, expect_shape)):
             if not self._dim_eq_defer(x, y, e.loc, "mask shape"):
                 raise TilaError(
@@ -2057,8 +2070,8 @@ class Checker:
                     e.loc,
                     [f"    mask: {mv.vtype.describe()}",
                      f"    access shape: ({', '.join(map(str, expect_shape))})"])
-        return mv, P.mapped(mv.predicate, expect_shape,
-                            ("broadcast", mv.vtype.dims, expect_shape))
+        return mv, P.mapped(predicate, expect_shape,
+                            ("broadcast", shape, expect_shape))
 
     def _snapshot_preds(self):
         return tuple(self.facts.preds.values())

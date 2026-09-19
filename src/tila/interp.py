@@ -252,6 +252,8 @@ class Interp:
             if x.op == "-":
                 return -v
             if x.op == "~":
+                if dt is D.bool_ or isinstance(x.vt, TY.MaskT):
+                    return np.logical_not(v)
                 return ~v
             if x.op == "not":
                 return np.logical_not(v)
