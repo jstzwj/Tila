@@ -203,7 +203,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 - effect 目前有聚合记录和 `where` eager-memory warning；atomic、race、
   uniformity 尚未实现；
 - TypeVar、公开 capability 集合、target database 和性能诊断尚未实现；
-- 默认证明器为 Z3，尚无公开可插拔 solver 接口；已发射 hint 记录来源，五个官方
+- 默认 SMT 证明器为 Z3，尚无公开可插拔 solver 接口；已发射 hint 记录来源，五个官方
   示例已有 TIR、Triton source 和 explain golden，M3 最终退出审计仍待完成；
 - `full/trans/cat/min/log/sqrt/rsqrt/abs/floor/ceil` 等内建尚未实现。
 
