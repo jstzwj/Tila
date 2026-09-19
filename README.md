@@ -217,6 +217,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 |---|---|
 | [docs/status.md](docs/status.md) | **当前能力的唯一状态清单** |
 | [docs/m1-exit-audit.md](docs/m1-exit-audit.md) | M1 冻结项、退出条件与自动化证据 |
+| [docs/gpu-support.md](docs/gpu-support.md) | 固定 GPU 环境、main CI、验收附件与重放 |
+| [docs/gpu-operation-audit.md](docs/gpu-operation-audit.md) | 操作/dtype 证据、支持边界与 M3 退出条件核查 |
 | [plan.md](plan.md) | M0–M6 实施计划、ADR、任务台账和退出标准 |
 | [docs/adr/README.md](docs/adr/README.md) | 已接受的公共语法与核心 IR 架构决定 |
 | [docs/design-principles.md](docs/design-principles.md) | 语言定位、设计目标与非目标 |
@@ -235,12 +237,14 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 当前工作区是 2026-09 的语言重置实现。旧设计和旧实现已按仓库规则移动到
 `trash/`，不再代表当前 Tila。
 
+M0/M1/M2 已完成；M3-02 至 M3-05 已完成 launch/target 门禁、后端诊断、操作/dtype
+审计及限定范围的 alignment hint 发射。固定环境 GPU workflow 已进入 main，
+首次默认分支定时运行仍需观察，M3 最终退出审计尚未完成。
+
 近期工作优先级是：
 
-1. 在已完成的 M0/M1 上固定整数运算与证明的共同语义；
-2. 基于已实现的 DAG/ProofResult/Z3，收口数据流、解释器及系统差异测试；
-3. 强化 interpreter、explain 与性质测试，独立评审 Mask/Const 易用性；
-4. 尽早验证小型 CPU/GPU 语义对照，并在 M3 完成固定支持矩阵与 GPU CI；
-5. 再推进 effect/race、泛型、target capability 和性能层。
+1. 完成 M3-06 退出审计，逐条核对支持矩阵、编译/执行证据、诊断与 hint 来源；
+2. 持续检查 main 的 CPU/GPU CI、附件和重放，明确保留未验证组合的边界；
+3. M3 验收完成后，再推进 M4 effect/race，以及后续泛型、target capability 和性能层。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。
