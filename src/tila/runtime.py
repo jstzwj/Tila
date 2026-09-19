@@ -148,6 +148,7 @@ class JITFunction:
         self.last_report: str = ""
         self.last_proof_results: tuple = ()
         self.last_backend_resources = None
+        self.last_alignment_facts = ()
 
     # ------------------------------------------------------------------
 
@@ -308,8 +309,9 @@ class JITFunction:
         L.append("hints:")
         # A private lowering instance records exactly the hints it would emit;
         # it neither mutates TKernel nor compiles/executes generated code.
-        hint_emitter = lowering.Lowering(tk)
+        hint_emitter = lowering.Lowering(tk, alignment_facts=self.last_alignment_facts)
         hint_emitter.stmts(tk.body, 1)
+        hint_emitter.alignment_prefix()
         if hint_emitter.hint_audit:
             for hint, origins in hint_emitter.hint_audit:
                 L.append(f"  {hint}")
@@ -651,7 +653,7 @@ def _debug() -> bool:
     return os.environ.get("TILA_DEBUG", "") == "1"
 
 
-def _triton_cache_key(jf, consts: dict, *, target=None, num_warps=4, source=None, bindings=()):
+def _triton_cache_key(jf, consts: dict, *, target=None, num_warps=4, source=None, bindings=(), alignment_facts=()):
     """Semantic cache key; registry changes invalidate compiled kernels."""
     import hashlib
     if source is None and hasattr(jf, "tk"):
@@ -660,7 +662,7 @@ def _triton_cache_key(jf, consts: dict, *, target=None, num_warps=4, source=None
     return (INTRINSIC_REGISTRY_SEMANTIC_REVISION, id(jf),
             tuple((k, "Bool" if type(v) is bool else "Int", v)
                   for k, v in sorted(consts.items())), _debug(), target, num_warps,
-            getattr(jf, "source_fingerprint", None), fingerprint, bindings,
+            getattr(jf, "source_fingerprint", None), fingerprint, bindings, tuple(alignment_facts),
             T.constant_signature(jf.tk.body) if hasattr(jf, "tk") else ())
 
 
@@ -676,9 +678,11 @@ class _Launcher:
         return _Launcher(self.jf, self.grid, num_warps)
 
     def __call__(self, *args, **kwargs):
-        target_policy.validate_options(self.num_warps)
         jf = self.jf
         jf.last_backend_resources = None
+        jf.last_alignment_facts = ()
+        jf.tk.runtime_alignments = {}
+        target_policy.validate_options(self.num_warps)
         tk = jf.tk
         dim_vals: dict[str, int] = {}
         stride_vals: dict[str, int] = {}
@@ -962,7 +966,10 @@ class _Launcher:
                 (("grid", tuple(grid)),))
 
         # ---- 执行：torch+cuda+triton → GPU；否则 interp
+        from .alignment import collect
+        self.alignment_facts = collect(tk, tensors, _tensor_info)
         self._execute(tensors, scalar_vals, stride_vals, consts, grid)
+        jf.last_alignment_facts = self.alignment_facts
 
     def _resolve_target(self, tensors):
         t0 = next(iter(tensors.values()), None)
@@ -993,7 +1000,7 @@ class _Launcher:
                     "TILA-TARGET-004",
                     "tensor is on CUDA but triton is not installed")
             device = next(iter(tensors.values())).device
-            emitter = lowering.Lowering(tk, _debug())
+            emitter = lowering.Lowering(tk, _debug(), alignment_facts=self.alignment_facts)
             src = emitter.kernel_source()
             bindings = _binding_signature(tk, tensors)
             from .backend import preflight, failure
@@ -1004,9 +1011,10 @@ class _Launcher:
                        "consts": consts, "scalars": scalar_vals,
                        "grid": grid, "num_warps": self.num_warps,
                        "debug": _debug(), "target": asdict(self.target),
-                       "bindings": bindings, "argument_order": emitter.launch_args()}
+                       "bindings": bindings, "argument_order": emitter.launch_args(),
+                       "alignment_facts": [asdict(f) for f in self.alignment_facts]}
             key = _triton_cache_key(jf, consts, target=self.target, num_warps=self.num_warps,
-                                    source=src, bindings=bindings)
+                                    source=src, bindings=bindings, alignment_facts=self.alignment_facts)
             if key not in jf._kern_cache:
                 # Triton retrieves Python source with inspect, including helpers.
                 import linecache

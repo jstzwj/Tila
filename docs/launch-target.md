@@ -58,7 +58,8 @@ multiple_of 的步长要求二次幂字面量、PowerOfTwo Const，或与 arange
 Const（执行前有 tile 二次幂门禁）。普通 Const 的整数折叠独立处理，避免影响大整数 cast。
 
 Buffer/Ptr 的 Aligned 契约检查实际 view 地址，失败时即使 grid 为零也拒绝，
-不进入 kernel 执行。本阶段不增加未经验证的 pointer alignment 优化 hint。
+不进入 kernel 执行。M3-05 已在 [独立的已检查绑定证据](alignment-hints.md) 下
+增加一维连续 Buffer/Ptr 基地址提示，不将此处的静态索引提示等同于地址对齐。
 
 ## 验收
 

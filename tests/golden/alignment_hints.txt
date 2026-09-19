@@ -1,0 +1,6 @@
+  multiple_of(i_base, 8)
+    dependency: StaticFact at line 3: structural pid * step; integer launch guards required
+  max_contiguous(i, 8)
+    dependency: StaticFact at line 3: structural contiguous span; integer launch guards required
+  multiple_of(byte_address(x_ptr), 16)
+    dependency: CheckedLaunchContract at line 0: last validated binding: x; view data_ptr % 16 == 0; element_bytes=4; stride=1; base address only

@@ -1,7 +1,7 @@
 # M2-08 CPU/GPU 语义审计
 
 本文保留 M2-08 当时的 70 节点/214 案例验收证据。统一入口在 M3 扩展为
-151 节点/295 案例，当前固定环境、CI 与重放方式见 [GPU 支持](gpu-support.md)。
+160 节点/304 案例，当前固定环境、CI 与重放方式见 [GPU 支持](gpu-support.md)。
 
 日期：2026-09-19。契约见 [ADR-008](adr/008-reduction-precision.md)，固定环境见
 [ADR-009](adr/009-gpu-validation-baseline.md)。

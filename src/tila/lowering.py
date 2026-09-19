@@ -84,9 +84,10 @@ class _SourceLine(str):
 
 
 class Lowering:
-    def __init__(self, tk: T.TKernel, debug_asserts: bool = False):
+    def __init__(self, tk: T.TKernel, debug_asserts: bool = False, *, alignment_facts=()):
         self.tk = tk
         self.debug = debug_asserts
+        self.alignment_facts = tuple(alignment_facts)
         self.hint_after = {var: span for var, span in tk.hints
                            if all(other == span for name, other in tk.hints if name == var)}
         # 裸指针参数名 → Triton 实参名（checker 正常物化为 TBufPtr；
@@ -140,13 +141,33 @@ class Lowering:
         out.append("):")
         casts = [f"    {s.name} = tl.cast({s.name}, {s.dtype.tl_name})"
                  for s in k.scalars]
-        body = casts + body
+        body = casts + self.alignment_prefix() + body
         if not body:
             body = ["    pass"]
         out.extend(body)
         self.source_map = {i: line.line for i, line in enumerate(out, 1)
                            if isinstance(line, _SourceLine) and line.line}
         return "\n".join(out) + "\n"
+
+    def alignment_prefix(self):
+        """Hint the integer byte address, then recover exactly the same pointer.
+
+        Integer divisibility has unambiguous byte units; never apply a base
+        alignment assertion to the whole offset pointer vector.
+        """
+        out = []
+        parameters = {p.name: p for p in self.tk.buffers + self.tk.ptr_params}
+        for fact in self.alignment_facts:
+            param = parameters.get(fact.parameter)
+            if param is None or param.vtype.aligned != fact.bytes or fact.stride != 1:
+                continue
+            if fact.element_bytes != max(1, param.vtype.elem.bits // 8):
+                continue
+            name, dt = fact.parameter, param.vtype.elem.tl_name
+            # Do not introduce user-visible temporary names or pointer aliases.
+            out.append(f"    {name}_ptr = tl.cast(tl.multiple_of(tl.cast({name}_ptr, tl.uint64), {fact.bytes}), tl.pointer_type({dt}))")
+            self.hint_audit.append((f"multiple_of(byte_address({name}_ptr), {fact.bytes})", (fact.origin,)))
+        return out
 
     def launch_args(self):
         """launch 调用的实参名模板（runtime 填值）。

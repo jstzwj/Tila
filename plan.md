@@ -1,6 +1,6 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M3-04 操作/dtype 证据审计；下一步 alignment hint 发射闭环，默认分支持续验收仍待合并
+状态：执行计划 v2；2026-09-19 完成 M3-05 alignment hint 发射闭环；下一步 M3 退出审计，默认分支持续验收仍待合并
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：910 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 151 节点/295 案例。
+- 当前测试基线：926 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 160 节点/304 案例。
 
 ### 2.2 当前主要缺口
 
@@ -923,7 +923,8 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M3-02 | DONE | launch/target 检查与缓存收口 | M3-01 | grid/零启动、集中 capability、结构与静态 target verifier、源码/ABI/布局缓存隔离、hint/alignment 负测试；本地 CPU 877/GPU 112 节点通过，边界见 docs/launch-target.md |
 | M3-03 | DONE | 编译后资源诊断与 source map | M3-02 | 语句映射、稳定编译/加载诊断、附件编译重放、shared-memory/线程硬门禁；寄存器/spill 仅作性能信息；3 份 golden 与真实 GPU 负测试；范围见 docs/backend-diagnostics.md |
 | M3-04 | DONE | 操作/dtype 支持矩阵与编译覆盖审计 | M3-03 | 22 项 intrinsic 证据索引、36 项 GPU 新案例、窄 exp/exp2 修复、FP8 target 门禁；五个示例 15 份 golden；CPU 910/GPU 151 节点通过；见 docs/gpu-operation-audit.md |
-| M3-05 | TODO | alignment 契约到 hint 的发射闭环 | M3-04 | 建立已验证契约到每个发射点的来源记录，补失败/无证据不发射及带/不带 hint 的 GPU 对照；随后做 M3 退出审计 |
+| M3-05 | DONE | alignment 契约到 hint 的发射闭环 | M3-04 | 一维 stride-1 Buffer/Ptr 的基地址字节提示，独立 checked 来源、explain golden、缓存隔离与逐次契约校验；CPU 926/GPU 160 节点通过；范围见 docs/alignment-hints.md |
+| M3-06 | TODO | M3 退出审计 | M3-01..05 | 逐条核对支持矩阵/编译与语义证据/诊断/hint 来源；确认未验证范围和默认分支 CI 状态，未满足项不得标记完成 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 
