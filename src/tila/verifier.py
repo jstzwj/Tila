@@ -66,7 +66,7 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         if isinstance(operand, T.TExpr):
             return operand.vt
         if isinstance(operand, T.TName):
-            return kernel.types.get(operand.name)
+            return operand.definition.vtype if operand.definition is not None else None
         return None
 
     def value_type(vt, line):
@@ -190,3 +190,5 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         if not isinstance(statement, T.TStmt):
             fail("kernel body requires statements")
         visit(statement)
+    from .effect_ir import verify_effects
+    verify_effects(kernel)

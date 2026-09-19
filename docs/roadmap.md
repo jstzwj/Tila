@@ -34,12 +34,12 @@
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
 | M2 | 已完成 | CPU 正确性与静态证明闭环 | M2-01 至 M2-08 完成；证明、数据流、性质审计、explain/常量接口与固定 GPU 对照已落地，未验证范围见 status.md |
 | M3 | 进行中 | Triton/CUDA 后端闭环 | M3-06 审计后已取得 CPU 托管首次成功并补测 dtype 矩阵；自动 GPU CI 缺失，结论仍 NOT READY；未测形状/架构不作承诺 |
-| M4 | 设计准备 | Effect、Atomic、Race、Uniformity | ADR-016（Proposed）定义逐指令 effect 与 TIR 派生汇总；尚未实现；atomic/race/uniformity 暂不推进 |
+| M4 | 基础 IR 实施中 | Effect、Atomic、Race、Uniformity | ADR-016 Accepted，M4-01b 局部 effect/定义引用/verifier 已实现；汇总待迁移，atomic/race/uniformity 暂缓 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
 | M6 | 计划中 | 优化事实、性能诊断与 Layout | hint provenance、结构性性能 warning、layout 评审 |
 
 M0/M1/M2 已完成。M3 的通过范围与剩余阻塞见 [退出审计](m3-exit-audit.md)；新增
-GitHub 托管 CPU CI 不替代 GPU 持续验收。M4 提前做模型设计不改变 M3 未完成状态；
+GitHub 托管 CPU CI 不替代 GPU 持续验收。M4 基础 IR 的实施不改变 M3 未完成状态；
 M4–M6 的设计/计划不表示相应能力已经可用。
 
 ---

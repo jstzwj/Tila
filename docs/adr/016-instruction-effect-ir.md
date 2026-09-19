@@ -1,6 +1,6 @@
 # ADR-016：逐指令 Effect IR 与派生汇总
 
-- 状态：**Proposed**（M4-01 设计提案，尚未实现）
+- 状态：**Accepted**（2026-09-19 评审冻结；M4-01b 实现局部元数据与定义引用）
 - 日期：2026-09-19
 - 前置：[ADR-002](002-region-id-and-extent.md)、[ADR-006](006-intrinsic-registry.md)、
   [ADR-007](007-integer-semantics.md)、[ADR-011](011-smt-proof-and-trust.md)
@@ -10,7 +10,12 @@
 
 ## 问题与现状
 
-当前 `tir.TEffect(op, region_id)` 仅表示 Read/Write；checker 的 Buffer/Ptr 访问
+冻结评审：使用结构路径作为出现点身份；源位置首版只承诺已知行号；定义引用的
+merge/loop 标签是保守身份，不是 SSA phi 或可达性证明。M4-01b 在 checker 完成
+TIR 后统一绑定局部元数据，verifier 独立重算检查；保留原聚合列表和输出。
+控制流 path/mask 汇总及移除列表归 M4-01c；本 ADR 的完整迁移尚未完成。
+
+冻结前 `tir.TEffect(op, region_id)` 仅表示 Read/Write；checker 的 Buffer/Ptr 访问
 处理器向 `TKernel.effects` 手工追加记录。`TLoad`/`TStore` 本身没有 effect 字段，
 dump 和 explain 消费此独立列表。它适合粗粒度展示，却不能回答某次访问受哪个
 mask、路径或循环约束，也不能保证 IR 改写后汇总仍与实际指令一致。
@@ -172,7 +177,7 @@ load 地址/other、store value、if 条件和循环界限。不以源代码文�
 
 ## 实施拆分与验收
 
-M4-01a：设计评审（本文，Proposed）；M4-01b：节点元数据、定义引用、穷尽 visitor
+M4-01a：设计评审（本文，Accepted）；M4-01b：节点元数据、定义引用、穷尽 visitor
 及 verifier；M4-01c：控制流上下文与 summary、移除平行列表；M4-01d：输出/缓存
 迁移及 golden。后续 `where` 策略、atomic、race、uniformity 单独立项。
 
@@ -193,7 +198,7 @@ M4-01a：设计评审（本文，Proposed）；M4-01b：节点元数据、定义
 - 遍历覆盖与 TIR registry 对账；新/未知节点和缺失 effect 被明确拒绝。纯 effect
   迁移不改变 CPU 数值结果或生成的 Triton 程序；按风险运行既有 CPU/golden 与 GPU gate。
 
-本轮仅提交设计文档，不修改 src、测试行为或现有 golden。M3 因独立 GPU 持续
+M4-01b 不修改现有数值语义或 golden 格式。M3 因独立 GPU 持续
 验收缺失仍未完成；提前设计 M4 的模型不改变该状态，也不宣称具备并发安全分析。
 
 ## 替代方案

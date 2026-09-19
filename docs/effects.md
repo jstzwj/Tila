@@ -1,9 +1,11 @@
 # Tila 效应系统、竞争检测与 Uniformity
 
-状态：设计基线与后续方向；当前只实现 kernel 级 Read/Write 聚合及局部 where warning。
-2026-09-19 [ADR-016](adr/016-instruction-effect-ir.md)提出 M4-01 逐指令模型，状态
-Proposed，尚未实现。它明确访问身份、定义引用、mask/path、早退与循环的组合，
-未来 kernel summary 从 TIR 派生。本轮不实现 atomic、race、uniformity 或新策略开关。
+状态：设计基线与后续方向；当前已有局部 effect 元数据、旧 kernel 级 Read/Write
+聚合及局部 where warning，完整 effect 汇总迁移和并发检查尚未完成。
+2026-09-19 [ADR-016](adr/016-instruction-effect-ir.md)已 Accepted；
+[M4-01b](effect-ir.md)实现局部访问身份、Read/Write/RegionId、定义引用与 verifier。
+mask/path 与 kernel summary 派生仍待 M4-01c。atomic、race、uniformity 和新策略
+开关尚未实现。
 前置阅读：`design-principles.md` §2（第四支柱）、`type-system.md` §8–§9
 （Region 概念）。
 
@@ -65,8 +67,8 @@ v0 落库的内容：
    `MustAlias` 或 `NoAlias`，重叠视图保持 `MayAlias`。显式别名声明
    `tila.alias(x, y)` 仍推迟到 v1。
 
-M4-01 的迁移提案将为 TLoad/TStore 增加不可变的局部 effect 元数据，路径和循环
-上下文由统一遍历器推导，再生成只读的 kernel 汇总，移除 checker 的平行追加列表。
+M4-01b 已为 TLoad/TStore 增加不可变的局部 effect 元数据；下一步 M4-01c 将推导
+路径和循环上下文，生成只读 kernel 汇总并移除 checker 的平行追加列表。
 未知条件/地址仍保留可能访问，unsafe 只豁免 bounds，assume 不是真实控制分支。
 现有实现状态不因 ADR 文件存在而升级。
 

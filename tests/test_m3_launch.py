@@ -230,5 +230,7 @@ def test_pid_hint_fact_does_not_leak_out_of_branch():
             T.TAssign("i", T.TBin(block, "+", T.TBin(scalar, "*", T.TName("p"), T.TLit(8, D.i32)),
                                    T.TArange(block, 0, T.TLit(8, D.i32))))]
     emitter = Lowering(replace(copy.tk, body=body, hints=[]))
+    from tila.effect_ir import bind_effects
+    bind_effects(emitter.tk)
     assert "tl.multiple_of(" not in emitter.kernel_source()
     assert emitter.kernel_source() == emitter.kernel_source()

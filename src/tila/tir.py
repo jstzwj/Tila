@@ -15,6 +15,28 @@ from . import types as TY
 # 参数
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class ValueRef:
+    kind: str
+    site: str
+    name: str
+    vtype: object = None
+
+
+@dataclass(frozen=True)
+class EffectLocation:
+    line: int
+
+
+@dataclass(frozen=True)
+class MemoryEffect:
+    site_id: str
+    kind: str
+    region_id: TY.RegionId
+    address_space: object
+    element_dtype: object
+    location: EffectLocation
+
 @dataclass
 class TBufferParam:
     name: str
@@ -65,6 +87,7 @@ class TOperand:
 @dataclass
 class TName(TOperand):
     name: str
+    definition: ValueRef | None = None
 
 
 @dataclass
@@ -207,6 +230,8 @@ class TLoad(TExpr):
     mask: TOperand | None
     other: TOperand | None
     unsafe: bool = False
+    line: int = 0
+    effect: MemoryEffect | None = None
 
 
 @dataclass
@@ -250,6 +275,7 @@ class TStore(TStmt):
     mask: TOperand | None
     unsafe: bool = False
     line: int = 0
+    effect: MemoryEffect | None = None
 
 
 @dataclass

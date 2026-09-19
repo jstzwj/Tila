@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 8  # M3 exit: f16 dot accumulator/result rounding
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 9  # ADR-016 effects and definition references
 
 
 class SurfaceForm(str, Enum):

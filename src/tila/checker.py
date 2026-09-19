@@ -285,6 +285,8 @@ class Checker:
         self.tk.nonneg_syms = set(self.nonneg_syms)
         self.tk.sym_hi = dict(self.facts.sym_hi)
         self.tk.sym_lo = dict(self.facts.sym_lo)
+        from .effect_ir import bind_effects
+        bind_effects(self.tk)
         return self.tk
 
     def stmts(self, stmts, out) -> bool:
@@ -2305,7 +2307,7 @@ class Checker:
             None,
             self._operand_of(mask_v, e.kwargs["mask"], out)
             if mask_v is not None else None,
-            other_op, unsafe))
+            other_op, unsafe, line=e.loc.line))
 
     def _access_ptr(self, e, out, head, is_store, unsafe):
         pt = head.vtype
@@ -2376,7 +2378,7 @@ class Checker:
         return VarInfo(vtype=vt, tir=T.TLoad(
             vt, None, [], self._operand_of(head, e.args[0], out),
             self._operand_of(mask_v, e.kwargs["mask"], out)
-            if mask_v is not None else None, other_op, unsafe))
+            if mask_v is not None else None, other_op, unsafe, line=e.loc.line))
 
     # ------------------------------------------------------------------
     # 操作数物化

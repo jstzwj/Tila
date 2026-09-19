@@ -2,8 +2,9 @@
 
 状态：执行计划 v2；2026-09-19 M3-06 审计与限定矩阵补测完成，CPU 托管首个 run 已通过；隔离 GPU CI 缺失，M3 仍 NOT READY
 
-后续：4774194 的托管 CPU CI 已通过 937 项；M4-01 已形成 ADR-016（Proposed），
-仅做设计准备，不推进 atomic/race/uniformity 实现，也不将 M3 标记完成。
+后续：4774194 的托管 CPU CI 已通过 937 项；ADR-016 已 Accepted，M4-01b 已实现
+节点 effect/定义引用/verifier，本地 CPU 953/GPU 300 节点通过。不推进 atomic/race/
+uniformity 实现，也不将 M3 标记完成。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -50,7 +51,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：937 passed、零 skipped；4774194 的 CPU 托管 run 已验证同一 937 项。M3 GPU 覆盖扩展至 300 节点/444 案例，后续代码修改需单独验收。
+- 当前本地测试基线：953 passed、零 skipped；4774194 的 CPU 托管 run 为历史 937 项证据。GPU 严格验收 300 节点/444 案例通过，当前修改需单独取得远端 CI 证据。
 
 ### 2.2 当前主要缺口
 
@@ -503,7 +504,7 @@ SafeUnderContract 保留显示兼容；unsafe 不再伪装成 ProvenSafe。
 
 ### M4.1 Per-instruction effect IR
 
-- 设计提案：[ADR-016](docs/adr/016-instruction-effect-ir.md)，Proposed，尚未实现；
+- 冻结设计：[ADR-016](docs/adr/016-instruction-effect-ir.md)，Accepted；M4-01b 已实现，汇总迁移待 M4-01c；
 - M4-01 先让每个现有 load/store（含 unsafe）节点携带 effect；atomic 留待 M4.3；
 - kernel effect summary 从指令聚合生成，不再由 checker 单独维护平行列表；
 - effect 使用 RegionId，不使用 extent 名称；
@@ -883,7 +884,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | [ADR-013](docs/adr/013-const-bool-domain.md) | Accepted | Const bool | M2-07b 已完成 | 自 0.3.0.dev0 开放 exact bool、独立参数域、带类型标签的缓存键 |
 | [ADR-014](docs/adr/014-host-integer-normalization.md) | Accepted | 宿主整数转换 | M2-07c 已完成 | 显式 host_int 白名单；ExactInt 入口不变 |
 | [ADR-015](docs/adr/015-rounded-typed-constants.md) | Accepted | 显式舍入常量 | M2-07d 已完成 | 目标 dtype、直接 RNE、规范位模式；拒绝非有限值及溢出 |
-| [ADR-016](docs/adr/016-instruction-effect-ir.md) | Proposed | 逐指令 Effect IR 与派生汇总 | M4-01 实现前 | 局部 Read/Write、RegionId、稳定定义引用；path/mask/loop 派生上下文；不涉及 atomic/race/uniformity 实现 |
+| [ADR-016](docs/adr/016-instruction-effect-ir.md) | Accepted | 逐指令 Effect IR 与派生汇总 | M4-01b 已实现 | 局部 Read/Write、RegionId、稳定定义引用已落地；path/mask/loop 上下文及汇总待 M4-01c；不涉及 atomic/race/uniformity 实现 |
 
 每份 ADR 至少回答：
 
@@ -938,8 +939,8 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M3-04 | DONE | 操作/dtype 支持矩阵与编译覆盖审计 | M3-03 | 22 项 intrinsic 证据索引、36 项 GPU 新案例、窄 exp/exp2 修复、FP8 target 门禁；五个示例 15 份 golden；CPU 910/GPU 151 节点通过；见 docs/gpu-operation-audit.md |
 | M3-05 | DONE | alignment 契约到 hint 的发射闭环 | M3-04 | 一维 stride-1 Buffer/Ptr 的基地址字节提示，独立 checked 来源、explain golden、缓存隔离与逐次契约校验；CPU 926/GPU 160 节点通过；范围见 docs/alignment-hints.md |
 | M3-06 | DONE | M3 退出审计及矩阵补测 | M3-01..05 现有成果 | docs/m3-exit-audit.md / m3-matrix-followup.md：NOT READY；托管 CPU 首个 run 通过，补测后本地 CPU 937/GPU 300 节点通过；dot f16 修复，zeros/reshape/add dtype 证据补齐；隔离 GPU 持续验收仍缺失 |
-| M4-01a | DONE | 逐指令 Effect IR 设计提案 | ADR-002/006/007/011 | ADR-016 已形成，Proposed；仅设计准备，未增加运行时/后端功能 |
-| M4-01b | TODO | 节点 effect、定义引用与 verifier | ADR-016 评审接受 | 不遗漏嵌套访问，区分重绑定与重复求值；未知节点明确拒绝 |
+| M4-01a | DONE | 逐指令 Effect IR 设计评审 | ADR-002/006/007/011 | ADR-016 已评审冻结为 Accepted |
+| M4-01b | DONE | 节点 effect、定义引用与 verifier | ADR-016 已接受 | 局部不可变元数据、词法定义点引用、穷尽遍历与独立重算校验；16 项专项，CPU 953/GPU 300 节点通过；边界见 docs/effect-ir.md |
 | M4-01c | TODO | 控制流上下文与 TIR 派生汇总 | M4-01b | mask/path 分栏，早退与零次/未知循环保守；移除 checker 平行 effect 列表 |
 | M4-01d | TODO | effect 输出与缓存迁移验收 | M4-01c | 兼容 explain 章节，稳定 site/golden、特化重算、launch overlay 隔离；不含 atomic/race/uniformity |
 
