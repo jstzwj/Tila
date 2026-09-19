@@ -25,9 +25,9 @@
 ## 验收边界
 
 统一命令：`PYTHONPATH=src python tools/gpu_audit.py`。
-环境必须精确匹配上述组合，全部 104 个 pytest 节点成功且无 skipped 才能
+环境必须精确匹配上述组合，全部 112 个 pytest 节点成功且无 skipped 才能
 标记 `accepted: true`。四个既有专项是聚合节点，其内部含 148 个固定案例；
-M2-08 另有 66 个新增节点，共 214 个语义案例；M3 再增加 34 个节点，当前共 248 个案例。
+M2-08 另有 66 个新增节点，共 214 个语义案例；M3 再增加 42 个节点，当前共 256 个案例。
 无 CUDA、依赖缺失、环境不匹配、测试失败或被跳过均返回非零，并保留失败记录。
 `--exploratory` 允许其他组合做探索，`--case` 允许定位子集，二者无论成功与否
 都不能作为完整基线验收。CPU pytest 与 GPU 门禁分离，不以 CPU 通过充当 GPU 证据。
@@ -42,5 +42,6 @@ PyTorch 不提供负 stride tensor，因此负 stride 仍只有 CPU 证据。
 M3-01 已增加全量依赖锁、专用 runner、workflow 与官方示例 differential，详见
 [支持矩阵与操作手册](../gpu-support.md)。验证分支 push 可执行；每日调度须合并至
 默认分支后启用。初始支持承诺仅覆盖本表 RTX 3090/SM86 的组合及已列举操作。
-其他架构/版本和完整 target verifier 仍未验证；不能因此将整个后端声明为全域稳定。
+M3-02 的结构与静态 target verifier 见 [launch/target](../launch-target.md)。其他架构/版本、
+编译后资源检查和完整 source map 仍未验证；不能因此将整个后端声明为全域稳定。
 升级依赖必须新建/更新基线并完整重跑，不能直接覆盖旧审计证据。

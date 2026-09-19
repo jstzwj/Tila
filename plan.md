@@ -1,8 +1,8 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M2-08 固定环境 CPU/GPU 语义对照，下一步 M3 GPU 持续验收
+状态：执行计划 v2；2026-09-19 完成 M3-02 launch/target/缓存收口，下一步编译后资源诊断与 source map
 
-基线日期：2026-09-19（M0/M1、M2-01 至 M2-07 已完成，M2 进行中）
+基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
 适用范围：语言规范、前端、类型系统、静态证明、TIR、Triton 后端、运行时、解释器、测试与文档。
 
@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：842 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 104 节点/248 案例。
+- 当前测试基线：877 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 112 节点/256 案例。
 
 ### 2.2 当前主要缺口
 
@@ -920,7 +920,8 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M2-07 | DONE | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b/c/d 均完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/11 组 GPU 对照，c 为 39 项宿主转换专项，d 为 39 项专项/两份 golden/46 组 GPU 按位对照；ADR-012 至 015 与状态表同步 |
 | M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
 | M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁/专用 runner；CI run 35440453081：CPU 842/GPU 104 节点通过、附件重放 8 项通过；待合并默认分支启用每日调度 |
-| M3-02 | IN_PROGRESS | launch/target/hint 基础闭环 | M3-01 | 已加入同设备门禁、4/8 num_warps、target 缓存隔离、hint 开关对照；完整 TIR verifier/资源约束/缓存指纹待续 |
+| M3-02 | DONE | launch/target 检查与缓存收口 | M3-01 | grid/零启动、集中 capability、结构与静态 target verifier、源码/ABI/布局缓存隔离、hint/alignment 负测试；本地 CPU 877/GPU 112 节点通过，边界见 docs/launch-target.md |
+| M3-03 | TODO | 编译后资源诊断与 source map | M3-02 | 检查寄存器/shared-memory 等编译产物限制；将后端失败映射到 Tila 源位置，扩展诊断 golden；不扩大未经验证的 target 支持范围 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

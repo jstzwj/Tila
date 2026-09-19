@@ -18,6 +18,7 @@ from . import dtypes as D
 from . import tir as T
 from . import types as TY
 from . import numeric
+from .verifier import verify, fail
 
 
 _INTEGER_DIVISION = '''@triton.jit
@@ -78,7 +79,8 @@ class Lowering:
     def __init__(self, tk: T.TKernel, debug_asserts: bool = False):
         self.tk = tk
         self.debug = debug_asserts
-        self.hint_after = {var: span for var, span in tk.hints}
+        self.hint_after = {var: span for var, span in tk.hints
+                           if all(other == span for name, other in tk.hints if name == var)}
         # 裸指针参数名 → Triton 实参名（checker 正常物化为 TBufPtr；
         # 此映射兜底防御直引参数名的 TName）。
         self.ptr_args = {p.name: f"{p.name}_ptr" for p in tk.ptr_params}
@@ -89,11 +91,16 @@ class Lowering:
         #   tl.constexpr 或字面量，运行期标量不可用）。
         self._pid_names = set()
         self._const_names = {c.name for c in tk.consts}
+        self._pow2_const_names = {c.name for c in tk.consts
+                                  if any(isinstance(r, TY.PowerOfTwo) for r in c.refinements)}
         self.hint_audit = []
 
     # ------------------------------------------------------------------
 
     def kernel_source(self) -> str:
+        verify(self.tk)
+        self._pid_names = set()
+        self.hint_audit = []
         k = self.tk
         params = [f"{b.name}_ptr" for b in k.buffers]
         params += [f"{p.name}_ptr" for p in k.ptr_params]   # 裸指针参数
@@ -174,10 +181,13 @@ class Lowering:
                 ]
             else:
                 out = [f"{pad}{s.name} = {self.e(s.value)}"]
-            if s.name in self.hint_after:
+            from .predicates import STATIC
+            origins = tuple(o for o in self.tk.hint_origins.get(s.name, ())
+                            if o.kind == STATIC and o.line == s.line)
+            if s.name in self.hint_after and origins:
                 span = self.hint_after[s.name]
                 self.hint_audit.append((f"max_contiguous({s.name}, {self.dim(span)})",
-                                       tuple(sorted(self.tk.hint_origins.get(s.name, ())))))
+                                       tuple(sorted(origins))))
                 out.append(f"{pad}tl.max_contiguous({s.name}, {self.dim(span)})")
             return out
         if isinstance(s, T.TStore):
@@ -192,12 +202,19 @@ class Lowering:
             # TStaticIf 与 TIf 同形 lowering：条件引用 tl.constexpr 实参，
             # Triton 在 trace 期解析该 python if（每特化取一分支）。
             out = [f"{pad}if {self.o(s.cond)}:"]
+            before = set(self._pid_names)
             out.extend(self.stmts(s.then_body, depth + 1) or [pad + "    pass"])
+            after_then = set(self._pid_names)
+            self._pid_names = set(before)
             if s.else_body:
                 out.append(f"{pad}else:")
                 out.extend(self.stmts(s.else_body, depth + 1))
+            self._pid_names.intersection_update(after_then)
             return out
         if isinstance(s, T.TFor):
+            # A loop-carried name can change on later iterations; structural
+            # pid hints inside/outside the loop require fresh definitions.
+            self._pid_names = set()
             start = self.o(s.start) if s.start is not None else "0"
             induction = f"_tila_loop_{s.var}"
             out = [f"{pad}for {induction} in range(tl.cast({start}, tl.int64), "
@@ -205,11 +222,12 @@ class Lowering:
                    f"{pad}    {s.var} = tl.cast({induction}, tl.int32)"]
             body = self.stmts(s.body, depth + 1)
             out.extend(body or [pad + "    pass"])
+            self._pid_names = set()
             return out
         if isinstance(s, T.TReturn):
             # 裸 return：Triton jit 支持提前 return（program instance 级退出）。
             return [f"{pad}return"]
-        return [f"{pad}# ?{s!r}"]
+        fail(f"unsupported TIR statement {type(s).__name__}", getattr(s, "line", 0))
 
     def _multiple_of_split(self, name: str, value):
         """offs = pid*STEP + arange(0, E) ⇒ (base 名, mul, arange, STEP)。
@@ -237,7 +255,7 @@ class Lowering:
                 continue
             for x, y in ((add_l.left, add_l.right),
                          (add_l.right, add_l.left)):
-                if self._is_pid_side(x) and self._is_step_side(y):
+                if self._is_pid_side(x) and self._is_step_side(y, add_r.end):
                     return f"{name}_base", add_l, add_r, y
         return None
 
@@ -246,10 +264,14 @@ class Lowering:
             return True
         return isinstance(x, T.TName) and x.name in self._pid_names
 
-    def _is_step_side(self, x) -> bool:
+    def _is_step_side(self, x, arange_end=None) -> bool:
         if isinstance(x, T.TLit):
-            return isinstance(x.value, int) and not isinstance(x.value, bool)
-        return isinstance(x, T.TName) and x.name in self._const_names
+            return type(x.value) is int and x.value > 0 and x.value & (x.value - 1) == 0
+        # A Const used as this arange's end is also guarded by the target tile
+        # power-of-two check before execution, even without a public refinement.
+        return isinstance(x, T.TName) and x.name in self._const_names and (
+            x.name in self._pow2_const_names or
+            isinstance(arange_end, T.TName) and x.name == arange_end.name)
 
     def store_dst(self, s: T.TStore):
         if s.buffer is not None:
@@ -380,7 +402,7 @@ class Lowering:
             return f"{x.buffer}_ptr"
         if isinstance(x, T.TPAdd):
             return f"({self.o(x.ptr)} + {self.o(x.offset)})"
-        return f"# ?{x!r}"
+        fail(f"unsupported TIR expression {type(x).__name__}")
 
     def _reduce(self, x: T.TReduce) -> str:
         dt = x.output_dtype

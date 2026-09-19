@@ -27,7 +27,7 @@ def main():
                PYTEST_ADDOPTS="", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
                TILA_GPU_KERNELS=str(run / "kernels"), TMPDIR=str(run / "tmp"))
     argv = [str(source / "ci/gpu/.venv/bin/python"), "-m", "pytest",
-            "tests/gpu_semantics.py", "tests/gpu_examples.py", "-v", "--tb=long", "--showlocals",
+            "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "-v", "--tb=long", "--showlocals",
             f"--junitxml={run / 'results.xml'}"]
     if args.case:
         argv += ["-k", args.case]

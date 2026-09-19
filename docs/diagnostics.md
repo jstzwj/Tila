@@ -63,7 +63,7 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | `TILA-MEM` | 001–006 | memory capability/offset/alignment |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
 | `TILA-EFFECT` | 007 | effect warning |
-| `TILA-TARGET` | 004–008 | backend/target、launch options、device 一致性 |
+| `TILA-TARGET` | 004–009 | backend/target、launch options、device 一致性、非法或不支持的 TIR |
 | `TILA-INTERNAL` | 001 | CLI 内部故障封装 |
 
 尚未实现的 `TILA-RACE`、`TILA-UNIFORM` 只存在于未来设计，不进入活动 registry；实际实现前
