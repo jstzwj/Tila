@@ -262,14 +262,11 @@ class Interp:
                 return bool(np.any(v))
             if x.op == "all":
                 return bool(np.all(v))
-            if x.op == "exp":
-                return np.exp(v.astype(np.float32) if not
-                              isinstance(v, np.ndarray) or
-                              v.dtype != np.float64 else v)
-            if x.op == "exp2":
-                return np.exp2(v.astype(np.float32) if not
-                               isinstance(v, np.ndarray) or
-                               v.dtype != np.float64 else v)
+            if x.op in ("exp", "exp2"):
+                result_dtype = x.vt.elem.dtype if isinstance(x.vt, TY.BlockT) else x.vt.dtype
+                compute_dtype = np.float64 if result_dtype is D.f64 else np.float32
+                result = getattr(np, x.op)(np.asarray(v, dtype=compute_dtype))
+                return np.asarray(result, dtype=_np_dtype(result_dtype))
             raise RuntimeError(x.op)
         if isinstance(x, T.TConstant):
             return np.asarray(x.bits, dtype=f"uint{x.dtype.bits}").view(_np_dtype(x.dtype))[()]

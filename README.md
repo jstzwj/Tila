@@ -195,7 +195,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 - Ptr 公共语法与 RegionId/Extent/alias 模型已定型；Buffer v0 不公开
   Strides/AddressSpace，`buf.ptr` 只允许 rank-1、stride-1；显式多维 flatten
   和更丰富 pointer arithmetic 尚未设计；
-- FP8 目前主要是 storage dtype 与算术闸门，不是完整 GPU FP8 支持；
+- FP8 仅保留前端 storage/cast 类型规则，固定 GPU target 的 build/launch 明确拒绝；
 - alignment 声明会在 launch 时校验，但尚未完整反馈为 lowering hint；
 - effect 目前有聚合记录和 `where` eager-memory warning；atomic、race、
   uniformity 尚未实现；

@@ -351,10 +351,13 @@ class Lowering:
                 return f"(~tl.cast({self.o(x.operand)}, tl.int1))"
             if dt and dt.is_int and not x.staged:
                 return f"tl.cast(({x.op}tl.cast({self.o(x.operand)}, {dt.tl_name})), {dt.tl_name})"
-            if x.op == "exp":
-                return f"tl.exp({self.o(x.operand)})"
-            if x.op == "exp2":
-                return f"tl.math.exp2({self.o(x.operand)})"
+            if x.op in ("exp", "exp2"):
+                dt = x.vt.elem.dtype if isinstance(x.vt, TY.BlockT) else x.vt.dtype
+                value = self.o(x.operand)
+                op = "tl.exp" if x.op == "exp" else "tl.math.exp2"
+                if dt in (D.f16, D.bf16):
+                    return f"tl.cast({op}(tl.cast({value}, tl.float32)), {dt.tl_name})"
+                return f"{op}({value})"
             # Mask lane 归约 → 标量 bool（int1 块经 cast 求和；tl.sum 无
             # axis 时归约全部元素为标量）——type-system.md §3.3
             if x.op == "any":

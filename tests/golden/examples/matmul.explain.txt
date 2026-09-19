@@ -1,0 +1,203 @@
+kernel @matmul_kernel — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: BK=32, BM=64, BN=64
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+integer launch contracts (must pass before execution):
+  integer operands must fit i32 before arithmetic
+  cannot prove intermediate index '*' does not overflow i32
+  cannot prove intermediate index '+' does not overflow i32
+  range start/end/positive step must fit i32
+parameters:
+  BK : Const[int]
+  BM : Const[int, PowerOfTwo]
+  BN : Const[int, PowerOfTwo]
+  K : i32
+  M : i32
+  N : i32
+  a : Buffer[f16, (M, K), ReadOnly, UnknownAlignment]
+  a_stride0 : i32
+  a_stride1 : i32
+  b : Buffer[f16, (K, N), ReadOnly, UnknownAlignment]
+  b_stride0 : i32
+  b_stride1 : i32
+  c : Buffer[f32, (M, N), WriteOnly, UnknownAlignment]
+  c_stride0 : i32
+  c_stride1 : i32
+types:
+  BK : i32
+  BM : i32
+  BN : i32
+  K : i32
+  M : i32
+  N : i32
+  a : Buffer[f16, (M, K), ReadOnly, UnknownAlignment]
+  a_stride0 : i32
+  a_stride1 : i32
+  acc : Block[f32, (BM, BN)]
+  b : Buffer[f16, (K, N), ReadOnly, UnknownAlignment]
+  b_stride0 : i32
+  b_stride1 : i32
+  c : Buffer[f32, (M, N), WriteOnly, UnknownAlignment]
+  c_stride0 : i32
+  c_stride1 : i32
+  m_mask : Mask[(BM)]
+  n_mask : Mask[(BN)]
+  pid_m : i32
+  pid_n : i32
+  rk : Block[i32, (BK)]
+  rm : Block[i32, (BM)]
+  rn : Block[i32, (BN)]
+facts:
+  BM ∈ [1, +inf)
+  BN ∈ [1, +inf)
+  __lane1 ∈ [0, BM)
+  __lane1@-2 ∈ [0, BM)
+  __lane2 ∈ [0, BN)
+  __lane3 ∈ [0, BK)
+  pid0 ∈ [0, __grid0)
+  pid1 ∈ [0, __grid1)
+  BK = 32 (Const)
+  BM = 64 (Const)
+  BN = 64 (Const)
+  nonneg symbols: BM, BN, K, M, N, __i_k0_4, __lane1, __lane1@-2, __lane2, __lane3, __lane3@-2, pid0, pid1
+obligations:
+  - load[a] axis 0: 0 <= (BM * pid0) + __lane1@-2 < M
+      path: true
+      mask: mapped((mapped((BM * pid0) + __lane1@-2 < M)) and (mapped(__i_k0_4 + __lane3 < K)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 17, line 24
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 17: comparison
+      proof route:
+        - direct predicate `(BM * pid0) + __lane1@-2 < M` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[a] axis 1: 0 <= __i_k0_4 + __lane3 < K
+      path: true
+      mask: mapped((mapped((BM * pid0) + __lane1@-2 < M)) and (mapped(__i_k0_4 + __lane3 < K)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 23, line 24
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 23: comparison
+      proof route:
+        - direct predicate `__i_k0_4 + __lane3 < K` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[b] axis 0: 0 <= __i_k0_4 + __lane3@-2 < K
+      path: true
+      mask: mapped((mapped(__i_k0_4 + __lane3@-2 < K)) and (mapped((BN * pid1) + __lane2 < N)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 23, line 26
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 23: comparison
+      proof route:
+        - direct predicate `__i_k0_4 + __lane3@-2 < K` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[b] axis 1: 0 <= (BN * pid1) + __lane2 < N
+      path: true
+      mask: mapped((mapped(__i_k0_4 + __lane3@-2 < K)) and (mapped((BN * pid1) + __lane2 < N)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 18, line 26
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 18: comparison
+      proof route:
+        - direct predicate `(BN * pid1) + __lane2 < N` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[c] axis 0: 0 <= (BM * pid0) + __lane1@-2 < M
+      path: true
+      mask: mapped((mapped((BM * pid0) + __lane1@-2 < M)) and (mapped((BN * pid1) + __lane2 < N)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 17, line 30
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 17: comparison
+      proof route:
+        - direct predicate `(BM * pid0) + __lane1@-2 < M` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[c] axis 1: 0 <= (BN * pid1) + __lane2 < N
+      path: true
+      mask: mapped((mapped((BM * pid0) + __lane1@-2 < M)) and (mapped((BN * pid1) + __lane2 < N)))
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 18, line 30
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 18: comparison
+      proof route:
+        - direct predicate `(BN * pid1) + __lane2 < N` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+hints:
+  multiple_of(rm_base, BM)
+    dependency: StaticFact at line 13: structural pid * step; integer launch guards required
+  max_contiguous(rm, BM)
+    dependency: StaticFact at line 13: structural contiguous span; integer launch guards required
+  multiple_of(rn_base, BN)
+    dependency: StaticFact at line 14: structural pid * step; integer launch guards required
+  max_contiguous(rn, BN)
+    dependency: StaticFact at line 14: structural contiguous span; integer launch guards required
+  max_contiguous(rk, BK)
+    dependency: StaticFact at line 15: structural contiguous span; integer launch guards required
+effects:
+  Read[BufferRegion[0:a]]
+  Read[BufferRegion[1:b]]
+  Write[BufferRegion[2:c]]
+aliases:
+  scope: static conservative defaults
+  MayAlias[BufferRegion[0:a], BufferRegion[1:b]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[0:a], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[1:b], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
+warnings:
+  (none)
+notes:
+  (none)
+deferred constraints:
+  step: loop step BK >= 1

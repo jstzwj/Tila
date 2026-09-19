@@ -15,6 +15,7 @@ class Capability:
     dot_inputs: tuple = ("f16",)
     dot_outputs: tuple = ("f16", "f32")
     min_dot_k: int = 16
+    fp8_storage: bool = False
 
 
 SUPPORTED = Capability()

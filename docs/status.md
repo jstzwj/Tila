@@ -6,10 +6,10 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 884 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 910 passed、零 skipped
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；专用 GPU runner 和 workflow 已配置，
-当前覆盖 115 个 GPU 测试节点/259 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 151 个 GPU 测试节点/295 个语义案例，初始支持仅 RTX 3090/SM86。
 默认分支定时验收须合并验证分支后启用；操作与边界见 [GPU 支持](gpu-support.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
@@ -18,6 +18,11 @@ M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构
 
 M3-03 已增加语句级 source map、编译/加载诊断与重放附件、shared-memory/线程硬门禁，
 寄存器/spill 仅记录性能信息；边界与使用方式见 [后端诊断](backend-diagnostics.md)。
+
+M3-04 已建立逐 intrinsic 的 [操作/dtype 证据清单](gpu-capabilities.json) 与
+[退出条件核查](gpu-operation-audit.md)，新增 36 个 GPU 节点和五个示例的 15 份 golden。
+修复窄浮点 exp/exp2 发射与中间舍入；FP8 storage/cast 收紧为 Stage 1 类型规则，
+固定 target 的 build/launch 明确拒绝。未认证的 dtype/shape 组合不因清单存在而获得支持承诺。
 
 M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节点、214 个语义
 案例通过，零 skipped。统一命令 `PYTHONPATH=src python tools/gpu_audit.py`，
@@ -142,7 +147,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | `u8/u16/u32/u64` | `Implemented` | Check / CPU / Triton | signed/unsigned 隐式混算拒绝 |
 | `f16/f32/f64` | `Implemented` | Check / CPU / Triton | 基础算术、cast、load/store；真实 GPU 组合未验证 |
 | `bf16` 基础值语义 | `Implemented` | Check / CPU / Triton | `ml_dtypes` 为 dev/interp 依赖；masked load 和加法有端到端测试 |
-| `f8e4m3fn/f8e5m2` storage gate | `Partial` | Check / Triton | 可声明、load/store/cast，直接算术会拒绝；CPU storage 和真实 GPU/FP8 dot 未闭环 |
+| `f8e4m3fn/f8e5m2` storage gate | `Partial` | Check | Stage 1 可声明和检查 load/store/cast，直接算术拒绝；固定 target build/launch 拒绝 storage/cast 及中间 FP8 值，尚无执行支持 |
 | FP8 完整 load→compute→store | `Designed` | — | 目标能力、舍入和 GPU 验证待 M5 |
 | dtype capability 公共对象（`Float` 等） | `Designed` | — | 当前只有内部 tuple，没有公共 `tila.Float`/`DotInput` 类型 |
 
@@ -302,7 +307,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `sum/max` | `Implemented` | Check / CPU / Triton | ADR-008：exact int axis；显式累加与输出 dtype、NaN 传播；12 dtype 双轴 GPU 对照；bool/FP8 先拒绝或 cast |
 | `min` reduction | `Deferred` | — | 尚未实现 |
 | `exp` | `Implemented` | Check / CPU / Triton | Float 域逐元素 |
-| `exp2` | `Implemented` | Check / CPU / Triton | 公共占位符、frontend、checker、interpreter 与 lowering 已对齐 |
+| `exp2` | `Implemented` | Check / CPU / Triton | 四种浮点 GPU 对照；与 exp 一样，f16/bf16 经 f32 计算后立即舍入回输入 dtype；f32/f64 保持精度 |
 | `log/sqrt/rsqrt/abs/floor/ceil` | `Deferred` | — | 尚未实现 |
 
 ### 8.4 断言与提示
@@ -359,7 +364,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 115 节点/259 案例，五个官方示例多配置；默认分支调度待合并、完整 dtype/target 矩阵仍待 M3 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 151 节点/295 案例，五个官方示例多配置；逐 intrinsic 证据见 gpu-capabilities.json，默认分支调度待合并、未覆盖组合不作承诺 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

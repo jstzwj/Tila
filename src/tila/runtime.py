@@ -1159,6 +1159,8 @@ def _binding_signature(tk, tensors):
 def _tensor_info(t):
     """dtype/shape/strides(元素)/data_ptr，torch 与 numpy 双协议。"""
     if torch is not None and isinstance(t, torch.Tensor):
+        if str(t.dtype) in ("torch.float8_e4m3fn", "torch.float8_e5m2"):
+            raise TilaError("TILA-TARGET-009", "FP8 storage/cast execution is not validated; use f16/bf16/f32")
         dt = _TORCH_DT.get(str(t.dtype).removeprefix("torch."))
         strides = tuple(t.stride())
         return dt, tuple(t.shape), strides, t.data_ptr()

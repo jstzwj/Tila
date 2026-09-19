@@ -1,0 +1,113 @@
+kernel @add_kernel — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: BLOCK=128
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+integer launch contracts (must pass before execution):
+  integer operands must fit i32 before arithmetic
+  cannot prove intermediate index '*' does not overflow i32
+  cannot prove intermediate index '+' does not overflow i32
+parameters:
+  BLOCK : Const[int, PowerOfTwo]
+  N : i32
+  out : Buffer[f32, (N,), WriteOnly, UnknownAlignment]
+  out_stride0 : i32
+  x : Buffer[f32, (N,), ReadOnly, UnknownAlignment]
+  x_stride0 : i32
+  y : Buffer[f32, (N,), ReadOnly, UnknownAlignment]
+  y_stride0 : i32
+types:
+  BLOCK : i32
+  N : i32
+  a : Block[f32, (BLOCK)]
+  b : Block[f32, (BLOCK)]
+  mask : Mask[(BLOCK)]
+  offs : Block[i32, (BLOCK)]
+  out : Buffer[f32, (N,), WriteOnly, UnknownAlignment]
+  out_stride0 : i32
+  pid : i32
+  x : Buffer[f32, (N,), ReadOnly, UnknownAlignment]
+  x_stride0 : i32
+  y : Buffer[f32, (N,), ReadOnly, UnknownAlignment]
+  y_stride0 : i32
+facts:
+  BLOCK ∈ [1, +inf)
+  __lane1 ∈ [0, BLOCK)
+  pid0 ∈ [0, __grid0)
+  BLOCK = 128 (Const)
+  nonneg symbols: BLOCK, N, __lane1, pid0
+obligations:
+  - load[x] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+      path: true
+      mask: mapped((BLOCK * pid0) + __lane1 < N)
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 11, line 13
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 11: comparison
+      proof route:
+        - direct predicate `(BLOCK * pid0) + __lane1 < N` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[y] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+      path: true
+      mask: mapped((BLOCK * pid0) + __lane1 < N)
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 11, line 14
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 11: comparison
+      proof route:
+        - direct predicate `(BLOCK * pid0) + __lane1 < N` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - store[out] axis 0: 0 <= (BLOCK * pid0) + __lane1 < N
+      path: true
+      mask: mapped((BLOCK * pid0) + __lane1 < N)
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 11, line 16
+      trust sources:
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+        - StaticFact line 11: comparison
+      proof route:
+        - direct predicate `(BLOCK * pid0) + __lane1 < N` (path/mask DAG) proves the upper bound; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+hints:
+  multiple_of(offs_base, BLOCK)
+    dependency: StaticFact at line 10: structural pid * step; integer launch guards required
+  max_contiguous(offs, BLOCK)
+    dependency: StaticFact at line 10: structural contiguous span; integer launch guards required
+effects:
+  Read[BufferRegion[0:x]]
+  Read[BufferRegion[1:y]]
+  Write[BufferRegion[2:out]]
+aliases:
+  scope: static conservative defaults
+  MayAlias[BufferRegion[0:x], BufferRegion[1:y]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[0:x], BufferRegion[2:out]] (distinct external parameters are conservatively MayAlias)
+  MayAlias[BufferRegion[1:y], BufferRegion[2:out]] (distinct external parameters are conservatively MayAlias)
+warnings:
+  (none)
+notes:
+  (none)

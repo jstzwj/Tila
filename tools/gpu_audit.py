@@ -20,7 +20,7 @@ BASELINE = {
     "cuda": "12.8", "numpy": "1.24.3", "ml_dtypes": "0.5.4",
     "gpu": "NVIDIA GeForce RTX 3090", "capability": [8, 6], "driver": "595.84",
 }
-EXPECTED_TESTS = 115  # M3-03 adds compiler/resource negatives and reporting
+EXPECTED_TESTS = 151  # M3-04 adds 36 operation/dtype audit nodes
 
 
 def command(args):
@@ -105,7 +105,7 @@ def main():
         report["execution_env"] = replay_env
         from importlib.metadata import distributions
         report["packages"] = {dist.metadata["Name"]: dist.version for dist in distributions() if dist.metadata["Name"]}
-        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "-v", "-s",
+        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "-v", "-s",
                 "--tb=long", "--showlocals", f"--junitxml={run / 'results.xml'}"]
         if args.case:
             argv += ["-k", args.case]

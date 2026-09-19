@@ -39,6 +39,7 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
     if type(kernel) is not T.TKernel:
         fail("expected TKernel")
     specialized = consts is not None
+    fp8_supported = capability is not None and capability.fp8_storage
     consts = {} if consts is None else consts
     buffers = {p.name: p.vtype for p in kernel.buffers}
     pointers = {p.name: p.vtype for p in kernel.ptr_params}
@@ -48,6 +49,8 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
     for p in kernel.buffers + kernel.ptr_params:
         if p.vtype.elem not in D.ALL.values() or p.vtype.space is not TY.GLOBAL:
             fail("unsupported memory dtype or address space")
+        if p.vtype.elem.kind == "float_storage" and not fp8_supported:
+            fail("FP8 storage/cast is not validated on this target; use f16/bf16/f32")
     for p in kernel.scalars:
         if p.dtype not in D.ARITH_DTYPES + (D.bool_,):
             fail("unsupported scalar ABI dtype")
@@ -70,6 +73,8 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         if type(vt) is TY.ScalarT:
             if vt.dtype not in D.ALL.values():
                 fail("unknown scalar dtype", line)
+            if vt.dtype.kind == "float_storage" and not fp8_supported:
+                fail("FP8 storage/cast is not validated on this target; use f16/bf16/f32", line)
         elif type(vt) is TY.PtrT:
             if vt.elem not in D.ALL.values() or vt.space is not TY.GLOBAL:
                 fail("unsupported pointer type", line)

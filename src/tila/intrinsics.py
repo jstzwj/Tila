@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 6  # ADR-008 reduction domains/NaN policy
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 7  # M3-04 narrow exp/exp2 result rounding
 
 
 class SurfaceForm(str, Enum):

@@ -1,0 +1,321 @@
+{
+  "schema": "tila.gpu-capabilities.v1",
+  "target": "RTX 3090 / SM86; ADR-009 fixed environment",
+  "scope": "Evidence inventory, not certification of every dtype/shape cross-product. Missing verified dtype is unverified, not automatically illegal.",
+  "excluded": {
+    "fp8": "f8e4m3fn/f8e5m2 storage and cast: frontend declarations only; target build/launch rejected",
+    "byte_offset": "Deferred; no backend coverage claim"
+  },
+  "operations": {
+    "program_id": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "SPMD axes 0..2; power-of-two tiles",
+      "evidence": [
+        "tests/gpu_examples.py::test_add",
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Launch values must satisfy M3-02 index/grid guards; examples exercise axes 0 and 1."
+    },
+    "arange": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "SPMD axes 0..2; power-of-two tiles",
+      "evidence": [
+        "tests/gpu_examples.py::test_add",
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Launch values must satisfy M3-02 index/grid guards; examples exercise axes 0 and 1."
+    },
+    "num_programs": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "Scalar grid size and scalar loop induction",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics",
+        "tests/gpu_examples.py::test_matmul"
+      ],
+      "limits": "Fixed two-program/two-iteration case and matmul K loops; not every loop form."
+    },
+    "range": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "Scalar grid size and scalar loop induction",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics",
+        "tests/gpu_examples.py::test_matmul"
+      ],
+      "limits": "Fixed two-program/two-iteration case and matmul K loops; not every loop form."
+    },
+    "load": {
+      "verified_dtypes": [
+        "bool",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Scalar/1D/2D coordinates; masked tails and strided views",
+      "evidence": [
+        "tests/gpu_semantics.py::test_reduction",
+        "tests/gpu_semantics.py::test_strided_views",
+        "tests/gpu_boolean_smoke.py::main"
+      ],
+      "limits": "Global memory only; FP8 execution excluded; negative strides have CPU evidence only."
+    },
+    "store": {
+      "verified_dtypes": [
+        "bool",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Scalar/1D/2D coordinates; masked tails and strided views",
+      "evidence": [
+        "tests/gpu_semantics.py::test_reduction",
+        "tests/gpu_semantics.py::test_strided_views",
+        "tests/gpu_boolean_smoke.py::main"
+      ],
+      "limits": "Global memory only; FP8 execution excluded; negative strides have CPU evidence only."
+    },
+    "unsafe_load": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "1D, 16 elements across two programs",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Bounds waived, not dtype/device/target checks; test uses actually valid addresses."
+    },
+    "unsafe_store": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "1D, 16 elements across two programs",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Bounds waived, not dtype/device/target checks; test uses actually valid addresses."
+    },
+    "cast": {
+      "verified_dtypes": [
+        "bool",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Scalar and tiles; float 4x4 cast matrix",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_float_cast_matrix",
+        "tests/gpu_integer_smoke.py::main",
+        "tests/gpu_boolean_smoke.py::main"
+      ],
+      "limits": "Selected integer/boolean conversions, not all dtype pairs; FP8 endpoints and intermediates rejected."
+    },
+    "constant": {
+      "verified_dtypes": [
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Scalar constants broadcast to tiles",
+      "evidence": [
+        "tests/gpu_constant_smoke.py::main"
+      ],
+      "limits": "ADR-015 finite exact-source RNE constants; no FP8 constant."
+    },
+    "where": {
+      "verified_dtypes": [
+        "bool",
+        "i32",
+        "bf16",
+        "f32"
+      ],
+      "shape": "Scalar/tile and outer broadcast",
+      "evidence": [
+        "tests/gpu_boolean_smoke.py::main",
+        "tests/gpu_capabilities.py::test_bf16_outer_broadcast",
+        "tests/gpu_examples.py::test_fused_attention"
+      ],
+      "limits": "Eager operands; no lazy memory-safety guarantee."
+    },
+    "dot": {
+      "verified_dtypes": [
+        "f16",
+        "f32"
+      ],
+      "shape": "Rank 2, matching K>=16, power-of-two tile dimensions",
+      "evidence": [
+        "tests/gpu_examples.py::test_matmul",
+        "tests/gpu_examples.py::test_self_attention"
+      ],
+      "limits": "Evidence: f16 inputs, f32 accumulator/output. Checker also permits f16 output; bf16/f32/FP8 inputs rejected."
+    },
+    "zeros": {
+      "verified_dtypes": [
+        "f32"
+      ],
+      "shape": "2D accumulator tiles",
+      "evidence": [
+        "tests/gpu_examples.py::test_matmul"
+      ],
+      "limits": "Other arithmetic/boolean zeros remain outside this row's measured dtype coverage."
+    },
+    "sum": {
+      "verified_dtypes": [
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Rank 2 axes 0/1 and masked 1D",
+      "evidence": [
+        "tests/gpu_semantics.py::test_reduction",
+        "tests/gpu_semantics.py::test_reduction_specials",
+        "tests/gpu_semantics.py::test_masked_reduction"
+      ],
+      "limits": "ADR-008 accumulation/output dtype; bool/FP8 reductions rejected; NaN propagation covered."
+    },
+    "max": {
+      "verified_dtypes": [
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "Rank 2 axes 0/1 and masked 1D",
+      "evidence": [
+        "tests/gpu_semantics.py::test_reduction",
+        "tests/gpu_semantics.py::test_reduction_specials",
+        "tests/gpu_semantics.py::test_masked_reduction"
+      ],
+      "limits": "ADR-008 accumulation/output dtype; bool/FP8 reductions rejected; NaN propagation covered."
+    },
+    "exp": {
+      "verified_dtypes": [
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "1D finite/special values/tail; narrow-result widening",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_exponential",
+        "tests/gpu_capabilities.py::test_narrow_exp_intermediate_rounding"
+      ],
+      "limits": "f16/bf16 compute in f32 then round to input dtype; f32/f64 retain dtype. Sampled tolerances, not global error bounds."
+    },
+    "exp2": {
+      "verified_dtypes": [
+        "f16",
+        "bf16",
+        "f32",
+        "f64"
+      ],
+      "shape": "1D finite/special values/tail; narrow-result widening",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_exponential",
+        "tests/gpu_capabilities.py::test_narrow_exp_intermediate_rounding"
+      ],
+      "limits": "f16/bf16 compute in f32 then round to input dtype; f32/f64 retain dtype. Sampled tolerances, not global error bounds."
+    },
+    "assume": {
+      "verified_dtypes": [
+        "bool"
+      ],
+      "shape": "Scalar symbolic predicate, debug device assertion",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "User trust, not a proof; successful debug assertion tested, intentional device-assert failure excluded."
+    },
+    "static_assert": {
+      "verified_dtypes": [
+        "bool"
+      ],
+      "shape": "Compile-time scalar predicate",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Checker-only intrinsic: successful assertion erased before lowering; no runtime opcode."
+    },
+    "reshape": {
+      "verified_dtypes": [
+        "i32"
+      ],
+      "shape": "8 -> (2,4) -> 8",
+      "evidence": [
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+      ],
+      "limits": "Element count preserved; additional dtype/rank cross-products not certified."
+    },
+    "any": {
+      "verified_dtypes": [
+        "bool"
+      ],
+      "shape": "Boolean lane reduction",
+      "evidence": [
+        "tests/gpu_boolean_smoke.py::main"
+      ],
+      "limits": "Method syntax over bool/Mask; not numeric sum/max."
+    },
+    "all": {
+      "verified_dtypes": [
+        "bool"
+      ],
+      "shape": "Boolean lane reduction",
+      "evidence": [
+        "tests/gpu_boolean_smoke.py::main"
+      ],
+      "limits": "Method syntax over bool/Mask; not numeric sum/max."
+    }
+  }
+}

@@ -28,7 +28,7 @@ def main():
                TILA_GPU_KERNELS=str(run / "kernels"), TMPDIR=str(run / "tmp"),
                TILA_BACKEND_ARTIFACTS=str(run / "backend"))
     argv = [str(source / "ci/gpu/.venv/bin/python"), "-m", "pytest",
-            "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "-v", "--tb=long", "--showlocals",
+            "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "-v", "--tb=long", "--showlocals",
             f"--junitxml={run / 'results.xml'}"]
     if args.case:
         argv += ["-k", args.case]

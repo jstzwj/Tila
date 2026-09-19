@@ -25,9 +25,9 @@
 ## 验收边界
 
 统一命令：`PYTHONPATH=src python tools/gpu_audit.py`。
-环境必须精确匹配上述组合，全部 115 个 pytest 节点成功且无 skipped 才能
+环境必须精确匹配上述组合，全部 151 个 pytest 节点成功且无 skipped 才能
 标记 `accepted: true`。四个既有专项是聚合节点，其内部含 148 个固定案例；
-M2-08 另有 66 个新增节点，共 214 个语义案例；M3 再增加 45 个节点，当前共 259 个案例。
+M2-08 另有 66 个新增节点，共 214 个语义案例；M3 再增加 81 个节点，当前共 295 个案例。
 无 CUDA、依赖缺失、环境不匹配、测试失败或被跳过均返回非零，并保留失败记录。
 `--exploratory` 允许其他组合做探索，`--case` 允许定位子集，二者无论成功与否
 都不能作为完整基线验收。CPU pytest 与 GPU 门禁分离，不以 CPU 通过充当 GPU 证据。
@@ -46,3 +46,6 @@ M3-02 的结构与静态 target verifier 见 [launch/target](../launch-target.md
 完整性能分析仍未验证；M3-03 的编译后硬资源门禁与语句 source map 见
 [后端诊断](../backend-diagnostics.md)。不能因此将整个后端声明为全域稳定。
 升级依赖必须新建/更新基线并完整重跑，不能直接覆盖旧审计证据。
+
+M3-04 逐 intrinsic 的 dtype/shape 证据与拒绝范围见 [操作审计](../gpu-operation-audit.md)。
+FP8 storage/cast（包括中间值）没有执行支持；Stage 1 类型设计不等于本 target 支持。
