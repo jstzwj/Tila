@@ -98,9 +98,9 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | Stage 1 定义期检查 | `Implemented` | Check | 装饰函数时完成子集、类型、shape、capability 和 obligation 生成 |
 | Stage 2 Const 特化 | `Implemented` | Check | 默认值/CLI const/launch const、延迟 shape 约束和 bounds 求值 |
 | NumPy reference interpreter | `Implemented` | CPU | add、matmul、attention、控制流、Ptr 1D 等路径有测试 |
-| Triton 源码 lowering | `Partial` | Triton | 核心 TIR 可生成；只有 add 有逐字节 golden，尚无 GPU CI 和完整 target verifier |
+| Triton 源码 lowering | `Partial` | Triton | 核心 TIR 可生成，add/typed constants 有 golden；GPU CI 验证分支已接入，完整 target verifier 待续 |
 | CUDA 自动后端选择 | `Partial` | Triton | 已检查同设备、RTX 3090/SM86、Triton 3.6.0；完整 target verifier 仍待完成 |
-| 特化缓存 | `Partial` | Triton | 当前键覆盖函数身份、Const、debug；未覆盖完整 dtype/target/alignment/source fingerprint |
+| 特化缓存 | `Partial` | Triton | 当前键含函数身份、Const、常量位模式、debug、CUDA device/capability、Triton 版本、num_warps；完整布局/alignment/source fingerprint 待续 |
 | Source map/后端错误回映射 | `Designed` | — | 尚无 Tila 源位置到 Triton 编译错误的完整映射 |
 | 多后端/直接 PTX | `Deferred` | — | Triton 是当前唯一计划后端 |
 
@@ -290,7 +290,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | bool tile 消费 | `Implemented` | Check / CPU / Triton | load/store mask、where 支持 Block bool；不自动取得 bounds 事实，不合并 Mask/Block 类型 |
 | `mask.any()/mask.all()` | `Implemented` | Check / CPU / Triton | Mask/Block bool，仅方法形式，归约为 scalar bool |
 | `where` | `Implemented` | Check / CPU / Triton | eager 两侧；dtype 必须一致，shape 可广播 |
-| `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；无真实 GPU CI |
+| `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；固定 RTX 3090 示例 GPU 对照覆盖 f32 acc，完整矩阵待续 |
 | `dot` bf16/FP8 输入 | `Designed` | — | 当前 `DOT_INPUT` 仅 f16 |
 | `sum/max` | `Implemented` | Check / CPU / Triton | ADR-008：exact int axis；显式累加与输出 dtype、NaN 传播；12 dtype 双轴 GPU 对照；bool/FP8 先拒绝或 cast |
 | `min` reduction | `Deferred` | — | 尚未实现 |

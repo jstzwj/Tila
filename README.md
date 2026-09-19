@@ -7,8 +7,8 @@ bounds obligation。
 
 Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typed TIR
 可以生成 Triton 源码，也可以交给 NumPy reference interpreter 执行。Triton
-和 CUDA 路径已经存在，但固定版本矩阵、真实 GPU CI 和完整 target capability
-检查尚未闭环，因此当前状态是 `Partial`，不是稳定的 GPU 支持承诺。
+和 CUDA 路径已有 RTX 3090 固定组合及 GPU CI 验证分支；完整 target capability
+检查与跨架构验证仍未闭环，因此后端整体状态仍为 `Partial`。
 
 > 类型不只描述“值是什么”，还描述 tile shape、编译期常量、读写能力和
 > 内存访问成立的条件。
@@ -189,8 +189,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 以下能力不是当前完整承诺。精确状态和边界见 [docs/status.md](docs/status.md)：
 
-- Triton/CUDA 路径缺少固定依赖矩阵、GPU CI、完整设备一致性和 target
-  capability 检查；
+- Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；默认分支定时 CI 待合并，
+  完整 target capability 检查仍待实现；
 - Ptr 公共语法与 RegionId/Extent/alias 模型已定型；Buffer v0 不公开
   Strides/AddressSpace，`buf.ptr` 只允许 rank-1、stride-1；显式多维 flatten
   和更丰富 pointer arithmetic 尚未设计；

@@ -33,7 +33,7 @@
 | M0 | 已完成 | 基线冻结与文档/API 对账 | 当前语法可构造，所有能力有唯一状态，文档不超前承诺 |
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
 | M2 | 进行中 | CPU 正确性与静态证明闭环 | M2-01 至 M2-03 完成；整数/DAG/信任来源/默认 Z3/预算/缓存已落地；数据流与系统审计继续 |
-| M3 | 计划中 | Triton/CUDA 后端闭环 | 固定支持矩阵、GPU CI、CPU/GPU differential、hint 验证 |
+| M3 | 进行中 | Triton/CUDA 后端闭环 | RTX 3090 固定锁/CI 验证分支、示例 differential 已建立；完整 target/hint 矩阵待续 |
 | M4 | 计划中 | Effect、Atomic、Race、Uniformity | per-instruction effect 与最小并发安全闭环 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
 | M6 | 计划中 | 优化事实、性能诊断与 Layout | hint provenance、结构性性能 warning、layout 评审 |

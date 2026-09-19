@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：832 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M2-08 GPU 70 节点/214 案例通过。
+- 当前测试基线：842 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 104 节点/248 案例。
 
 ### 2.2 当前主要缺口
 
@@ -919,7 +919,7 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M2-06 | DONE | explain 与审计 golden | M2-03/05 | 628 项 CPU 回归，新增 24 项专项/15 份 golden；audit explain v1、信任来源/反例分类、预算修复建议、缓存与模型附件边界、CLI/错误 SMT 重放及两类 hint 依据；见 docs/explain-audit.md |
 | M2-07 | DONE | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b/c/d 均完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/11 组 GPU 对照，c 为 39 项宿主转换专项，d 为 39 项专项/两份 golden/46 组 GPU 按位对照；ADR-012 至 015 与状态表同步 |
 | M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
-| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁/专用 runner/workflow；104 节点/248 案例；验证分支 CI 与附件验证后待合并默认分支 |
+| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁/专用 runner；CI run 35440453081：CPU 842/GPU 104 节点通过、附件重放 8 项通过；待合并默认分支启用每日调度 |
 | M3-02 | IN_PROGRESS | launch/target/hint 基础闭环 | M3-01 | 已加入同设备门禁、4/8 num_warps、target 缓存隔离、hint 开关对照；完整 TIR verifier/资源约束/缓存指纹待续 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
