@@ -6,12 +6,13 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 471 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 505 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
 基础整数语义与 launch 门禁；M2-02 已实现 DAG、ProofResult、信任来源及作用域
-隔离。通用 SMT、预算与完整 proof 缓存尚未实现，ExactInt 和 Mask 的公开边界不变。
+隔离。M2-03 已接入默认 Z3、Int/BitVec、预算与有界进程内 proof 缓存，
+详见 [证明器实现边界](smt-prover.md)。ExactInt 和 Mask 的公开边界不变。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
@@ -130,7 +131,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 |---|---|---|---|
 | `tila.Dim(name)` | `Implemented` | Check / Launch | shape 绑定与同名显式标量一致性有检查 |
 | 仿射 `DimExpr` | `Implemented` | Check / Launch | `+ - * // % ceildiv` 的受限规范化/求值 |
-| `min/max` DimExpr | `Partial` | Check | 内部节点存在；完整规范化和 slow solver 尚未实现 |
+| `min/max` DimExpr | `Partial` | Check | 内部节点与 Z3 编码已存在；公共构造及完整规范化尚未闭环 |
 | shape 等价与延迟 Const 约束 | `Implemented` | Check | dot/broadcast/store/reshape 的 Const-only 差异可延迟到 Stage 2 |
 | trailing-dimension broadcast | `Implemented` | Check / CPU / Triton | 相等或 size-1；不合法时报 shape 错误 |
 | scalar→Block broadcast | `Implemented` | Check / CPU / Triton | 按内建/运算语境广播 |
@@ -274,16 +275,17 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | 能力 | 状态 | 覆盖 | 当前边界/证据 |
 |---|---|---|---|
 | load/store proof obligation | `Implemented` | Check / Launch | Buffer 逐轴、Ptr 单 extent；访问点保存谓词快照 |
-| interval/nonnegative fast path | `Implemented` | Check | 无第三方依赖 |
-| predicate DAG | `Implemented` | Check | 无 DNF 展开；共享子式、未知布尔身份、路径、源位置及 lane/broadcast 映射；`~` 通常仍 Unknown |
+| interval/nonnegative fast path | `Implemented` | Check | 默认 Z3 前的小型充分条件捷径；不绕过缺失依赖诊断 |
+| predicate DAG | `Implemented` | Check | 无 DNF 展开；共享子式、未知布尔身份、路径、源位置及 lane/broadcast 映射；支持 Z3 否定/析取蕴含 |
 | grid cdiv/exact-dim contract | `Implemented` | Launch | 显式 grid 和 launch_auto 均可登记事实 |
 | 四态结论 | `Implemented` | Check / Launch | ProvenSafe、ProvenUnsafe、Unknown、Exempted；SafeUnderContract 仅为已检查契约的显示摘要 |
 | `--safety strict/warn` | `Implemented` | CLI / Launch | Unknown 可降 warning；ProvenUnsafe 永远 error |
-| 默认 Z3 通用证明引擎 | `Designed` | — | ADR-011 替代可选 slow path；已有共享 ProofResult 接口，Z3 集成和依赖待 M2-03 |
-| 否定谓词 SMT 编码 | `Designed` | — | DAG 已保存 Not；一般逻辑求解待 M2-03 |
-| 有限位宽 proof 与执行语义对齐 | `Partial` | Specialize / Launch | ADR-007 基础语义及区间门禁已实现；完整 Int/BitVec SMT 编码仍待 M2-03 |
+| 默认 Z3 通用证明引擎 | `Implemented` | Check / Specialize / Launch | 锁定 z3-solver 4.16.0.0；统一结果/协议、可重放查询；缺失时明确配置错误 |
+| 否定谓词 SMT 编码 | `Implemented` | Check / Specialize / Launch | And/Or/Not 共享编码；复杂查询可因预算返回 Unknown |
+| 有限位宽 proof 与执行语义对齐 | `Partial` | Specialize / Launch | Int/BitVec 编码覆盖回绕、floor 商余、整数 cast、位运算/移位；加载内容/复杂数据流仍近似，浮点不进入 SMT |
 | ProofResult 信任来源与 Exempted | `Implemented` | Check / Launch | 不可变结果、来源集合/位置/trace；assume 不泄漏作用域，unsafe 局部豁免；符号 grid 仅 pending，launch 每次重验 |
-| SMT 预算与完整证明缓存 | `Designed` | — | 查询及 kernel 总预算、公式大小、语义/信任依赖缓存和反例可达性待实现 |
+| SMT 预算与证明缓存 | `Implemented` | Check / Specialize / Launch | timeout/rlimit、kernel 时间/查询数、构建大小；来源/版本/绑定隔离的有界 LRU，Unknown 不缓存；launch 契约仍逐次重验 |
+| SAT 反例可达性 | `Partial` | Check / Launch | 常量无条件越界可确认；其余模型明确标记 Unknown 候选；一般循环/数据流可达性待后续 |
 | 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
 | kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
 | per-instruction effect IR | `Designed` | — | TLoad/TStore 尚无统一原生 effect 字段 |

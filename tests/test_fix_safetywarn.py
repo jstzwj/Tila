@@ -88,7 +88,8 @@ def test_proven_unsafe_raises_in_strict_mode(monkeypatch):
 
 # (d) CLI：check --safety=warn 走 materialize 同一求值路径，rc 0 + stderr warning
 def test_cli_check_safety_warn(tmp_path, capsys, monkeypatch):
-    monkeypatch.delenv("TILA_SAFETY", raising=False)
+    # Register the key with monkeypatch so CLI's in-process mutation is restored.
+    monkeypatch.setenv("TILA_SAFETY", "strict")
     f = tmp_path / "unmasked_tail.py"
     f.write_text(UNMASKED_SRC, encoding="utf-8")
     rc = main(["check", str(f), "--safety=warn"])

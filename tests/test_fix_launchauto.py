@@ -61,7 +61,8 @@ class TestLaunchAuto1D:
         assert np.allclose(out, x + y)
         # strict 模式下义务全体可证（无 TILA-BOUNDS-001 即已证明；
         # 报告再确认四态里没有 Unknown）
-        assert "-> ProvenSafe" in add_kernel.last_report
+        assert all(result.verdict == "ProvenSafe"
+                   for _, result in add_kernel.last_proof_results)
         assert "Unknown" not in add_kernel.last_report
 
     def test_derived_grid_exact_value(self):

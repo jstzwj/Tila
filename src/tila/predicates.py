@@ -142,6 +142,15 @@ def map_atoms(root, transform, shape, mapping):
             todo.extend((c, False) for c in node.args if c not in memo)
             continue
         pred = node.atom
+        if node.op in ("unknown", "unknown_view") and mapping[0] == "expand":
+            base = node.args[0] if node.op == "unknown_view" else node
+            axes = node.mapping if node.op == "unknown_view" else tuple(range(-len(node.shape), 0))
+            rank, axis = len(mapping[2]), mapping[1]
+            shifted = tuple(a - (rank + a < axis) for a in axes)
+            memo[node] = (node if shifted == axes else
+                          Predicate("unknown_view", (base,), line=node.line,
+                                    shape=shape, mapping=shifted))
+            continue
         if node.op == "atom":
             pred = replace(pred, left=transform(pred.left), right=transform(pred.right))
         children = tuple(memo[c] for c in node.args)

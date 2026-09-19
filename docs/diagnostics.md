@@ -70,6 +70,10 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 
 ## Const 诊断约定
 
+M2-03 的 `TILA-PROOF-001` 表示默认 Z3 依赖缺失或预算配置非法。
+求解 timeout/rlimit/累计预算耗尽仍是 Unknown，按既有 bounds strict/warn 分派，
+诊断附带 ProofResult 原因与候选反例；不是配置错误。
+
 M2-01 的 `TILA-NUM-001` 覆盖除数非零、合法移位、有限且可表示的 float→int、
 索引中间值溢出和 shape/stride/标量 ABI 范围。已知非法值在 materialize 时拒绝，
 需要实参的契约每次 launch 检查；与 bounds strict/warn 独立，不能通过 unsafe

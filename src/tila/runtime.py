@@ -238,6 +238,8 @@ class JITFunction:
         facts.grid_facts = {}        # launch 期契约：explain 不可见（见上）
         facts.sym_hi = dict(tk.sym_hi)
         facts.sym_lo = dict(tk.sym_lo)
+        from .solver import ProofSession
+        proof_session = ProofSession()
 
         L = [f"kernel @{tk.name} — explain (surface-language.md §8)"]
         ctext = ", ".join(f"{k}={v}" for k, v in sorted(cenv.items()))
@@ -307,7 +309,7 @@ class JITFunction:
             for ob in tk.obligations:
                 L.append(f"  - {ob.describe()}")
                 for line in explain_obligation(ob, facts,
-                                               tk.nonneg_syms).splitlines():
+                                               tk.nonneg_syms, proof_session).splitlines():
                     L.append(f"      {line}")
         else:
             L.append("  (none)")
@@ -485,13 +487,16 @@ class JITFunction:
                     )
 
     def _evaluate_obligations(self, cenv: dict, grid_facts: dict,
-                              extra_preds: list, launch_checked=True):
+                              extra_preds: list, launch_checked=True, launch_bindings=()):
+        from .solver import ProofSession
+        proof_session = ProofSession()
         from dataclasses import replace
         from . import predicates as P
         facts = Facts()
         facts.num = dict(cenv)
         facts.grid_facts = grid_facts
         facts.grid_checked = launch_checked
+        facts.launch_bindings = launch_bindings
         facts.sym_hi = dict(self.tk.sym_hi)
         facts.sym_lo = dict(self.tk.sym_lo)
         for p in extra_preds:
@@ -502,7 +507,7 @@ class JITFunction:
         warn_diags = []
         for ob in self.tk.obligations:
             nonneg = self.tk.nonneg_syms | {name for name, value in cenv.items() if value >= 0}
-            result = evaluate_obligation(ob, facts, nonneg)
+            result = evaluate_obligation(ob, facts, nonneg, proof_session)
             state = result.verdict
             results.append((ob, result))
             if state == PROVEN_UNSAFE:
@@ -511,7 +516,7 @@ class JITFunction:
                     Loc(ob.loc_line), [f"    {ob.describe()}"],
                     ["修正坐标、补 mask，或 unsafe_load/unsafe_store"])
             if state == UNKNOWN and not (not launch_checked and result.pending_contracts):
-                warn = self._raise_unknown(ob)
+                warn = self._raise_unknown(ob, result)
                 if warn is not None:
                     warn_diags.append(warn)
         self.last_report = "\n".join(
@@ -523,7 +528,7 @@ class JITFunction:
             self.last_report += "\n" + "\n".join(warn_diags)
         return results
 
-    def _raise_unknown(self, ob):
+    def _raise_unknown(self, ob, result=None):
         """Unknown 义务（TILA-BOUNDS-001/002）的严格度分派。
 
         strict（默认）：raise。TILA_SAFETY=warn（refinements.md §5.3 /
@@ -532,6 +537,8 @@ class JITFunction:
         ProvenUnsafe（TILA-BOUNDS-003）不经此路径——任何模式都不降级。
         """
         err = self._unknown_error(ob)
+        if result is not None:
+            err.details.append(result.render())
         if os.environ.get("TILA_SAFETY", "strict") != "warn":
             raise err
         lines = err.render().split("\n")
@@ -867,7 +874,9 @@ class _Launcher:
         if any(type(g) is not int or not 0 <= g <= (1 << 31) - 1 for g in grid):
             raise TilaLaunchContractError("TILA-TYPE-104", "auto grid must fit nonnegative i32")
         numeric.validate(tk, consts, scalar_vals, grid + (1,) * (3 - len(grid)))
-        jf._evaluate_obligations(consts, grid_facts, extra_preds)
+        jf._evaluate_obligations(consts, grid_facts, extra_preds,
+            launch_bindings=tuple(sorted(meta.items())) +
+                (("grid", tuple(grid)),))
 
         # ---- 执行：torch+cuda+triton → GPU；否则 interp
         self._execute(tensors, scalar_vals, stride_vals, consts, grid)

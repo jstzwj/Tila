@@ -30,7 +30,8 @@ class VarInfo:
                  tir=None, static_variant=None):
         self.vtype = vtype
         self.expr = expr              # DimExpr：i32 值的符号式
-        self.predicate = predicate if predicate is not None else P.unknown()
+        self.predicate = predicate if predicate is not None else P.unknown(
+            shape=vtype.dims if isinstance(vtype, (TY.BlockT, TY.MaskT)) else ())
         self.lit = lit                # Python 字面量（语境多态）
         self.is_const = is_const
         self.contiguous_span = contiguous_span
@@ -107,6 +108,8 @@ class Checker:
         self.nonneg_syms: set[str] = set()
         self.lane_counter = 0
         self.lane_axes = {}  # symbol -> right-relative tile axes (scalar symbols absent)
+        self.value_types = {}
+        self.value_defs = {}
         self.loop_stack: list[dict] = []
         self.regions: dict[str, TY.RegionId] = {}
         self.tk = T.TKernel(kern.name, [], [], [], [])
@@ -190,6 +193,8 @@ class Checker:
                 self.tk.explicit_scalars.add(p.name)
                 self.vars[p.name] = VarInfo(vtype=TY.ScalarT(dt),
                                             expr=Sym(p.name))
+                if dt.is_int:
+                    self.value_types[p.name] = dt.name
                 self._register_refinement_facts(p.name, dt, refins)
             else:
                 raise TilaError(
@@ -256,8 +261,10 @@ class Checker:
         self.stmts(self.kern.body, self.tk.body)
         proof_facts = self.facts.clone()
         proof_facts.preds = {}  # Only access-point snapshots may supply assumptions.
+        from .solver import ProofSession
+        proof_session = ProofSession()
         for ob in self.tk.obligations:
-            if evaluate_obligation(ob, proof_facts, self.nonneg_syms).verdict == \
+            if evaluate_obligation(ob, proof_facts, self.nonneg_syms, proof_session).verdict == \
                     PROVEN_UNSAFE:
                 raise TilaError(
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
@@ -310,6 +317,7 @@ class Checker:
                 if dt is not None and dt.is_int:
                     self.lane_counter += 1
                     v.expr = Sym(f"__v{self.lane_counter}")
+                    self.value_types[v.expr.name] = dt.name
                     if shape_of(v):
                         self.lane_axes[v.expr.name] = tuple(range(-len(shape_of(v)), 0))
             # loop-carried 类型稳定（type-system.md §10.2）
@@ -448,7 +456,7 @@ class Checker:
                              f"    assigned: {TY.describe(v.vtype)}",
                              f"    before:   {TY.describe(v0.vtype)}"])
                     m = v0.clone()
-                    m.expr, m.predicate, m.contiguous_span = None, P.unknown(), None
+                    m.expr, m.predicate, m.contiguous_span = None, P.unknown(shape=shape_of(m)), None
                     out[name] = m
             else:
                 out[name] = v0.clone()
@@ -533,7 +541,7 @@ class Checker:
                     m = va.clone()
                     m.static_variant = (va.vtype, vb.vtype)
                     m.expr, m.predicate, m.contiguous_span, m.lit = \
-                        None, P.unknown(), None, None
+                        None, P.unknown(shape=shape_of(m)), None, None
                     out[name] = m
             elif va is not None or vb is not None:
                 v = va or vb
@@ -545,13 +553,13 @@ class Checker:
                     if self._same_type(v.vtype, v0.vtype) or \
                             self._static_same_type(v.vtype, v0.vtype):
                         m = v0.clone()
-                        m.expr, m.predicate, m.contiguous_span = None, P.unknown(), None
+                        m.expr, m.predicate, m.contiguous_span = None, P.unknown(shape=shape_of(m)), None
                         out[name] = m
                     else:
                         m = v.clone()
                         m.static_variant = (v.vtype, v0.vtype)
                         m.expr, m.predicate, m.contiguous_span, m.lit = \
-                            None, P.unknown(), None, None
+                            None, P.unknown(shape=shape_of(m)), None, None
                         out[name] = m
             else:
                 out[name] = v0.clone()
@@ -923,12 +931,13 @@ class Checker:
 
     def _forget_value(self, value):
         out = value.clone()
-        out.expr, out.predicate, out.contiguous_span = None, P.unknown(), None
+        out.expr, out.predicate, out.contiguous_span = None, P.unknown(shape=shape_of(out)), None
         out.lit, out.is_const = None, False
         dtype = self._dtype_of(out)
         if dtype is not None and dtype.is_int:
             self.lane_counter += 1
             out.expr = Sym(f"__v{self.lane_counter}")
+            self.value_types[out.expr.name] = dtype.name
             if shape_of(out):
                 self.lane_axes[out.expr.name] = tuple(range(-len(shape_of(out)), 0))
         return out
@@ -1192,7 +1201,20 @@ class Checker:
                             self._is_const_index(r.expr))
             m.tir.operand_dtype = dt
             self._guard_index_math(m)
+            if m.expr is None and l.expr is not None and r.expr is not None:
+                m.expr = self._integer_expr(e.op, dt, l.expr, r.expr)
         return m
+
+    def _integer_expr(self, op, dtype, left, right=Cst(0)):
+        self.lane_counter += 1
+        sym = Sym(f"__bv{self.lane_counter}")
+        self.value_types[sym.name] = dtype.name
+        self.value_defs[sym.name] = (op, dtype.name, left, right)
+        axes = {axis for name in free_syms(left) | free_syms(right)
+                for axis in self.lane_axes.get(name, ())}
+        if axes:
+            self.lane_axes[sym.name] = tuple(sorted(axes))
+        return sym
 
     def _guard_index_math(self, value):
         """Only retain mathematical index facts behind a launch overflow gate.
@@ -1207,7 +1229,7 @@ class Checker:
                    {c.name for c in self.tk.consts})
         if any(s not in trusted and not s.startswith(("pid", "__lane", "__i_"))
                for s in symbols):
-            value.expr = None
+            value.expr = self._integer_expr("wrap", self._dtype_of(value), value.expr)
             value.contiguous_span = None
         else:
             value.tir.checked_index = True
@@ -1230,7 +1252,8 @@ class Checker:
                                           self._operand_of(v, e.operand, out)))
             dt = self._dtype_of(v)
             if dt is not None and dt.is_int:
-                return VarInfo(vtype=v.vtype, tir=T.TUna(
+                expr = self._integer_expr("~", dt, v.expr) if v.expr is not None else None
+                return VarInfo(vtype=v.vtype, expr=expr, tir=T.TUna(
                     v.vtype, "~", self._operand_of(v, e.operand, out)))
             raise TilaError("TILA-TYPE-029", "'~' requires a mask or integer",
                             e.loc)
@@ -1558,7 +1581,13 @@ class Checker:
         preserves = (source_dt and source_dt.is_int and dt.is_int and
                      D._INT_RANGE[dt][0] <= D._INT_RANGE[source_dt][0] and
                      D._INT_RANGE[source_dt][1] <= D._INT_RANGE[dt][1])
-        return VarInfo(vtype=vt, expr=v.expr if preserves else None,
+        expr = v.expr
+        if expr is None and type(v.lit) is int:
+            expr = Cst(v.lit)
+        if not preserves:
+            expr = (self._integer_expr("wrap", dt, expr)
+                    if source_dt and dt.is_int and source_dt.is_int and expr is not None else None)
+        return VarInfo(vtype=vt, expr=expr,
                        tir=T.TCast(vt, dt, self._operand_of(v, e.args[0], out)))
 
     def _in_where(self, e, out):
@@ -1912,6 +1941,13 @@ class Checker:
                 return expr
             name = expr.name.split("@")[0] + "@" + ",".join(map(str, new_axes))
             self.lane_axes[name] = new_axes
+            if expr.name in self.value_types:
+                self.value_types[name] = self.value_types[expr.name]
+            if expr.name in self.value_defs:
+                op, dtype, left, right = self.value_defs[expr.name]
+                self.value_defs[name] = (op, dtype,
+                    self._expand_index(left, rank, inserted_axis),
+                    self._expand_index(right, rank, inserted_axis))
             for bounds in (self.facts.sym_lo, self.facts.sym_hi):
                 if expr.name in bounds:
                     bounds[name] = bounds[expr.name]
@@ -1950,7 +1986,8 @@ class Checker:
                         loc_line):
         ob = Obligation(kind, source, axis, coord, extent, predicate,
                         loc_line, self._snapshot_preds(), self.facts.path,
-                        tuple(self.facts.sym_lo.items()), tuple(self.facts.sym_hi.items()))
+                        tuple(self.facts.sym_lo.items()), tuple(self.facts.sym_hi.items()),
+                        tuple(self.value_types.items()), tuple(self.value_defs.items()))
         self.tk.obligations.append(ob)
         return ob
 

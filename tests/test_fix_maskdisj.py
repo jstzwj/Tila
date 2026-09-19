@@ -88,8 +88,8 @@ class TestMaskConjunctionRegression:
 
 
 class TestMaskNegationConservative:
-    def test_negated_mask_still_rejected(self):
-        """(d) Not 被 DAG 保留，但一般否定求解仍待 M2-03。"""
+    def test_negated_mask_proved_by_default_smt(self):
+        """M2-03: ~(offs >= N) proves the upper bound via Z3."""
         @ti.jit
         def k(x: ti.Buffer[ti.f32, (N,), ti.ReadWrite],
               BLOCK: ti.Const[int, ti.PowerOfTwo] = 64):
@@ -99,9 +99,8 @@ class TestMaskNegationConservative:
             ti.store(x, offs, v, mask=~(offs >= N))
 
         x = np.ones(100, dtype=np.float32)
-        with pytest.raises(TilaError) as ei:
-            _run1d(k, 100, 64, x)
-        assert ei.value.code == "TILA-BOUNDS-001"
+        _run1d(k, 100, 64, x)
+        assert np.array_equal(x, np.ones(100, dtype=np.float32))
 
     def test_negated_mask_with_contract_route_proves(self):
         """(d') ~ 保守性不影响其他证明路径：整除契约下无 mask 访问仍可证。"""

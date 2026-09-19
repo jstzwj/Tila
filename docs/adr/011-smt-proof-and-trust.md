@@ -2,7 +2,7 @@
 
 - 状态：**Accepted**
 - 日期：2026-09-19
-- 实施状态：**Partial**；M2-02 已完成共享 DAG、ProofResult/信任来源及作用域隔离；当前仍运行区间/直接匹配/grid 快速路径，未集成 Z3
+- 实施状态：**Partial**；M2-02/03 已完成 DAG、信任来源、默认 Z3、Int/BitVec、预算与缓存；一般数据流可达性、性质测试和完整审计尚待后续
 - 归属：M2；整数语义由已接受的 [ADR-007](007-integer-semantics.md) 固定，GPU 验证衔接 M3
 
 ## 背景与决定
@@ -15,6 +15,8 @@ fast path，再接可选 SMT slow path”。保留常量折叠、直接事实匹
 信任来源或资源限制。实现切换时将受支持的 Z3 版本纳入标准开发/运行依赖
 和锁文件；版本与预算值通过回归和性能测量确定，本 ADR 不虚构已验证组合。
 缺少求解器应明确报配置错误，不得静默换成较弱的默认验证模式。
+M2-03 已固定 `z3-solver==4.16.0.0` 并更新锁文件；预算、基准与实际编码边界见
+[默认 Z3 证明器](../smt-prover.md)。
 
 ## 谓词与整数编码
 
@@ -84,8 +86,9 @@ lane/broadcast 映射；`facts.py` 的不可变 ProofResult 由 checker、launch
 校验后才登记 CheckedLaunchContract。无 launch 的符号 grid 只显示 pending，
 不伪装成已检查契约。当前 hints 仅依赖结构性 StaticFact，不从 assume 推导。
 
-旧 DNF 构建已移除。结构原子提取及直接矛盾检查是保守快速路径，不替代一般
-Boolean/BitVec SMT 编码；否定、一般不可达性、预算和完整缓存仍由 M2-03 接续。
+旧 DNF 构建已移除。M2-03 已接入 Boolean/Int/BitVec SMT 编码、定义域与前提一致性
+查询、候选模型及可重放查询、预算和来源敏感 LRU。常量无条件越界可确认为
+ProvenUnsafe，其余 SAT 保守标记 Unknown 候选；循环/数据流反例可达性的扩大仍待后续。
 迁移还修复了仅有上界也判安全、后置/分支/循环假设污染及行列 lane 混同。
 
 1. 完成 ADR-007 与整数边界测试，建立统一谓词/ProofResult 接口。

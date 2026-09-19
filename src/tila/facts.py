@@ -57,11 +57,12 @@ class Facts:
     grid_facts: dict = field(default_factory=dict)
     path: P.Predicate = P.TRUE
     grid_checked: bool = False
+    launch_bindings: tuple = ()
 
     def clone(self) -> "Facts":
         return Facts(dict(self.var_exprs), dict(self.sym_lo), dict(self.sym_hi),
                      dict(self.num), dict(self.preds), dict(self.grid_facts),
-                     self.path, self.grid_checked)
+                     self.path, self.grid_checked, self.launch_bindings)
 
     def intersect(self, other: "Facts") -> "Facts":
         """分支合并：只保留两侧共同可推出的事实（保守正确）。"""
@@ -157,6 +158,8 @@ class Obligation:
     path: P.Predicate = P.TRUE
     sym_lo: tuple = ()
     sym_hi: tuple = ()
+    value_types: tuple = ()
+    value_defs: tuple = ()
 
     def describe(self):
         axis = f"axis {self.axis}" if self.axis is not None else "flat"
@@ -175,6 +178,7 @@ class ProofResult:
     reason: str = ""
     candidate_counterexample: tuple = ()
     pending_contracts: tuple[str, ...] = ()
+    query: str = ""
 
     @property
     def summary(self):
@@ -191,6 +195,9 @@ class ProofResult:
         lines.extend(f"proof: {item}" for item in self.trace)
         if self.reason:
             lines.append(f"reason: {self.reason}")
+        if self.candidate_counterexample:
+            lines.append("counterexample candidate: " + ", ".join(
+                f"{name}={value}" for name, value in self.candidate_counterexample))
         for origin in sorted(self.dependencies):
             lines.append(f"dependency: {origin.kind} at line {origin.line}: {origin.detail}")
         lines.extend(f"pending contract: {p}" for p in self.pending_contracts)
@@ -212,7 +219,13 @@ def _decompose_linear(e: DimExpr):
 
 
 def evaluate_obligation(ob: Obligation, facts: Facts,
-                        nonneg_syms: set[str]) -> ProofResult:
+                        nonneg_syms: set[str], session=None) -> ProofResult:
+    from .solver import ProofSession
+    return (session or ProofSession()).prove(ob, facts, nonneg_syms)
+
+
+def fast_obligation(ob: Obligation, facts: Facts,
+                    nonneg_syms: set[str]) -> ProofResult:
     """Pure proof interface shared by checking, launch and explain.
 
     The fast path extracts only structurally entailed atoms from the DAG.
@@ -438,8 +451,8 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
 
 
 def explain_obligation(ob: Obligation, facts: Facts,
-                       nonneg_syms: set[str]) -> str:
-    return evaluate_obligation(ob, facts, nonneg_syms).render()
+                       nonneg_syms: set[str], session=None) -> str:
+    return evaluate_obligation(ob, facts, nonneg_syms, session).render()
 
 
 def _match_pid_times_step(term, step) -> str | None:

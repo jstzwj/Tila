@@ -60,6 +60,10 @@ _BOUNDS_FIX = "补充逐轴 mask/契约，或显式使用 unsafe 访问并接受
 
 
 _DIAGNOSTICS = {
+    **_specs("PROOF", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE,
+                        DiagnosticPhase.LAUNCH), {
+        "001": "proof solver dependency or configuration is invalid",
+    }, default_fix="安装项目锁定的 Z3 依赖，检查 TILA_PROOF_* 预算参数"),
     **_specs("NUM", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE,
                       DiagnosticPhase.LAUNCH), {
         "001": "integer arithmetic domain or index overflow could not be validated",

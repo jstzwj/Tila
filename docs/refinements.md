@@ -178,8 +178,8 @@ x = tila.load(data, idx)                  # 现在 bounds 可证 ✓
 真伪（那是 device_assert 的事），但**每个 assume 都出现在诊断汇总里**。
 
 M2-02 已使派生证明继承 UserAssumption 依赖，debug 执行检查不使它自动成为
-release 的无条件事实。直接矛盾的假设返回 Unknown 并显示来源；一般矛盾检测待
-M2-03。当前 hint 仅从结构事实生成，记录 StaticFact 与源位置，不从 assume
+release 的无条件事实。M2-03 已用 Z3 检查前提一致性；矛盾的假设返回 Unknown
+并显示来源。当前 hint 仅从结构事实生成，记录 StaticFact 与源位置，不从 assume
 生成优化 hint；未来新增这类推导也必须传播依赖。
 
 ### 5.2 `tila.unsafe_load / tila.unsafe_store`

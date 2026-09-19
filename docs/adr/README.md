@@ -12,7 +12,7 @@
 | [ADR-005](005-const-type-domain.md) | Accepted | Const 类型域与 staged bool 边界 |
 | [ADR-006](006-intrinsic-registry.md) | Accepted | Intrinsic registry 架构与完整性门禁 |
 | [ADR-007](007-integer-semantics.md) | Accepted | 整数回绕、floor 除法、转换、索引门禁与 ABI；M2-01 已实现 |
-| [ADR-011](011-smt-proof-and-trust.md) | Accepted | M2-02 已实现 DAG/ProofResult 与信任来源；默认 SMT、预算及缓存待 M2-03 |
+| [ADR-011](011-smt-proof-and-trust.md) | Accepted | M2-02/03 已实现 DAG/ProofResult、默认 Z3、预算及缓存；系统可达性/审计继续 |
 
 ADR-008 至 ADR-010 的议题仍在 `plan.md` 中处于 Proposed，尚未形成独立决策文件；
 ADR-011 不替代 ADR-007 对具体整数运算语义的决策。

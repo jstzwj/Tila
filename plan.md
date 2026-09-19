@@ -47,14 +47,14 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：471 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
+- 当前测试基线：505 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
 
 ### 2.2 当前主要缺口
 
 - M0/M1 已完成状态表、公共语法对账、RegionId/Extent 拆分和 intrinsic registry；
 - ADR-007 的基础整数语义/保守门禁已实现；完整有限位宽 SMT 与数据流证明仍缺；
-- 证明已使用共享 DAG、ProofResult 和来源集合；默认 SMT、资源预算及完整缓存尚未实现；
-- 当前快速路径只提取结构原子及区间/grid 事实，一般否定/矛盾/可达性分析仍待 M2-03；
+- 证明已使用共享 DAG、ProofResult、默认 Z3、Int/BitVec、预算及有界进程内缓存；
+- 一般加载内容/循环/数据流可达性仍保守近似，SAT 不自动升级为 ProvenUnsafe；
 - alignment 只验证，没有完整反馈到 lowering；
 - GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
 - 完整 FP8、target capability 与泛型仍是未来能力；
@@ -823,9 +823,9 @@ device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔�
 
 ## 17. 下一步
 
-M0/M1、**M2-01/02 已完成**。下一步 **M2-03**：基于 ADR-007 与共享 DAG /
-ProofResult 接入默认 Z3，完成 Int/BitVec 编码、查询/累计预算及来源敏感缓存。
-依次完成 M2-04 至 M2-06；Mask/Const 易用性独立处理。
+M0/M1、**M2-01 至 M2-03 已完成**。下一步 **M2-04**：收口数据流与 interpreter，
+重点补循环不变量、分支合并、非连续输入及反例可达性；随后完成 M2-05 系统差异/
+性质测试和 M2-06 审计 golden。Mask/Const 易用性独立处理。
 
 同时推进 M3-01 的固定 GPU 环境，使 M2-08 的小型语义对照尽早可执行。
 M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及 M3 的正式
@@ -892,7 +892,7 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | M1-07 | DONE | M1 Exit Audit | M1-01..06 | 四项退出标准逐项通过；审计中移除字符串/`None` 哨兵类型协议并收回 `p - offset` 超前声明；`docs/m1-exit-audit.md` 记录证据与 M2 交接边界 |
 | M2-01 | DONE | ADR-007 与整数语义对齐 | M1 完成 | 回绕/floor 商余数/移位/cast/索引门禁与反例；452 项 CPU 回归、23 组本地 GPU 对照；完整 SMT 仍归 M2-03 |
 | M2-02 | DONE | DAG 与 ProofResult/信任来源 | ADR-011、M2-01 | 471 项 CPU 回归；共享 And/Or/Not、path/lane/broadcast、不可变 ProofResult、Exempted、来源/作用域隔离及契约重验；19 项专门回归 |
-| M2-03 | TODO | 默认 Z3、预算与缓存 | M2-02 | unsat/sat/unknown、近似反例可达性、超时/累计预算、编码及缓存隔离；纳入标准依赖 |
+| M2-03 | DONE | 默认 Z3、预算与缓存 | M2-02 | 505 项 CPU 回归；34 项 SMT 专项；固定 Z3 4.16.0.0，Int/BitVec、否定/析取、候选反例、预算/缓存隔离与重放查询；边界见 docs/smt-prover.md |
 | M2-04 | TODO | 数据流与 interpreter 收口 | M2-01/02 | 分支交集、循环不变量、数值语义与 non-contiguous 用例 |
 | M2-05 | TODO | 差异审计与性质测试 | M2-03/04 | 新旧结论差异逐项核查、布尔压力/溢出/假设污染测试；退役复杂 DNF |
 | M2-06 | TODO | explain 与审计 golden | M2-03/05 | 信任来源、候选反例、不可达路径、Unknown 原因及 hint 依据可复核 |
