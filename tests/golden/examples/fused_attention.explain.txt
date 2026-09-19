@@ -579,8 +579,6 @@ effects:
   Read[BufferRegion[2:v]]
   Read[BufferRegion[1:k]]
   Read[BufferRegion[2:v]]
-  Read[BufferRegion[1:k]]
-  Read[BufferRegion[2:v]]
   Write[BufferRegion[3:o]]
 aliases:
   scope: static conservative defaults

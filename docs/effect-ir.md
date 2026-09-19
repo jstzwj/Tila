@@ -1,7 +1,8 @@
 # M4-01b：局部 Effect IR 与定义引用
 
 2026-09-19，[ADR-016](adr/016-instruction-effect-ir.md) 已评审冻结为 Accepted。
-本阶段实现指令元数据与完整性检查，尚未实现 path/mask 汇总或并发分析。
+本文记录 M4-01b 的指令元数据与完整性检查；后续 [M4-01c](effect-summary.md)已实现
+path/mask/loop 上下文与汇总迁移，并发分析仍未实现。
 
 `TLoad.effect` / `TStore.effect` 保存不可变 MemoryEffect：结构路径 site_id、
 Read/Write、RegionId、address_space、element_dtype、EffectLocation(line)。
@@ -25,8 +26,8 @@ verifier 在原结构/target 校验后独立重算元数据并比较，验证过
 `tk.types` 的最终名字快照。内部构造/改写 TIR 的工具需显式重新绑定后再验证，
 不能把验证器当作自动接受任意篡改的修复入口。
 
-保留原 `TKernel.effects` 聚合列表、dump/explain 格式及所有现有 golden；它们
-尚未切换为新遍历器的投影。`verify_effects()` 返回的是结构访问清单，包含所有
+M4-01b 当时保留原 `TKernel.effects` 列表与输出；M4-01c 已将其替换为只读派生
+投影，输出差异见后续文档。`verify_effects()` 返回的是结构访问清单，包含所有
 分支和循环体，不是运行时事件序列、执行次数或 kernel may-effect summary。
 UserAssumption、mask=false 和 unsafe 不删除此清单中的节点。
 
@@ -40,6 +41,6 @@ overlay、solver 查询或公共 API，没有改变 CPU 计算或 Triton 源码�
 未改写。本地 GPU 报告：`artifacts/ci-gpu/20260919T144732Z-fylqrfl8/report.json`。
 这些是当前工作区的本地证据，旧提交的托管 CPU run 不替代本次远端验收。
 
-下一步 M4-01c 才派生 path/mask/loop 上下文与 kernel summary，移除 checker
-平行列表。M4-01d 负责新的详细输出与缓存/绑定隔离；atomic/race/uniformity 暂缓。
+M4-01c 已派生 path/mask/loop 上下文与 kernel summary，移除 checker 平行列表。
+[M4-01d](effect-audit.md)已实现可选详细输出与缓存/绑定隔离；atomic/race/uniformity 暂缓。
 M3 仍因缺少隔离 GPU CI 保持未完成。

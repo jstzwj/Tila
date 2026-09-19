@@ -29,6 +29,10 @@ path/mask 不使用 Python 对象地址或 Z3 内部变量名；不同未知布�
 
 ## 稳定边界与可选附件
 
+M4-01d 增加 `--show-effects` / `show_effects=True`，在 effects 后附加
+`tila.effect-details.v1` JSON；默认输出不变。字段、谓词 DAG 引用、Const 特化
+和运行时绑定隔离契约见 [Effect 明细审计](effect-audit.md)。
+
 默认输出不显示缓存命中/未命中，也不显示求解器任意选择的模型数值。
 反例分类仍明确：ProvenUnsafe 为 `confirmed reachable witness`，Unknown 为
 `candidate only; reachability unverified`。这避免具体 SAT 模型选择影响稳定快照。

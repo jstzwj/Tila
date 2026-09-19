@@ -2263,7 +2263,6 @@ class Checker:
                     [f"    value:  ({', '.join(map(str, vshape)) or 'scalar'})",
                      f"    access: ({', '.join(map(str, shape)) or 'scalar'})"])
             kind = "unsafe_store" if unsafe else "store"
-            self.tk.effects.append(T.TEffect("Write", self.regions[bname]))
             for i, cv in enumerate(coords):
                 self._add_obligation(kind, bname, i, cv.expr
                                      if cv.expr is not None else None,
@@ -2295,7 +2294,6 @@ class Checker:
         vt = TY.BlockT(TY.ScalarT(bt.elem), shape) if shape else \
             TY.ScalarT(bt.elem)
         kind = "unsafe_load" if unsafe else "load"
-        self.tk.effects.append(T.TEffect("Read", self.regions[bname]))
         for i, cv in enumerate(coords):
             self._add_obligation(kind, bname, i,
                                  cv.expr if cv.expr is not None else None,
@@ -2341,7 +2339,6 @@ class Checker:
                      f"    pointer: {base_pt.elem.name}"],
                     [f"ti.cast[{base_pt.elem.name}](value)"])
             kind = "unsafe_store" if unsafe else "store"
-            self.tk.effects.append(T.TEffect("Write", region_id))
             self._add_obligation(kind, f"ptr:{source_name}", None,
                                  head.expr, extent, predicate, e.loc.line)
             out.append(T.TStore(
@@ -2372,7 +2369,6 @@ class Checker:
         vt = TY.BlockT(TY.ScalarT(base_pt.elem), shape) if shape else \
             TY.ScalarT(base_pt.elem)
         kind = "unsafe_load" if unsafe else "load"
-        self.tk.effects.append(T.TEffect("Read", region_id))
         self._add_obligation(kind, f"ptr:{source_name}", None,
                              head.expr, extent, predicate, e.loc.line)
         return VarInfo(vtype=vt, tir=T.TLoad(

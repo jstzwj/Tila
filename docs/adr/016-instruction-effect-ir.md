@@ -1,6 +1,6 @@
 # ADR-016：逐指令 Effect IR 与派生汇总
 
-- 状态：**Accepted**（2026-09-19 评审冻结；M4-01b 实现局部元数据与定义引用）
+- 状态：**Accepted**（2026-09-19 冻结；M4-01b/c/d 已实现）
 - 日期：2026-09-19
 - 前置：[ADR-002](002-region-id-and-extent.md)、[ADR-006](006-intrinsic-registry.md)、
   [ADR-007](007-integer-semantics.md)、[ADR-011](011-smt-proof-and-trust.md)
@@ -13,7 +13,9 @@
 冻结评审：使用结构路径作为出现点身份；源位置首版只承诺已知行号；定义引用的
 merge/loop 标签是保守身份，不是 SSA phi 或可达性证明。M4-01b 在 checker 完成
 TIR 后统一绑定局部元数据，verifier 独立重算检查；保留原聚合列表和输出。
-控制流 path/mask 汇总及移除列表归 M4-01c；本 ADR 的完整迁移尚未完成。
+2026-09-20 M4-01c 已实现控制流 path/mask/loop 汇总并移除平行列表；
+实现边界见 [派生汇总](../effect-summary.md)；M4-01d 已实现
+[详细输出与隔离验收](../effect-audit.md)。
 
 冻结前 `tir.TEffect(op, region_id)` 仅表示 Read/Write；checker 的 Buffer/Ptr 访问
 处理器向 `TKernel.effects` 手工追加记录。`TLoad`/`TStore` 本身没有 effect 字段，

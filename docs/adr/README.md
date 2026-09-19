@@ -32,7 +32,7 @@ M4-01 分阶段实施：
 
 | ADR | 状态 | 主题 |
 |---|---|---|
-| [ADR-016](016-instruction-effect-ir.md) | Accepted | M4-01b 已实现局部 effect、定义引用与 verifier；path/mask/loop 上下文及 TIR 派生汇总待 M4-01c |
+| [ADR-016](016-instruction-effect-ir.md) | Accepted | M4-01b/c/d 已实现局部 effect、定义引用/verifier、path/mask/loop、派生汇总及可选详细输出与隔离验收 |
 
 ADR-016 不替代 ADR-010 的诊断严格度决策，不引入 atomic/race/uniformity 功能。
 

@@ -1,7 +1,7 @@
 """Instruction-local effects and lexical definition references (ADR-016).
 
 Binding runs once on newly checked TIR. Verification recomputes expectations
-without edits. No path/mask inference, summary replacement or race analysis.
+without edits. Control-flow summaries live in effect_summary; no race analysis.
 """
 from . import tir as T, types as TY, dtypes as D
 

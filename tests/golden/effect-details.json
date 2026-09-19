@@ -1,0 +1,57 @@
+{
+  "schema": "tila.effect-details.v1",
+  "stage": "specialized",
+  "consts": [
+    {
+      "name": "FLAG",
+      "kind": "Bool",
+      "value": true
+    }
+  ],
+  "provenance": "verified TIR and Const only",
+  "assumptions": "not used to remove accesses",
+  "launch_bindings": "excluded",
+  "cache": "recomputed",
+  "predicates": [
+    {
+      "id": "p0",
+      "op": "true",
+      "args": [],
+      "shape": [],
+      "source": null
+    },
+    {
+      "id": "p1",
+      "op": "false",
+      "args": [],
+      "shape": [],
+      "source": null
+    }
+  ],
+  "accesses": [
+    {
+      "site": "body/0/then/0",
+      "kind": "Write",
+      "region": "BufferRegion[0:out]",
+      "dtype": "i32",
+      "address_space": "Global",
+      "line": 4,
+      "status": "may-access",
+      "path": "p0",
+      "mask": "p0",
+      "loops": []
+    },
+    {
+      "site": "body/0/else/0",
+      "kind": "Write",
+      "region": "BufferRegion[0:out]",
+      "dtype": "i32",
+      "address_space": "Global",
+      "line": 6,
+      "status": "excluded",
+      "path": "p1",
+      "mask": "p0",
+      "loops": []
+    }
+  ]
+}

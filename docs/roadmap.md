@@ -34,7 +34,7 @@
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
 | M2 | 已完成 | CPU 正确性与静态证明闭环 | M2-01 至 M2-08 完成；证明、数据流、性质审计、explain/常量接口与固定 GPU 对照已落地，未验证范围见 status.md |
 | M3 | 进行中 | Triton/CUDA 后端闭环 | M3-06 审计后已取得 CPU 托管首次成功并补测 dtype 矩阵；自动 GPU CI 缺失，结论仍 NOT READY；未测形状/架构不作承诺 |
-| M4 | 基础 IR 实施中 | Effect、Atomic、Race、Uniformity | ADR-016 Accepted，M4-01b 局部 effect/定义引用/verifier 已实现；汇总待迁移，atomic/race/uniformity 暂缓 |
+| M4 | 基础 IR 已实现 | Effect、Atomic、Race、Uniformity | ADR-016 Accepted，M4-01b/c/d 元数据、控制流派生汇总、详细输出与隔离验收已实现；atomic/race/uniformity 暂缓，整个 M4 未完成 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
 | M6 | 计划中 | 优化事实、性能诊断与 Layout | hint provenance、结构性性能 warning、layout 评审 |
 

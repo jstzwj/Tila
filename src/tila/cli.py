@@ -98,6 +98,7 @@ def main(argv=None):
                     help="explain: append raw SMT-LIB replay queries; omitted from stable audit output")
     ap.add_argument("--show-witness", action="store_true", help="explain: show solver-selected witness bindings")
     ap.add_argument("--show-cache", action="store_true", help="explain: show per-call cache telemetry")
+    ap.add_argument("--show-effects", action="store_true", help="explain: show versioned per-access effect details")
     ap.add_argument("--safety", choices=["strict", "warn"], default="strict",
                     help="bounds 义务严格度：strict（默认）Unknown → error；"
                          "warn → warning 后继续（refinements.md §5.3；"
@@ -130,7 +131,8 @@ def main(argv=None):
                 # explain：不 materialize（Unknown 义务只展示、不 raise），
                 # 直接给出 §8 审计输出
                 print(k.explain(consts, show_query=args.show_query,
-                                show_witness=args.show_witness, show_cache=args.show_cache))
+                                show_witness=args.show_witness, show_cache=args.show_cache,
+                                show_effects=args.show_effects))
                 continue
             src, tir = k.materialize(consts)
             if args.command == "check":
@@ -139,7 +141,8 @@ def main(argv=None):
                 print(k.report())
                 if args.explain:
                     print(k.explain(consts, show_query=args.show_query,
-                                    show_witness=args.show_witness, show_cache=args.show_cache))
+                                    show_witness=args.show_witness, show_cache=args.show_cache,
+                                    show_effects=args.show_effects))
                 continue
             if args.command == "build":
                 os.makedirs(args.out, exist_ok=True)

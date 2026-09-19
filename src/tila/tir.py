@@ -339,7 +339,6 @@ class TKernel:
     param_order: list = field(default_factory=list)
     types: dict = field(default_factory=dict)   # name -> Type（最后定义点）
     obligations: list = field(default_factory=list)
-    effects: list = field(default_factory=list)     # list[TEffect]
     aliases: list = field(default_factory=list)     # list[TY.AliasFact]
     runtime_aliases: list = field(default_factory=list)  # 上次 launch 快照
     runtime_alignments: dict = field(default_factory=dict)  # RegionId -> bytes
@@ -355,6 +354,15 @@ class TKernel:
     explicit_scalars: set = field(default_factory=set)  # 用户显式声明的标量参数名
     sym_hi: dict = field(default_factory=dict)   # 符号区间上界快照（证明用）
     sym_lo: dict = field(default_factory=dict)   # 符号区间下界快照
+
+    def effect_summary(self, consts=None):
+        from .effect_summary import summarize_effects
+        return summarize_effects(self, consts)
+
+    @property
+    def effects(self):
+        """Read-only symbolic projection; never an independently mutable list."""
+        return self.effect_summary().effects
 
     def dump(self) -> str:
         return _Printer(self).dump()

@@ -249,7 +249,8 @@ zeros/reshape 与 add 多 dtype；自动 GPU CI 已撤下，隔离 GPU 持续验
 
 1. 后续修改持续运行托管 CPU CI 与本地 GPU gate，保留矩阵边界及失败重放；
 2. 有独立 GPU 资源后建立隔离 GPU CI；目前没有 runner，不连接开发者机器补位；
-3. [M4-01b](docs/effect-ir.md)已实现逐访问 effect、定义引用与 verifier；下一步
-   M4-01c 从 TIR 派生控制流汇总。atomic/race/uniformity 暂缓，M3 仍未完成。
+3. [M4-01c](docs/effect-summary.md)已从 TIR 派生 path/mask/loop 与只读 effect 汇总；
+   [M4-01d](docs/effect-audit.md)已固定可选详细输出与缓存／绑定隔离验收。
+   atomic/race/uniformity 暂缓，M3 仍未完成。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

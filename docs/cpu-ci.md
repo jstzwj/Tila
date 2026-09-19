@@ -11,6 +11,11 @@ workflow_dispatch。[首次托管运行](https://github.com/jstzwj/Tila/actions/
 全部通过，失败/错误/跳过均为 0**。`cpu-test-report` 附件已下载核实，包含新增
 f16 dot 舍入回归与全部 15 个官方示例 golden。本轮 ADR 文档不改变这些测试行为。
 
+后续 M4-01b 提交 `f4add240605366a6da2e8ae3bb9253a9a438cc67` 的
+[托管运行](https://github.com/jstzwj/Tila/actions/runs/35454545217)通过 **953 项、零跳过**，
+JUnit 附件已下载核实。M4-01d 工作区本地 984 项通过，另见 [详细审计](effect-audit.md)，
+不将旧提交的 run 视为当前修改的远端验收。
+
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
 contents:read，checkout 不保留凭据；第三方 action 固定到 commit。PR 使用普通

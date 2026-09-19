@@ -226,7 +226,7 @@ class JITFunction:
         return "\n".join(out)
 
     def explain(self, consts: dict | None = None, *, show_query=False,
-                show_witness=False, show_cache=False) -> str:
+                show_witness=False, show_cache=False, show_effects=False) -> str:
         """--explain 审计输出（surface-language.md §8）：类型环境、事实集、
         义务证明链、发射的 hint、效应汇总 + warnings/notes——全部可审计。
 
@@ -321,11 +321,17 @@ class JITFunction:
             L.append("  (none)")
 
         L.append("effects:")
-        if tk.effects:
-            for effect in tk.effects:
+        effects = tk.effect_summary(cenv).effects
+        if effects:
+            for effect in effects:
                 L.append(f"  {effect.describe()}")
         else:
             L.append("  (none)")
+
+        if show_effects:
+            from .effect_audit import render_effect_details
+            L.append("effect-details:")
+            L.extend("  " + line for line in render_effect_details(tk, cenv).splitlines())
 
         L.append("aliases:")
         aliases = tk.runtime_aliases or tk.aliases
@@ -678,6 +684,20 @@ class _Launcher:
         return _Launcher(self.jf, self.grid, num_warps)
 
     def __call__(self, *args, **kwargs):
+        # Runtime evidence is a snapshot of a successful, nonempty launch only.
+        # Clear both old evidence and partially validated new bindings on failure.
+        self._completed = False
+        self.jf.tk.runtime_aliases = []
+        try:
+            return self._call(*args, **kwargs)
+        finally:
+            if not self._completed:
+                self.jf.tk.runtime_aliases = []
+                self.jf.tk.runtime_alignments = {}
+                self.jf.last_alignment_facts = ()
+                self.jf.last_backend_resources = None
+
+    def _call(self, *args, **kwargs):
         jf = self.jf
         jf.last_backend_resources = None
         jf.last_alignment_facts = ()
@@ -970,6 +990,7 @@ class _Launcher:
         self.alignment_facts = collect(tk, tensors, _tensor_info)
         self._execute(tensors, scalar_vals, stride_vals, consts, grid)
         jf.last_alignment_facts = self.alignment_facts
+        self._completed = True
 
     def _resolve_target(self, tensors):
         t0 = next(iter(tensors.values()), None)

@@ -6,7 +6,7 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 953 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 984 passed、零 skipped
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
 当前覆盖 300 个 GPU 测试节点/444 个语义案例，初始支持仅 RTX 3090/SM86。
@@ -20,8 +20,11 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 
 提交 `4774194` 的托管 CPU CI 已通过 937 项回归，JUnit 附件与 15 个示例 golden
 已核实；该旧 run 不替代当前工作区的 CI 证据。
-[ADR-016](adr/016-instruction-effect-ir.md)已 Accepted，[M4-01b](effect-ir.md)已实现
-逐访问元数据、定义引用与 verifier；控制流汇总待 M4-01c，并发检查尚未实现。
+[ADR-016](adr/016-instruction-effect-ir.md)已 Accepted，[M4-01b](effect-ir.md)已有
+逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
+上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
+已实现可选详细输出与缓存／绑定隔离验收，并发检查尚未实现。
+前置提交 f4add24 的托管 CPU CI 已通过 953 项并核实附件；当前修改仍需独立远端验收。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
@@ -354,8 +357,8 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | SMT 预算与证明缓存 | `Implemented` | Check / Specialize / Launch | timeout/rlimit、kernel 时间/查询数、构建大小；来源/版本/绑定隔离的有界 LRU，Unknown 不缓存；launch 契约仍逐次重验 |
 | SAT 反例可达性 | `Partial` | Check / Launch | 首次访问的精确整数标量/常量/条件路径可确认；加载、phi、lane、循环及前序内存效果仍为 Unknown 候选 |
 | 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
-| kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
-| per-instruction effect IR | `Partial` | Check / Specialize / Launch | M4-01b 已有局部 effect、定义引用与 verifier；旧聚合列表保留，控制流上下文与 TIR 派生汇总待 M4-01c |
+| kernel effect 汇总 | `Implemented` | Check / Specialize | 从 TIR 派生只读 Read/Write 投影；区分 symbolic/partial/specialized，未知条件保留可能访问 |
+| per-instruction effect IR | `Implemented` | Check / Specialize / Launch | M4-01b/c/d 已有局部 effect、定义引用/verifier、path/mask/loop、可选详细审计及隔离验收；不包含并发安全检查 |
 | `where` eager memory warning | `Implemented` | Check | `TILA-EFFECT-007` 已生成；完整 effect/并发系统归 M4 |
 | alias 声明/运行时 alias 检查 | `Designed` | — | `tila.alias`、`--check-alias` 尚不存在 |
 | atomic | `Designed` | — | 无公共名字、checker、TIR 或后端实现 |
