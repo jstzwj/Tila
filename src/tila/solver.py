@@ -18,7 +18,7 @@ from .errors import TilaError
 from .facts import (ProofResult, fast_obligation, PROVEN_SAFE, PROVEN_UNSAFE,
                     UNKNOWN, EXEMPTED)
 
-ENCODING_VERSION = 2
+ENCODING_VERSION = 3
 _CACHE = OrderedDict()
 _LOCK = RLock()  # Z3's default context and the process cache are shared.
 
@@ -163,6 +163,21 @@ class Encoder:
             node, ready = todo.pop()
             if node in self.booleans:
                 continue
+            # Specialization-known short circuits must not construct domains
+            # for an unevaluated RHS (e.g. FLAG or 1 // DIV with FLAG=True).
+            # Numeric validation independently checks eager runtime operations.
+            if node.op in ("and", "or"):
+                left = node.args[0]
+                if left not in self.booleans:
+                    self.tick()
+                    todo.extend(((node, False), (left, False)))
+                    continue
+                known = self.booleans[left]
+                if (node.op == "and" and z.is_false(known) or
+                        node.op == "or" and z.is_true(known)):
+                    self.tick()
+                    self.booleans[node] = known
+                    continue
             if not ready:
                 self.tick()
                 todo.append((node, True))
@@ -178,9 +193,23 @@ class Encoder:
                     self.unknown_views[key] = z.Bool(f"unknown-view:{len(self.unknown_views)}")
                 value = self.unknown_views[key]
             elif node.op == "atom": value = self.pred(node.atom)
-            elif node.op == "and": value = z.And(*args)
-            elif node.op == "or": value = z.Or(*args)
-            elif node.op == "not": value = z.Not(args[0])
+            elif node.op == "const_bool":
+                if node.atom in self.facts.bools:
+                    value = z.BoolVal(self.facts.bools[node.atom])
+                    self.origins.add(P.Origin(P.STATIC, detail=f"Const[bool] {node.atom}"))
+                else:
+                    value = z.Bool(f"const-bool:{node.atom}")
+            elif node.op == "and":
+                value = (z.BoolVal(False) if any(z.is_false(a) for a in args) else
+                         args[1] if z.is_true(args[0]) else
+                         args[0] if z.is_true(args[1]) else z.And(*args))
+            elif node.op == "or":
+                value = (z.BoolVal(True) if any(z.is_true(a) for a in args) else
+                         args[1] if z.is_false(args[0]) else
+                         args[0] if z.is_false(args[1]) else z.Or(*args))
+            elif node.op == "not":
+                value = (z.BoolVal(False) if z.is_true(args[0]) else
+                         z.BoolVal(True) if z.is_false(args[0]) else z.Not(args[0]))
             elif node.op == "map": value = args[0]  # symbols already use right-relative lane axes
             else: raise Unsupported(f"unsupported Boolean node {node.op}")
             self.booleans[node] = value
@@ -282,6 +311,8 @@ class ProofSession:
             key = sha256(repr((ENCODING_VERSION, self.z.get_version_string(),
                 self.config, normalized, tuple(sorted(encoder.origins)), ob.loc_line,
                 ob.source, ob.kind, facts.grid_checked, facts.launch_bindings,
+                tuple((k, "Bool", v) for k, v in sorted(facts.bools.items())),
+                tuple((k, "Int", v) for k, v in sorted(facts.num.items())),
                 ob.path is P.TRUE, ob.mask is P.TRUE,
                 ob.reachability_inputs, ob.execution_context_exact,
                 (D.free_syms(ob.coord) | D.free_syms(ob.extent)) <= facts.num.keys(),
@@ -366,6 +397,8 @@ class ProofSession:
         for root in (ob.path, ob.mask):
             for node in P.nodes(root):
                 if node.op in ("unknown", "unknown_view"):
+                    return False
+                if node.op == "const_bool" and node.atom not in facts.bools:
                     return False
                 if node.op == "atom":
                     needed.update(D.free_syms(node.atom.left) | D.free_syms(node.atom.right))

@@ -17,6 +17,10 @@ Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typ
 分别见 [docs/design-principles.md](docs/design-principles.md) 和
 [plan.md](plan.md)。
 
+当前开发版本为 `0.3.0.dev0`：按 [ADR-013](docs/adr/013-const-bool-domain.md)
+新增 `Const[bool]`（仅原生 Python True/False，CLI 使用 `--const FLAG=true/false`）。
+`Const[int]` 的 ExactInt 门禁保持不变；该扩展不回移至 0.2.x，也不代表正式 0.3.0 已发布。
+
 ---
 
 ## 最小示例

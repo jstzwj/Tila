@@ -54,7 +54,7 @@ def _specs(family: str, phases: Iterable[DiagnosticPhase], entries: dict,
 
 _FRONTEND_FIX = "只使用 docs/surface-language.md 列出的 Python 子集与表面语法"
 _TYPE_FIX = "对齐操作数类型/shape，必要时使用显式 ti.cast"
-_CONST_FIX = "使用精确 Python int、Const[int] 或只依赖 Const 的表达式"
+_CONST_FIX = "按声明使用精确 Python int/bool，或只依赖 Const 的表达式"
 _MEM_FIX = "检查 Buffer/Ptr capability、extent、offset 与 alignment 声明"
 _BOUNDS_FIX = "补充逐轴 mask/契约，或显式使用 unsafe 访问并接受审计"
 
@@ -159,7 +159,7 @@ _DIAGNOSTICS = {
         "005": "static assertion evaluated to false",
         "006": "static assertion is not a staged bool",
         "007": "Const parameter has no specialization value",
-        "008": "Const value is not an exact Python int",
+        "008": "Const value does not match its exact Python int/bool domain",
         "009": "Const expression evaluation failed",
         "010": "unknown Const override was supplied",
     }, default_fix=_CONST_FIX),

@@ -17,12 +17,12 @@
 ADR-008 至 ADR-010 的议题仍在 `plan.md` 中处于 Proposed，尚未形成独立决策文件；
 ADR-011 不替代 ADR-007 对具体整数运算语义的决策。
 
-M2-07 独立决策与提案（ADR-012 已实现，其余未开放）：
+M2-07 独立决策与提案（ADR-012/013 已实现，其余未开放）：
 
 | ADR | 状态 | 主题 |
 |---|---|---|
 | [ADR-012](012-boolean-tile-mask.md) | Accepted | 布尔 tile 与 Mask 的受限互操作；M2-07a 已实现 |
-| [ADR-013](013-const-bool-domain.md) | Proposed | 0.3.x Const[bool] 独立类型域与带类型标签的缓存键 |
+| [ADR-013](013-const-bool-domain.md) | Accepted | 自 0.3.0.dev0 实现 Const[bool] 独立类型域与带类型标签的缓存键 |
 | [ADR-014](014-host-integer-normalization.md) | Proposed | 显式 host_int 白名单转换，保留 ExactInt |
 | [ADR-015](015-rounded-typed-constants.md) | Proposed | 显式目标 dtype、RNE 舍入与按位常量表示 |
 

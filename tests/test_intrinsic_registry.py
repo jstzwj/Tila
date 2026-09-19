@@ -161,7 +161,7 @@ def test_registry_semantic_revision_is_part_of_compilation_cache_key():
     key = _triton_cache_key(marker, {"BLOCK": 128})
     assert key[0] == INTRINSIC_REGISTRY_SEMANTIC_REVISION
     assert key[1] == id(marker)
-    assert key[2] == (("BLOCK", 128),)
+    assert key[2] == (("BLOCK", "Int", 128),)
 
 
 def test_validator_rejects_missing_metadata_and_duplicate_identity():

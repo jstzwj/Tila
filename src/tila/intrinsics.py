@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 3  # ADR-012 boolean tile consumers
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 4  # ADR-013 typed Const parameter domains
 
 
 class SurfaceForm(str, Enum):

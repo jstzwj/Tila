@@ -4,9 +4,9 @@
 
 基线日期：2026-09-19
 
-对应版本：`0.2.0` 开发基线
+对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 671 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 718 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -20,9 +20,12 @@ CLI/关键错误 golden、反例与重放附件边界。ExactInt 边界不变。
 
 M2-07 已形成四份独立提案：[布尔 tile/Mask](adr/012-boolean-tile-mask.md)、
 [Const bool](adr/013-const-bool-domain.md)、[宿主整数转换](adr/014-host-integer-normalization.md)、
-[显式舍入常量](adr/015-rounded-typed-constants.md)。M2-07a / ADR-012 已实现；
-其余三份仍为 Proposed，尚未实现；
-`host_int`、`constant` 尚非公共 API，Const[bool] 提案面向 0.3.x。
+[显式舍入常量](adr/015-rounded-typed-constants.md)。M2-07a/b / ADR-012/013 已实现；
+ADR-014/015 仍为 Proposed，尚未实现；`host_int`、`constant` 尚非公共 API。
+Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数事实/缓存域分离。
+47 项 Const bool 专项覆盖 exact 绑定、staging/短路、分支/循环、CLI、缓存与审计快照。
+11 组 Const bool CPU/GPU 对照通过同下述 GPU 环境（含短路跳过除零），命令为
+`PYTHONPATH=src python tests/gpu_const_bool_smoke.py`。
 
 布尔 tile 的 39 项专项包含身份/广播、分支/循环、Ptr、debug assume 与 explain golden。
 68 组 CPU/GPU 对照已通过 RTX 3090 + PyTorch 2.10.0+cu128 / Triton 3.6.0 / CUDA 12.8，
@@ -127,7 +130,8 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | `Unit` | `Implemented` | Check | store/assume 等返回；赋值和参与运算会拒绝 |
 | `Const[int]` | `Implemented` | Check / CPU / Triton | 支持默认值、特化和 refinement；ADR-005 将其固定为 0.2.x 唯一公共 Const 参数域 |
 | `Const[int]` ExactInt 全入口门禁 | `Implemented` | Frontend / Specialize / Launch | 默认值、materialize/explain、CLI 和 launch override 均只接受 exact Python int；bool、float、字符串及 NumPy integer 拒绝 |
-| `Const[bool]`/其他数值 Const 参数 | `Designed` | — | ADR-005 明确延后；Const int 比较产生 staged bool，不构成可声明的 `Const[bool]` |
+| `Const[bool]` | `Implemented` | Frontend / Specialize / Launch / CPU / Triton | ADR-013；exact Python bool，CLI true/false；不接受 0/1、NumPy bool 或 refinement；支持 staged 布尔表达式与类型标签缓存 |
+| 其他数值 Const 参数 | `Designed` | — | Const[float/dtype/str] 不开放 |
 | `Buffer[T, Shape, Access, Alignment?]` | `Implemented` | Check / CPU / Triton | 2–4 项公共形式规范化为四项打印；隐式 Global；内部显式区分 `BoundStrides/UnboundStrides`，不能由用户伪造 |
 | `Ptr[T, AddressSpace, Access, Extent, Alignment]` 与紧凑形式 | `Implemented` | Check / CPU / Triton | ADR-001 五参数完整形式和 1–4 项紧凑形式统一规范化；Access/AddressSpace 为受控 enum，Extent/Alignment 为结构化类型；v0 只接受 Global |
 | `ReadPtr/WritePtr/RWPtr[T, Extent?, Alignment?]` | `Implemented` | Check / CPU / Triton | 可携带 Extent/Alignment；省略 Extent 时为 UnknownExtent，strict bounds 下需要额外证明或 unsafe |

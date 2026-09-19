@@ -1,8 +1,8 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M2-07a，M2-07b/c/d 保留独立 ADR 提案
+状态：执行计划 v2；2026-09-19 完成 M2-07a/b，0.3.0.dev0 开放 Const bool，c/d 仍为提案
 
-基线日期：2026-09-19（M0/M1、M2-01 至 M2-06 与 M2-07a 已完成，M2 进行中）
+基线日期：2026-09-19（M0/M1、M2-01 至 M2-06 与 M2-07a/b 已完成，M2 进行中）
 
 适用范围：语言规范、前端、类型系统、静态证明、TIR、Triton 后端、运行时、解释器、测试与文档。
 
@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：671 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
+- 当前测试基线：718 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
 
 ### 2.2 当前主要缺口
 
@@ -59,7 +59,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
 - 完整 FP8、target capability 与泛型仍是未来能力；
 - effect 只有聚合记录和局部 warning，race/uniformity/atomic 尚未形成系统；
-- M2-05 性质/差异审计、M2-06 explain golden 和 M2-07a 布尔 tile 已完成；更广 fuzz 持续扩展，M2-07b/c/d 待评审与实现。
+- M2-05 性质/差异审计、M2-06 explain golden、M2-07a 布尔 tile 与 M2-07b Const bool 已完成；更广 fuzz 持续扩展，M2-07c/d 待评审与实现。
 
 ---
 
@@ -379,12 +379,12 @@ SafeUnderContract 保留显示兼容；unsafe 不再伪装成 ProvenSafe。
 
 ### M2.7 独立的公共接口设计
 
-2026-09-19 已形成以下独立 ADR；ADR-012 Accepted 且实现完成，其余为 Proposed。
+2026-09-19 已形成以下独立 ADR；ADR-012/013 Accepted 且实现完成，其余为 Proposed。
 
 | 子项 | ADR 与推荐方向 | 后续门禁 |
 |---|---|---|
 | M2-07a | [ADR-012](docs/adr/012-boolean-tile-mask.md)：布尔 tile 消费者适配，保持 Mask 独立 | DONE；39 项专项、68 组 CPU/GPU 对照；身份/广播、审计 golden 对齐 |
-| M2-07b | [ADR-013](docs/adr/013-const-bool-domain.md)：exact bool、独立参数域及类型标签键 | 目标 0.3.x；先明确 ADR-005 版本边界，再开放入口 |
+| M2-07b | [ADR-013](docs/adr/013-const-bool-domain.md)：exact bool、独立参数域及类型标签键 | DONE；自 0.3.0.dev0 生效，保留 0.2.x 历史边界；47 项专项、11 组 CPU/GPU 对照 |
 | M2-07c | [ADR-014](docs/adr/014-host-integer-normalization.md)：显式 host_int 白名单转换 | 较低优先级；不放宽 ExactInt，不调用任意转换协议 |
 | M2-07d | [ADR-015](docs/adr/015-rounded-typed-constants.md)：显式 RNE 浮点常量 | 可独立于 b/c 实施；直接舍入、规范位模式及后端对照 |
 
@@ -834,9 +834,10 @@ device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔�
 
 ## 17. 下一步
 
-M0/M1、**M2-01 至 M2-06 与 M2-07a 已完成**。M2-07b/c/d 仍待实施：
+M0/M1、**M2-01 至 M2-06 与 M2-07a/b 已完成**。M2-07c/d 仍待实施：
 ADR-012 至 ADR-015 分别覆盖布尔 tile mask、Const bool、宿主整数转换与显式舍入常量。
-下一步评审并实施 **M2-07b / ADR-013**，Const bool 按 0.3.x 版本边界推进。
+下一步可推进 **M2-07c / ADR-014** 的显式宿主整数转换；M2-07d 舍入常量可独立排期。
+Const bool 已自 0.3.0.dev0 开放，不回移至 0.2.x，不放宽 ExactInt。
 M2-06 的版本化审计格式与 golden 边界见 [explain 审计](docs/explain-audit.md)。
 M2-05 的有限穷举范围、差异台账与重放方式见 [证明审计](docs/m2-proof-audit.md)。
 Mask/Const 易用性独立处理。
@@ -867,7 +868,7 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | ADR-010 | Proposed | effect/race 严格度 | M4 开始前 | bounds、effects、race 使用独立策略开关 |
 | [ADR-011](docs/adr/011-smt-proof-and-trust.md) | Accepted | 默认 SMT 与信任来源 | M2 证明迁移前 | Z3 + 布尔 DAG + 小型快速路径；Int/BitVec 分离、Exempted、预算及反例可达性 |
 | [ADR-012](docs/adr/012-boolean-tile-mask.md) | Accepted | 布尔 tile 与 Mask | M2-07a 已完成 | 受限消费者适配，保留类型与未知谓词身份 |
-| [ADR-013](docs/adr/013-const-bool-domain.md) | Proposed | Const bool | M2-07b / 0.3.x 开放前 | exact bool、独立参数域、带类型标签的缓存键 |
+| [ADR-013](docs/adr/013-const-bool-domain.md) | Accepted | Const bool | M2-07b 已完成 | 自 0.3.0.dev0 开放 exact bool、独立参数域、带类型标签的缓存键 |
 | [ADR-014](docs/adr/014-host-integer-normalization.md) | Proposed | 宿主整数转换 | M2-07c 开放前 | 显式 host_int 白名单；ExactInt 入口不变 |
 | [ADR-015](docs/adr/015-rounded-typed-constants.md) | Proposed | 显式舍入常量 | M2-07d 开放前 | 目标 dtype、RNE、规范位模式；拒绝非有限值 |
 
@@ -916,7 +917,7 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | M2-04 | DONE | 数据流与 interpreter 收口 | M2-01/02/03 | 537 项 CPU 回归；32 项新专项；活跃分支/整数 phi、简单不变量/零次出口、标量反例重放、非连续/广播/bf16/f64/debug；23 组 GPU 整数对照；保守边界见 docs/dataflow-interpreter.md |
 | M2-05 | DONE | 差异审计与性质测试 | M2-03/04 | 604 项 CPU 回归，新增 67 项专项；小位宽合法输入对穷举、SMT 对照/差异台账、固定种子布尔/控制流/广播、预算/缓存/来源隔离、失败见证重放；确认无复杂 DNF 执行入口，详见 docs/m2-proof-audit.md |
 | M2-06 | DONE | explain 与审计 golden | M2-03/05 | 628 项 CPU 回归，新增 24 项专项/15 份 golden；audit explain v1、信任来源/反例分类、预算修复建议、缓存与模型附件边界、CLI/错误 SMT 重放及两类 hint 依据；见 docs/explain-audit.md |
-| M2-07 | DOING | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a / ADR-012 已完成，39 项专项、1 份 golden、68 组 CPU/GPU 对照；b/c/d 仍 Proposed 未实现，各项验收见 §M2.7 与独立 ADR |
+| M2-07 | DOING | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b 已完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/独立 SMT Bool/CLI/golden 与 11 组 GPU 对照；c/d 仍 Proposed 未实现 |
 | M2-08 | TODO | 小型 CPU/GPU 语义对照 | M2-01、M3-01 | 整数/cast/mask/归约在固定环境对照；无 runner 明确未验证，不阻塞 CPU 检查 |
 | M3-01 | BLOCKED | GPU 支持矩阵 | ADR-009 | 依赖版本和 CI runner 明确 |
 

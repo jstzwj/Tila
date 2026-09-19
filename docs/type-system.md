@@ -16,7 +16,7 @@ Type
 │   ├── f16 bf16 f32 f64
 │   └── f8e4m3fn f8e5m2 …          仅存储 dtype（见 §2）
 │
-├── Const[int]                    0.2.x 唯一可声明的编译期参数域
+├── Const[int] / Const[bool]      编译期参数；bool 自 0.3.0.dev0 开放
 │
 ├── Block[T, Shape]               寄存器驻留的 tile；Layout 为保留扩展轴（§11）
 │
@@ -186,7 +186,7 @@ known:    K1 = 32, K2 = 64
 
 ---
 
-## 5. Const[int]：编译期整数参数与 staging
+## 5. Const：编译期参数与 staging
 
 ### 5.1 语法与推导
 
@@ -195,9 +195,10 @@ known:    K1 = 32, K2 = 64
 BLOCK: tila.Const[int]                      # kernel 参数：编译期
 N:     tila.i32                             # kernel 参数：运行期
 TILE:  tila.Const[int, tila.PowerOfTwo]     # 带精化的编译期参数
+ENABLED: tila.Const[bool] = True           # 0.3.x：只接受 exact Python bool
 ```
 
-Const 上的算术在 checker 内**常量折叠**，结果仍是 Const：
+Const[int] 上的算术在 checker 内**常量折叠**，结果仍是 Const：
 
 <!-- tila-example: current; mode=syntax -->
 ```python
@@ -220,7 +221,7 @@ upper bound must be compile-time known
 <!-- tila-example: current; mode=syntax -->
 ```python
 if BLOCK >= 128:        # BLOCK : Const → constexpr if
-    ...                 # 未选中分支不进入 IR（死分支消除发生在 HIR）
+    ...                 # 参数未绑定时两分支均检查；特化时选择执行分支
 else:
     ...
 
@@ -228,9 +229,11 @@ if pid == 0:            # pid : i32 → runtime if
     ...                 # 两分支都进入 IR，走控制流类型规则（§10）
 ```
 
-- 0.2.x 不提供可声明的 `Const[bool]`。constexpr-if 的条件是模块级可折叠
-  bool，或只依赖 `Const[int]` 比较的 staged bool predicate；其 staging
-  属性独立于值类型（[ADR-005](adr/005-const-type-domain.md)）。
+- 0.2.x 的 int-only 参数边界保留在 [ADR-005](adr/005-const-type-domain.md)。
+  0.3.0.dev0 起按 [ADR-013](adr/013-const-bool-domain.md) 支持 `Const[bool]`：
+  原生 True/False 可用于 `not/and/or`、bool 等值比较、static-if 和 static_assert；
+  不接受 0/1、NumPy bool、refinement 或整数语境。CLI 按声明解析小写 true/false。
+  staging 仍独立于值类型，混入 runtime bool 后为 runtime 条件。
 - runtime-if 的条件必须是**标量 bool**（§3.3 的 Mask 拒绝规则）。
 - **三路分类（实现语义）**：
   1. 条件仅含模块级常量 → Stage 1 折叠，死分支不进 IR；
@@ -260,10 +263,9 @@ i32 范围限制，Buffer 地址线性化与循环内部步进使用 i64。
 验证及 Int/BitVec SMT 编码；加载内容和复杂数据流可达性仍保守近似，
 详见 [证明器实现边界](smt-prover.md)。
 
-易用性提案分别见 [显式舍入常量](adr/015-rounded-typed-constants.md)、
-[Const bool](adr/013-const-bool-domain.md) 与
-[宿主整数转换](adr/014-host-integer-normalization.md)，均尚未实现。当前
-0.2.x 的 ExactInt 和隐式转换规则不因这次设计更新而改变。
+易用性提案 [显式舍入常量](adr/015-rounded-typed-constants.md) 与
+[宿主整数转换](adr/014-host-integer-normalization.md) 尚未实现。
+Const bool 已在 0.3.0.dev0 独立实现；ExactInt 和隐式数值转换规则保持不变。
 
 ### 6.1 隐式转换只允许安全 widening
 

@@ -49,7 +49,8 @@ class TScalarParam:
 class TConstParam:
     name: str
     refinements: tuple
-    default: int | None
+    default: int | bool | None
+    value_kind: str = "Int"
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +326,7 @@ class _Printer:
             out.append(f"  scalar {s.name} : {s.dtype.name}{r}")
         for c in self.k.consts:
             d = f" = {c.default}" if c.default is not None else ""
-            out.append(f"  const  {c.name} : Const[int]{d}")
+            out.append(f"  const  {c.name} : Const[{c.value_kind.lower()}]{d}")
         out.append("  {")
         for st in self.k.body:
             out.extend(self.stmt(st, 2))

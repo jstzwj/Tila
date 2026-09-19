@@ -1,17 +1,20 @@
 # ADR-013：Const[bool] 的独立参数域
 
-- 状态：**Proposed**（推荐后续版本方案，未实现）
+- 状态：**Accepted**（M2-07b；自 0.3.0.dev0 生效）
 - 日期：2026-09-19
 - 阶段：M2-07b；目标为 0.3.x，发布前版本评审
-- 关联：ADR-005；不修改其对当前 0.2.x 的承诺
+- 关联：ADR-005；保留其对 0.2.x 的历史承诺
 
 ## 推荐决策
 
-在后续版本新增 `ti.Const[bool]`，默认值、materialize/explain override 和 launch
+从 0.3.0.dev0 开发基线新增 `ti.Const[bool]`，默认值、materialize/explain override 和 launch
 override 统一要求 `type(value) is bool`。0/1、NumPy bool、字符串和可转换对象
 均拒绝。Const[int] 继续只接受 ExactInt；两者不能通过 Python 子类关系混用。
 
-<!-- tila-example: future; milestone=M2 -->
+该变更不回移到 0.2.x；版本号同步 pyproject.toml 与 tila.__version__，不代表
+已发布 0.3.0 正式版。Const 类型域、编译与 proof 缓存 revision 一并升级。
+
+<!-- tila-example: current; mode=syntax -->
 ```python
 @ti.jit
 def optional_path(ENABLED: ti.Const[bool] = True):
@@ -49,6 +52,22 @@ frontend、staged 求值、runtime 绑定、缓存键、CLI 和规范打印。�
 测试矩阵必须覆盖 True/False 与 1/0 的跨域拒绝、所有绑定入口、默认值覆盖、
 缺参、嵌套 static-if、短路、延迟 static_assert、冷/热缓存隔离、CPU/Triton 路径
 一致，以及 CLI 的合法/非法文本。达标前状态表保持 Designed。
+
+## 实现证据与保守边界
+
+M2-07b 已接通 ConstT/TIR 的 Bool 域、exact bool 全入口绑定、staged 布尔表达式
+与别名、static-if、延迟 static_assert、声明驱动 CLI 和类型标签缓存键。
+嵌套 static-if 中的断言只在所选特化路径求值；已知短路条件不构造未执行右侧
+的 SMT 运算定义域，布尔常量传播仅局部折叠，保持共享 DAG 的有界迭代遍历。
+Facts.bools 与 Facts.num 分离；SMT 使用独立 Bool 节点，未绑定时不会确认可达
+反例，绑定后重新判定；bool 不进入 DimExpr、shape/grid 或整数 launch 契约。
+registry semantic revision 为 4，proof encoding revision 为 3。
+
+分支合并与循环仍沿用 M2-04 的保守 staging；失去稳定值身份的局部变量降为
+Runtime，不把控制流相关别名错误地内联为某一分支的 Const 值。
+`tests/test_const_bool.py` 覆盖各入口、类型拒绝、短路、嵌套分支/循环、缓存隔离、
+CLI 冲突和 explain golden。11 组 CPU/GPU 对照通过 RTX 3090、PyTorch 2.10.0+cu128、
+Triton 3.6.0、CUDA 12.8；命令：`PYTHONPATH=src python tests/gpu_const_bool_smoke.py`。
 
 ## 未选择的方案
 

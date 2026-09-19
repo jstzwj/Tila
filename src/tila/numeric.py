@@ -153,6 +153,8 @@ class Validator:
             return iv
         if isinstance(x, T.TUna):
             a = self.expr(x.operand)
+            if dt is D.bool_ and x.op in ("not", "~"):
+                return (not bool(a[0]),) * 2 if a is not None and a[0] == a[1] else None
             iv = (-a[1], -a[0]) if a is not None and x.op == "-" else None
             if x.checked_index:
                 self.require(self.fits(iv, dt), "index negation may overflow", definite=iv is not None)

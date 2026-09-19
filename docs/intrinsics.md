@@ -152,7 +152,7 @@ reshape(x: Block[T, S1], S2)                  → Block[T, S2]
 expand_dims(x: Block[T, S], axis)             → Block[T, S 插入 size-1]
     表面语法糖: x[:, None] / x[None, :] 等价于 expand_dims（唯一允许的下标形态）
 cat(a: Block[T, S], b: Block[T, S])          → Block[T, (2·S0, S1..)]  [未排期]
-    reorder 参数不属于 0.2.x；未来若恢复，须先决定 bool Const 参数 ABI
+    reorder 参数未开放；Const bool 参数 ABI 已由 ADR-013 固定，reorder 仍需独立设计
 ```
 
 ### 2.9 原子 [M4]
@@ -173,7 +173,7 @@ assume(pred: Block-level 谓词的标量/Presburger 形态)     → Unit
     fact 注入；debug → device_assert（refinements.md §5.1）
 static_assert(pred: StagedBool)                          → Unit
     编译期断言：Stage 1 立即检查，Const specialization 条件延迟检查
-    0.2.x 不支持消息参数；StagedBool 不是可声明的 Const[bool]（ADR-005）
+    消息参数未开放；StagedBool 表示阶段属性，可来自 Const int 比较或 0.3.x Const bool
 hint.multiple_of / hint.max_contiguous                   调试用；常规路径由编译器自动发射
 ```
 

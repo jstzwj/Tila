@@ -1,0 +1,24 @@
+kernel @declaration — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: FLAG=False
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  FLAG : Const[bool]
+types:
+  FLAG : bool
+facts:
+  FLAG = False (Const)
+obligations:
+  (none)
+hints:
+  (none)
+effects:
+  (none)
+aliases:
+  (none)
+warnings:
+  (none)
+notes:
+  (none)
+deferred constraints:
+  static_assert:

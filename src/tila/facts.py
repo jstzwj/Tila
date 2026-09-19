@@ -58,11 +58,12 @@ class Facts:
     path: P.Predicate = P.TRUE
     grid_checked: bool = False
     launch_bindings: tuple = ()
+    bools: dict = field(default_factory=dict)
 
     def clone(self) -> "Facts":
         return Facts(dict(self.var_exprs), dict(self.sym_lo), dict(self.sym_hi),
                      dict(self.num), dict(self.preds), dict(self.grid_facts),
-                     self.path, self.grid_checked, self.launch_bindings)
+                     self.path, self.grid_checked, self.launch_bindings, dict(self.bools))
 
     def intersect(self, other: "Facts") -> "Facts":
         """分支合并：只保留两侧共同可推出的事实（保守正确）。"""
@@ -71,7 +72,7 @@ class Facts:
                          if other.var_exprs.get(k) == v}
         out.preds = {k: replace(p, origins=p.origins | other.preds[k].origins)
                      for k, p in out.preds.items() if k in other.preds}
-        for name in ("sym_lo", "sym_hi", "num", "grid_facts"):
+        for name in ("sym_lo", "sym_hi", "num", "bools", "grid_facts"):
             a, b = getattr(self, name), getattr(other, name)
             setattr(out, name, {k: v for k, v in a.items() if b.get(k) == v})
         out.path = P.disjunction(self.path, other.path)
@@ -233,6 +234,8 @@ def predicate_audit_text(root: P.Predicate) -> str:
             value = f"unknown#{unknowns[node]}"
         elif node.op == "unknown_view":
             value = f"view({args[0]}, axes={node.mapping})"
+        elif node.op == "const_bool":
+            value = f"Const[bool]({node.atom})"
         elif node.op == "atom":
             value = f"{node.atom.left} {node.atom.op} {node.atom.right}"
         elif node.op == "not":

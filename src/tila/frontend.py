@@ -118,18 +118,20 @@ def _parse_param(a: ast.arg, default_node, g: dict, lines: list) -> Param:
             [f"例如 x: ti.Buffer[ti.f32, (N,), ti.ReadOnly] 或 BLOCK: ti.Const[int, ti.PowerOfTwo]"])
 
     # ti.Const[...] 的 spec 是 ("const", refinements) 元组
-    if isinstance(spec, tuple) and len(spec) == 2 and spec[0] == "const":
+    if isinstance(spec, tuple) and len(spec) == 2 and spec[0] in ("const", "const_bool"):
         refins = spec[1]
-        if default is not None and type(default) is not int:
+        expected = bool if spec[0] == "const_bool" else int
+        if default_node is not None and type(default) is not expected:
             raise TilaError(
                 "TILA-CONST-008",
-                f"Const parameter '{name}' default must be an exact Python int",
+                f"Const parameter '{name}' default must be an exact Python {expected.__name__}",
                 loc,
                 [f"found: {type(default).__name__} value {default!r}",
-                 "required: type(value) is int (bool is not accepted)"],
-                [f"write {name}: ti.Const[int] = <integer literal>"],
+                 f"required: type(value) is {expected.__name__}"],
+                [f"write {name}: ti.Const[{expected.__name__}] = <{expected.__name__} literal>"],
             )
-        return Param(name, ConstT(name, refins, default), default)
+        return Param(name, ConstT(name, refins, default,
+                                 D.bool_ if expected is bool else D.i32), default)
     if isinstance(spec, D.DType):                    # 裸 dtype：ti.f32
         spec = ScalarT(spec)
     if isinstance(spec, (BufferT, PtrT, RefinedScalar, ScalarT, ConstT)):

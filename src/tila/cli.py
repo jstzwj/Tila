@@ -52,7 +52,8 @@ def _jit_functions(mod):
             if isinstance(v, JITFunction)}
 
 
-def _consts(argv):
+def _consts(argv, declarations=()):
+    kinds = {c.name: c.value_kind for c in declarations}
     out = {}
     for c in argv or []:
         name, _, v = c.partition("=")
@@ -65,6 +66,12 @@ def _consts(argv):
                 fixes=["for example: --const BLOCK=128"],
             )
         try:
+            if kinds.get(name) == "Bool":
+                if v.strip() not in ("true", "false"):
+                    raise TilaError("TILA-CONST-008",
+                                    f"Const '{name}' requires CLI true or false")
+                out[name] = v.strip() == "true"
+                continue
             out[name] = int(v.strip(), 10)
         except ValueError:
             raise TilaError(
@@ -105,7 +112,7 @@ def main(argv=None):
         if not kerns:
             print(f"{args.path}: no @ti.jit kernels found")
             return 1
-        consts = _consts(args.const)
+        parsed_consts = {name: _consts(args.const, k.tk.consts) for name, k in kerns.items()}
         if args.command == "run":
             fn = getattr(mod, "main", None)
             if fn is None:
@@ -115,6 +122,7 @@ def main(argv=None):
             return 0
         ok = True
         for name, k in kerns.items():
+            consts = parsed_consts[name]
             if args.command == "dump":
                 print(k.tk.dump(), end="")
                 continue

@@ -143,9 +143,11 @@ staged 整数保持任意精度及 floor 除法，runtime 整数按位宽回绕�
 
 ## 迁移与验收
 
-M2-07 的 [ADR-013](013-const-bool-domain.md) 提议在 0.3.x 引入 Const[bool]，
-[ADR-014](014-host-integer-normalization.md) 提议显式宿主整数转换。两者均为
-Proposed；本 ADR 的 0.2.x ExactInt 与 Const[int] 边界继续有效。
+版本边界：本 ADR 保留 0.2.x 的历史契约。自 **0.3.0.dev0** 起，
+[ADR-013](013-const-bool-domain.md) 扩展公共参数域，允许 exact Python bool 的
+`Const[bool]`；本 ADR 的 int-only 限制仅适用于 0.2.x，ExactInt 与 staging
+正交原则继续适用。没有 0.2.x 回移或隐式 0/1 转 bool 的兼容路径。
+[ADR-014](014-host-integer-normalization.md) 的显式宿主整数转换仍为 Proposed。
 
 - 将 current 文档中的 `Const[bool]` 改为 `StagedBool` 或“只依赖 Const int 的静态谓词”。
 - future API 若需要 bool/dtype 参数，必须另写 ADR，给出 ABI、缓存和序列化规则。

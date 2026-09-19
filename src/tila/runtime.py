@@ -235,7 +235,8 @@ class JITFunction:
         self._check_consts(cenv)     # 只读的精化校验（与 materialize 同源）
 
         facts = Facts()              # 与 _evaluate_obligations 特化期同构
-        facts.num = dict(cenv)
+        facts.num = {k: v for k, v in cenv.items() if type(v) is int}
+        facts.bools = {k: v for k, v in cenv.items() if type(v) is bool}
         facts.grid_facts = {}        # launch 期契约：explain 不可见（见上）
         facts.sym_hi = dict(tk.sym_hi)
         facts.sym_lo = dict(tk.sym_lo)
@@ -260,7 +261,8 @@ class JITFunction:
         parameters.extend((p.name, TY.describe(p.vtype)) for p in tk.ptr_params)
         parameters.extend((p.name, TY.RefinedScalar(p.dtype, p.refined).describe())
                           for p in tk.scalars)
-        parameters.extend((p.name, TY.ConstT(p.name, p.refinements, p.default).describe())
+        parameters.extend((p.name, TY.ConstT(p.name, p.refinements, p.default,
+                           D.bool_ if p.value_kind == "Bool" else D.i32).describe())
                           for p in tk.consts)
         if parameters:
             for name, desc in sorted(parameters):
@@ -385,7 +387,7 @@ class JITFunction:
 
     # -- Stage 2 内部 -------------------------------------------------------
 
-    def _resolve_consts(self, supplied: dict | None) -> dict[str, int]:
+    def _resolve_consts(self, supplied: dict | None) -> dict[str, int | bool]:
         supplied = {} if supplied is None else dict(supplied)
         declared = {const.name for const in self.tk.consts}
         unknown = sorted(set(supplied) - declared)
@@ -396,10 +398,11 @@ class JITFunction:
                 details=[f"declared Const parameters: "
                          f"{', '.join(sorted(declared)) or '(none)'}"],
                 fixes=["remove the unknown --const/override name, or declare "
-                       "a matching Const[int] parameter"],
+                       "a matching Const parameter"],
             )
         resolved = {}
         for const in self.tk.consts:
+            expected = bool if const.value_kind == "Bool" else int
             if const.name in supplied:
                 value = supplied[const.name]
             elif const.default is not None:
@@ -408,18 +411,16 @@ class JITFunction:
                 raise TilaError(
                     "TILA-CONST-007",
                     f"Const parameter '{const.name}' has no value",
-                    details=["required at specialization: exact Python int"],
-                    fixes=[f"pass {const.name}=<int>, --const "
-                           f"{const.name}=<int>, or add an integer default"],
+                    details=[f"required at specialization: exact Python {expected.__name__}"],
+                    fixes=[f"pass {const.name}=<{expected.__name__}>, or add a typed default"],
                 )
-            if type(value) is not int:
+            if type(value) is not expected:
                 raise TilaError(
                     "TILA-CONST-008",
-                    f"Const '{const.name}' must be an exact Python int",
+                    f"Const '{const.name}' must be an exact Python {expected.__name__}",
                     details=[f"found: {type(value).__name__} value {value!r}",
-                             "required: type(value) is int "
-                             "(bool and coercible objects are rejected)"],
-                    fixes=[f"pass {const.name}=<integer> without implicit "
+                             f"required: type(value) is {expected.__name__}"],
+                    fixes=[f"pass {const.name}=<{expected.__name__}> without implicit "
                            "conversion"],
                 )
             resolved[const.name] = value
@@ -427,15 +428,16 @@ class JITFunction:
 
     def _check_consts(self, cenv: dict):
         for c in self.tk.consts:
+            expected = bool if c.value_kind == "Bool" else int
             v = cenv.get(c.name)
             if v is None:
                 raise TilaError("TILA-CONST-007",
                                 f"Const '{c.name}' unresolved at "
                                 "specialization")
-            if type(v) is not int:
+            if type(v) is not expected:
                 raise TilaError(
                     "TILA-CONST-008",
-                    f"Const '{c.name}' must be an exact Python int",
+                    f"Const '{c.name}' must be an exact Python {expected.__name__}",
                     details=[f"found: {type(v).__name__} value {v!r}"])
             for r in c.refinements:
                 if not r.check(v):
@@ -447,8 +449,8 @@ class JITFunction:
     def _check_deferred(self, cenv: dict):
         for d in self.tk.deferred:
             if d["kind"] == "eq":
-                l = rewrite_syms(d["l"], {k: Cst(v) for k, v in cenv.items()})
-                r = rewrite_syms(d["r"], {k: Cst(v) for k, v in cenv.items()})
+                l = rewrite_syms(d["l"], {k: Cst(v) for k, v in cenv.items() if type(v) is int})
+                r = rewrite_syms(d["r"], {k: Cst(v) for k, v in cenv.items() if type(v) is int})
                 if not equal(l, r):
                     raise TilaError(
                         "TILA-SHAPE-004",
@@ -466,7 +468,7 @@ class JITFunction:
                 # reshape numel 约束（intrinsics.md §2.8）：Const 值代入
                 # 两个维度列表后数值比较乘积。
                 from .dims import int_value
-                mapping = {k: Cst(v) for k, v in cenv.items()}
+                mapping = {k: Cst(v) for k, v in cenv.items() if type(v) is int}
 
                 def _numel(shape):
                     prod = 1
@@ -496,6 +498,9 @@ class JITFunction:
                          f"    with consts {cenv}"])
             elif d["kind"] == "static_assert":
                 try:
+                    if any(bool(_eval_const_operand(guard, cenv)) != selected
+                           for guard, selected in d.get("guards", ())):
+                        continue
                     value = _eval_const_operand(d["pred"], cenv)
                 except (ArithmeticError, TypeError, ValueError) as exc:
                     raise TilaError(
@@ -532,7 +537,8 @@ class JITFunction:
         from dataclasses import replace
         from . import predicates as P
         facts = Facts()
-        facts.num = dict(cenv)
+        facts.num = {k: v for k, v in cenv.items() if type(v) is int}
+        facts.bools = {k: v for k, v in cenv.items() if type(v) is bool}
         facts.grid_facts = grid_facts
         facts.grid_checked = launch_checked
         facts.launch_bindings = launch_bindings
@@ -545,7 +551,7 @@ class JITFunction:
         results = []
         warn_diags = []
         for ob in self.tk.obligations:
-            nonneg = self.tk.nonneg_syms | {name for name, value in cenv.items() if value >= 0}
+            nonneg = self.tk.nonneg_syms | {name for name, value in facts.num.items() if value >= 0}
             result = evaluate_obligation(ob, facts, nonneg, proof_session)
             state = result.verdict
             results.append((ob, result))
@@ -638,7 +644,8 @@ def _debug() -> bool:
 def _triton_cache_key(jf, consts: dict):
     """Semantic cache key; registry changes invalidate compiled kernels."""
     return (INTRINSIC_REGISTRY_SEMANTIC_REVISION, id(jf),
-            tuple(sorted(consts.items())), _debug())
+            tuple((k, "Bool" if type(v) is bool else "Int", v)
+                  for k, v in sorted(consts.items())), _debug())
 
 
 class _Launcher:
@@ -653,7 +660,7 @@ class _Launcher:
         stride_vals: dict[str, int] = {}
         scalar_vals: dict[str, int | float] = {}
         tensors: dict[str, object] = {}
-        consts: dict[str, int] = {}
+        consts: dict[str, int | bool] = {}
 
         # ---- 位置实参 → 声明序参数（buffer | ptr | 显式标量）
         # param_order 由 checker 记录源码声明序；隐式符号（维/步长/Ptr
@@ -693,14 +700,15 @@ class _Launcher:
 
         # ---- Const 参数（kwargs / 默认）
         for c in tk.consts:
+            expected = bool if c.value_kind == "Bool" else int
             if c.name in kwargs:
                 v = kwargs.pop(c.name)
-                if type(v) is not int:
+                if type(v) is not expected:
                     raise TilaLaunchContractError(
                         "TILA-CONST-008",
-                        f"Const '{c.name}' must be an exact Python int",
+                        f"Const '{c.name}' must be an exact Python {expected.__name__}",
                         [f"found: {type(v).__name__} value {v!r}",
-                         "required: type(value) is int"])
+                         f"required: type(value) is {expected.__name__}"])
                 consts[c.name] = v
             elif c.default is not None:
                 consts[c.name] = c.default
@@ -1140,7 +1148,7 @@ def _match_cdiv(g: _Cdiv, dim_vals: dict, consts: dict):
     if bound is None:
         return None, None
     for name, v in consts.items():
-        if v == b:
+        if type(v) is int and v == b:
             return bound, name
     return bound, b
 
@@ -1198,7 +1206,7 @@ def _step_value(step: DimExpr, consts: dict):
     """step 的数值：Const 符号代入后常量折叠（Cst / Sym(BLOCK) / 组合式）。
     非数值或 < 1（步长无意义）返回 None。"""
     if consts:
-        step = rewrite_syms(step, {k: Cst(v) for k, v in consts.items()})
+        step = rewrite_syms(step, {k: Cst(v) for k, v in consts.items() if type(v) is int})
     v = int_value(step)
     return v if v is not None and v >= 1 else None
 
@@ -1300,8 +1308,9 @@ def assume_launch(pred: str):
 
 
 def _expr(node, tk: T.TKernel):
-    names = {s.name for s in tk.scalars} | {c.name for c in tk.consts}
-    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+    names = {s.name for s in tk.scalars if s.dtype.is_int} | {
+        c.name for c in tk.consts if c.value_kind == "Int"}
+    if isinstance(node, ast.Constant) and type(node.value) is int:
         return Cst(node.value)
     if isinstance(node, ast.Name):
         if node.id not in names:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tila-lang"
-version = "0.2.0"
+version = "0.3.0.dev0"
 description = "Tila: a statically strongly-typed GPU kernel DSL (shape + refinement + effects + pointer capabilities) that compiles to Triton"
 requires-python = ">=3.10"
 dependencies = ["numpy", "z3-solver==4.16.0.0"]

@@ -385,11 +385,15 @@ class ConstT:
     特化期代入数值。"""
     name: str
     refinements: tuple = ()
-    default: int | None = None
+    default: int | bool | None = None
     dtype: D.DType = field(default_factory=lambda: D.i32)
 
+    @property
+    def value_kind(self):
+        return "Bool" if self.dtype is D.bool_ else "Int"
+
     def describe(self):
-        base = f"Const[int{'' if not self.refinements else ', '}"
+        base = f"Const[{self.value_kind.lower()}{'' if not self.refinements else ', '}"
         base += ", ".join(r.text for r in self.refinements) + "]"
         return base
 
@@ -666,6 +670,10 @@ class _ConstMeta:
     def __getitem__(self, item):
         if not isinstance(item, tuple):
             item = (item,)
+        if item and item[0] is bool:
+            if len(item) != 1:
+                raise TypeError("Const[bool] does not accept refinements")
+            return ("const_bool", ())
         if not item or item[0] is not int or any(x is int for x in item[1:]):
             raise TypeError("Const v0 syntax is Const[int, Refinement, ...]")
         return ("const", _normalize_refinements(item[1:], integer_only=True))

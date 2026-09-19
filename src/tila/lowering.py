@@ -300,6 +300,8 @@ class Lowering:
             return f"({left} {x.op} {right})"
         if isinstance(x, T.TUna):
             dt = numeric.dtype(x.vt)
+            if x.op == "not":
+                return f"(not {self.o(x.operand)})"
             if x.op == "~" and dt is D.bool_:
                 return f"(~tl.cast({self.o(x.operand)}, tl.int1))"
             if dt and dt.is_int and not x.staged:

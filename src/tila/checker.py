@@ -112,6 +112,7 @@ class Checker:
         self.value_defs = {}
         self.execution_context_exact = True
         self.loop_stack: list[dict] = []
+        self.static_guards = []
         self.regions: dict[str, TY.RegionId] = {}
         self.tk = T.TKernel(kern.name, [], [], [], [])
         self._collect_params()
@@ -177,8 +178,12 @@ class Checker:
                             implicit.append(s)
             elif isinstance(spec, TY.ConstT):
                 self.tk.consts.append(T.TConstParam(p.name, spec.refinements,
-                                                    spec.default))
+                                                    spec.default, spec.value_kind))
                 order.append(("const", p.name))
+                if spec.value_kind == "Bool":
+                    self.vars[p.name] = VarInfo(vtype=TY.ScalarT(D.bool_),
+                        predicate=P.Predicate("const_bool", atom=p.name), is_const=True)
+                    continue
                 self.vars[p.name] = VarInfo(vtype=TY.ScalarT(D.i32),
                                             expr=Sym(p.name), is_const=True)
                 if spec.default is not None:
@@ -204,6 +209,9 @@ class Checker:
 
         named = {s.name for s in self.tk.scalars} | \
                 {c.name for c in self.tk.consts}
+        bool_names = {c.name for c in self.tk.consts if c.value_kind == "Bool"}
+        if bool_names.intersection(implicit):
+            raise TilaError("TILA-CONST-001", "Const[bool] cannot be used as a dimension or extent")
         for s in implicit:
             if s in named:
                 continue
@@ -335,6 +343,8 @@ class Checker:
             self.vars[s.target] = VarInfo(v.vtype, v.expr,
                                           v.predicate, v.lit,
                                           v.is_const, v.contiguous_span)
+            if v.is_const and self._dtype_of(v) is D.bool_:
+                self.vars[s.target].tir = self._operand_of(v, s.value, out)
             out.append(T.TAssign(s.target, self._operand_of(v, s.value, out),
                                  line=s.loc.line))
             if v.contiguous_span is not None:
@@ -452,6 +462,10 @@ class Checker:
         m.is_const = (a.is_const and b.is_const and
                       (m.lit is not None or (a.expr is not None and
                        b.expr is not None and canon(a.expr) == canon(b.expr))))
+        if a.is_const and b.is_const and a.predicate is b.predicate:
+            m.is_const = True
+        if not m.is_const:
+            m.tir = None
 
     def _merge_branches(self, loc, before, a, b, condition):
         out = {}
@@ -514,18 +528,23 @@ class Checker:
         """
         self.tk.notes.append(f"line {s.loc.line}: static-if on Const "
                              f"parameters (resolved at specialization)")
+        guard = self._operand_of(cv, s.cond, out)
         snap_vars = {k: v.clone() for k, v in self.vars.items()}
         snap_facts = self.facts.clone()
         self.facts.path = P.conjunction(snap_facts.path, cv.predicate)
         then_out: list = []
+        self.static_guards.append((guard, True))
         then_term = self.stmts(s.then_body, then_out)
+        self.static_guards.pop()
         then_vars, then_facts = self.vars, self.facts
 
         self.vars = {k: v.clone() for k, v in snap_vars.items()}
         self.facts = snap_facts.clone()
         self.facts.path = P.conjunction(snap_facts.path, P.negate(cv.predicate))
         else_out: list = []
+        self.static_guards.append((guard, False))
         else_term = self.stmts(s.else_body, else_out)
+        self.static_guards.pop()
 
         self._join_live_branches(s.loc, snap_vars, then_vars, then_facts,
                                 then_term, else_term, cv.predicate, static=True)
@@ -644,7 +663,21 @@ class Checker:
             return None
         if isinstance(e, UnaOp) and e.op == "not":
             return self._static_cond_syms(e.operand)
+        if isinstance(e, Name):
+            v = self.vars.get(e.id)
+            if v is not None and v.is_const and self._dtype_of(v) is D.bool_:
+                if type(v.lit) is bool:
+                    return set()
+                if v.predicate.op == "const_bool":
+                    return {v.predicate.atom}
+                if v.tir is not None:
+                    return self._staged_operand_syms(v.tir)
+            return None
         if isinstance(e, Cmp):
+            if e.op in ("==", "!="):
+                l, r = self._static_cond_syms(e.left), self._static_cond_syms(e.right)
+                if l is not None and r is not None:
+                    return l | r
             l, r = self._static_int_syms(e.left), self._static_int_syms(e.right)
             if l is None or r is None:
                 return None
@@ -658,6 +691,23 @@ class Checker:
                 syms |= s
             return syms
         return None
+
+    def _staged_operand_syms(self, operand):
+        if isinstance(operand, T.TLit):
+            return set()
+        if isinstance(operand, T.TName):
+            return {operand.name} if operand.name in {c.name for c in self.tk.consts} else None
+        children = ([operand.operand] if isinstance(operand, T.TUna) else
+                    [operand.left, operand.right] if isinstance(operand, T.TBin) else [])
+        if not children:
+            return None
+        result = set()
+        for child in children:
+            syms = self._staged_operand_syms(child)
+            if syms is None:
+                return None
+            result |= syms
+        return result
 
     def _static_int_syms(self, e):
         """int 值子式的 Const 符号集（含运行期值 ⇒ None）。
@@ -738,6 +788,10 @@ class Checker:
                 return v.lit
             return None
         if isinstance(e, Cmp):
+            if e.op in ("==", "!="):
+                lb, rb = self._const_eval_bool(e.left), self._const_eval_bool(e.right)
+                if lb is not None and rb is not None:
+                    return (lb == rb) if e.op == "==" else (lb != rb)
             l, r = self._const_eval_int(e.left), self._const_eval_int(e.right)
             if l is None or r is None:
                 return None
@@ -1014,6 +1068,7 @@ class Checker:
         out = value.clone()
         out.expr, out.predicate, out.contiguous_span = None, P.unknown(shape=shape_of(out)), None
         out.lit, out.is_const = None, False
+        out.tir = None
         dtype = self._dtype_of(out)
         if dtype is not None and dtype.is_int:
             self.lane_counter += 1
@@ -1029,6 +1084,9 @@ class Checker:
 
     def synth(self, e, out) -> VarInfo:
         if isinstance(e, Lit):
+            if type(e.value) is bool:
+                return VarInfo(vtype=TY.ScalarT(D.bool_), lit=e.value, is_const=True,
+                               predicate=P.TRUE if e.value else P.FALSE)
             return VarInfo(lit=e.value)
         if isinstance(e, Name):
             v = self.vars.get(e.id)
@@ -1337,7 +1395,9 @@ class Checker:
                 raise TilaError("TILA-TYPE-019",
                                 f"'not' requires bool scalar, found "
                                 f"{TY.describe(v.vtype)}", e.loc)
-            return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate), tir=T.TUna(
+            return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate),
+                lit=self._const_eval_bool(e),
+                is_const=self._static_cond_syms(e) is not None, tir=T.TUna(
                 v.vtype, "not", self._operand_of(v, e.operand, out)))
         if e.op == "~":
             if self._is_boolean(v):
@@ -1395,6 +1455,21 @@ class Checker:
     def _cmp(self, e: Cmp, out):
         l = self.synth(e.left, out)
         r = self.synth(e.right, out)
+        if self._is_boolean(l) or self._is_boolean(r):
+            ls, lo, lp = self._boolean_operand(l, e.left, out)
+            rs, ro, rp = self._boolean_operand(r, e.right, out)
+            if e.op not in ("==", "!="):
+                raise TilaError("TILA-TYPE-026", "bool comparisons support only == and !=", e.loc)
+            sh = self._broadcast(ls, rs, e.loc, "bool comparison shapes")
+            predicate = P.disjunction(P.conjunction(lp, rp),
+                                      P.conjunction(P.negate(lp), P.negate(rp)))
+            if e.op == "!=":
+                predicate = P.negate(predicate)
+            vt = TY.MaskT(sh) if sh else TY.ScalarT(D.bool_)
+            return VarInfo(vtype=vt, predicate=predicate,
+                           lit=self._const_eval_bool(e),
+                           is_const=self._static_cond_syms(e) is not None,
+                           tir=T.TBin(vt, e.op, lo, ro))
         dl, dr = self._dtype_of(l), self._dtype_of(r)
         if dl is not None or dr is not None:
             if l.lit is not None and r.lit is None and dr is not None:
@@ -1453,7 +1528,9 @@ class Checker:
         combine = P.conjunction if e.op == "and" else P.disjunction
         for value in vals[1:]:
             predicate = combine(predicate, value.predicate)
-        return VarInfo(vtype=TY.ScalarT(D.bool_), predicate=predicate, tir=tir)
+        return VarInfo(vtype=TY.ScalarT(D.bool_), predicate=predicate, tir=tir,
+                       lit=self._const_eval_bool(e),
+                       is_const=self._static_cond_syms(e) is not None)
 
     # ------------------------------------------------------------------
     # 内建分派（intrinsics.md §2）
@@ -1913,7 +1990,7 @@ class Checker:
                 ["move runtime validation into ordinary control flow, or make "
                  "the predicate depend only on Const[int] parameters"],
             )
-        if symbols:
+        if symbols or self.static_guards:
             value = self.synth(pred, out)
             if not (isinstance(value.vtype, TY.ScalarT) and
                     value.vtype.dtype is D.bool_):
@@ -1924,6 +2001,7 @@ class Checker:
                 "loc": e.loc,
                 "pred": self._operand_of(value, pred, out),
                 "symbols": tuple(sorted(symbols)),
+                "guards": tuple(self.static_guards),
             })
             return VarInfo(vtype=TY.UnitT())
         cval = self._const_eval_bool(pred)
