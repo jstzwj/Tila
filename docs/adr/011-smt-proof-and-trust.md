@@ -2,8 +2,8 @@
 
 - 状态：**Accepted**
 - 日期：2026-09-19
-- 实施状态：**Designed**；当前仍运行手写区间/DNF/grid 证明器，未集成 Z3
-- 归属：M2；整数精确语义依赖待定 ADR-007，GPU 验证衔接 M3
+- 实施状态：**Partial**；M2-02 已完成共享 DAG、ProofResult/信任来源及作用域隔离；当前仍运行区间/直接匹配/grid 快速路径，未集成 Z3
+- 归属：M2；整数语义由已接受的 [ADR-007](007-integer-semantics.md) 固定，GPU 验证衔接 M3
 
 ## 背景与决定
 
@@ -77,6 +77,16 @@ dependencies 是集合，允许多种来源共存。`SafeUnderContract` 保留�
   将候选反例和证明依据映射到 Tila 源码，保留可复现查询。
 
 ## 迁移和验收
+
+M2-02 实施记录：`predicates.py` 保存共享 And/Or/Not、未知值身份、比较位置及
+lane/broadcast 映射；`facts.py` 的不可变 ProofResult 由 checker、launch、explain
+共用。unsafe 是 Exempted；assume 以 UserAssumption 传播，实际 grid/assume_launch
+校验后才登记 CheckedLaunchContract。无 launch 的符号 grid 只显示 pending，
+不伪装成已检查契约。当前 hints 仅依赖结构性 StaticFact，不从 assume 推导。
+
+旧 DNF 构建已移除。结构原子提取及直接矛盾检查是保守快速路径，不替代一般
+Boolean/BitVec SMT 编码；否定、一般不可达性、预算和完整缓存仍由 M2-03 接续。
+迁移还修复了仅有上界也判安全、后置/分支/循环假设污染及行列 lane 混同。
 
 1. 完成 ADR-007 与整数边界测试，建立统一谓词/ProofResult 接口。
 2. 接入 Z3，在测试中对新旧路径做差异审计；重点检查“旧拒绝、新判安全”及

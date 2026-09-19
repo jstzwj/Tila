@@ -32,13 +32,14 @@
 |---|---|---|---|
 | M0 | 已完成 | 基线冻结与文档/API 对账 | 当前语法可构造，所有能力有唯一状态，文档不超前承诺 |
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
-| M2 | 计划中 | CPU 正确性与静态证明闭环 | 整数语义、默认 SMT、信任来源、预算、interpreter 和审计稳定 |
+| M2 | 进行中 | CPU 正确性与静态证明闭环 | M2-01 整数语义/门禁、M2-02 DAG/信任来源已完成；默认 SMT、预算和完整审计待做 |
 | M3 | 计划中 | Triton/CUDA 后端闭环 | 固定支持矩阵、GPU CI、CPU/GPU differential、hint 验证 |
 | M4 | 计划中 | Effect、Atomic、Race、Uniformity | per-instruction effect 与最小并发安全闭环 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
 | M6 | 计划中 | 优化事实、性能诊断与 Layout | hint provenance、结构性性能 warning、layout 评审 |
 
-M0/M1 已完成，下一阶段是 M2。M2–M6 的“计划中”不表示相应能力已经可用。
+M0/M1 已完成，M2-01/02 已落地，下一任务是 M2-03。M2 尚未退出，M3–M6 的
+“计划中”不表示相应能力已经可用。
 
 ---
 
@@ -160,6 +161,9 @@ M0 不负责扩充语言表面积。发现文档超前时，默认先降为 `Par
 - 明确整数、归约、NaN、bf16 等 interpreter 语义；
 - 为所有 Implemented intrinsic 提供 interpreter 路径；
 - 增加 property/metamorphic tests 和 explain golden。
+
+进度：M2-01 已完成，新增保守整数门禁及独立 GPU 整数 differential；详见
+[ADR-007](adr/007-integer-semantics.md)。现有本地 GPU 证据不代替 M3 的 CI 退出条件。
 
 测试期间审计新旧证明路径差异，再切换默认并退役复杂手写推理。独立推进
 布尔 tile mask 设计；Const bool、宿主整数白名单和显式舍入常量先评审再开放，

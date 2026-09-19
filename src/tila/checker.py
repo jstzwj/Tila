@@ -6,6 +6,8 @@ bounds 预证明；Unknown 义务与延迟 shape 约束留到特化期（runtime
 """
 
 from __future__ import annotations
+from dataclasses import replace
+from . import predicates as P
 
 from . import dtypes as D
 from .dims import (Cst, DimExpr, FloorDiv, Mod, Sym, canon, equal, free_syms)
@@ -20,15 +22,15 @@ from .intrinsics import call_shape_problem, get_intrinsic
 
 
 class VarInfo:
-    __slots__ = ("vtype", "expr", "mask_preds", "lit", "is_const",
+    __slots__ = ("vtype", "expr", "predicate", "lit", "is_const",
                  "contiguous_span", "maybe_undefined", "tir", "static_variant")
 
-    def __init__(self, vtype=None, expr=None, mask_preds=None, lit=None,
+    def __init__(self, vtype=None, expr=None, predicate=None, lit=None,
                  is_const=False, contiguous_span=None, maybe_undefined=False,
                  tir=None, static_variant=None):
         self.vtype = vtype
         self.expr = expr              # DimExpr：i32 值的符号式
-        self.mask_preds = mask_preds or []
+        self.predicate = predicate if predicate is not None else P.unknown()
         self.lit = lit                # Python 字面量（语境多态）
         self.is_const = is_const
         self.contiguous_span = contiguous_span
@@ -38,7 +40,7 @@ class VarInfo:
         #                                          两分支类型不同的变体名
 
     def clone(self):
-        return VarInfo(self.vtype, self.expr, list(self.mask_preds), self.lit,
+        return VarInfo(self.vtype, self.expr, self.predicate, self.lit,
                        self.is_const, self.contiguous_span,
                        self.maybe_undefined, self.tir, self.static_variant)
 
@@ -104,6 +106,7 @@ class Checker:
         self.vars: dict[str, VarInfo] = {}
         self.nonneg_syms: set[str] = set()
         self.lane_counter = 0
+        self.lane_axes = {}  # symbol -> right-relative tile axes (scalar symbols absent)
         self.loop_stack: list[dict] = []
         self.regions: dict[str, TY.RegionId] = {}
         self.tk = T.TKernel(kern.name, [], [], [], [])
@@ -176,8 +179,7 @@ class Checker:
                                             expr=Sym(p.name), is_const=True)
                 if spec.default is not None:
                     self.facts.num[p.name] = spec.default
-                    if spec.default >= 0:
-                        self.nonneg_syms.add(p.name)
+                self._register_refinement_facts(p.name, D.i32, spec.refinements)
             elif isinstance(spec, (TY.RefinedScalar, TY.ScalarT)):
                 if isinstance(spec, TY.RefinedScalar):
                     dt, refins = spec.dtype, spec.refinements
@@ -201,7 +203,8 @@ class Checker:
                 continue
             self.tk.scalars.append(T.TScalarParam(s, D.i32, ()))
             self.vars[s] = VarInfo(vtype=TY.ScalarT(D.i32), expr=Sym(s))
-            self.nonneg_syms.add(s)      # 维/步长/Ptr extent 符号：非负
+            if "_stride" not in s:
+                self.nonneg_syms.add(s)  # strides may be negative
         self.tk.implicit_names = {s for s in implicit}
         self.tk.param_order = order
         for i, left in enumerate(external_regions):
@@ -251,8 +254,10 @@ class Checker:
 
     def run(self) -> T.TKernel:
         self.stmts(self.kern.body, self.tk.body)
+        proof_facts = self.facts.clone()
+        proof_facts.preds = {}  # Only access-point snapshots may supply assumptions.
         for ob in self.tk.obligations:
-            if evaluate_obligation(ob, self.facts, self.nonneg_syms) == \
+            if evaluate_obligation(ob, proof_facts, self.nonneg_syms).verdict == \
                     PROVEN_UNSAFE:
                 raise TilaError(
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
@@ -305,6 +310,8 @@ class Checker:
                 if dt is not None and dt.is_int:
                     self.lane_counter += 1
                     v.expr = Sym(f"__v{self.lane_counter}")
+                    if shape_of(v):
+                        self.lane_axes[v.expr.name] = tuple(range(-len(shape_of(v)), 0))
             # loop-carried 类型稳定（type-system.md §10.2）
             for ctx in self.loop_stack:
                 if s.target in ctx and not self._same_type(
@@ -316,12 +323,15 @@ class Checker:
                         [f"    before loop: {TY.describe(ctx[s.target].vtype)}",
                          f"    in loop:     {TY.describe(v.vtype)}"])
             self.vars[s.target] = VarInfo(v.vtype, v.expr,
-                                          list(v.mask_preds), v.lit,
+                                          v.predicate, v.lit,
                                           v.is_const, v.contiguous_span)
             out.append(T.TAssign(s.target, self._operand_of(v, s.value, out),
                                  line=s.loc.line))
             if v.contiguous_span is not None:
                 self.tk.hints.append((s.target, v.contiguous_span))
+                self.tk.hint_origins.setdefault(s.target, set()).add(
+                    P.Origin(P.STATIC, s.loc.line,
+                             "structural contiguous span; integer launch guards required"))
         elif isinstance(s, ExprStmt):
             if s.value is None:
                 return
@@ -373,18 +383,21 @@ class Checker:
 
         snap_vars = {k: v.clone() for k, v in self.vars.items()}
         snap_facts = self.facts.clone()
+        self.facts.path = P.conjunction(snap_facts.path, cv.predicate)
         then_out: list = []
         then_term = self.stmts(s.then_body, then_out)
         then_vars, then_facts = self.vars, self.facts
 
         self.vars = {k: v.clone() for k, v in snap_vars.items()}
         self.facts = snap_facts.clone()
+        self.facts.path = P.conjunction(snap_facts.path, P.negate(cv.predicate))
         else_out: list = []
         else_term = self.stmts(s.else_body, else_out)
 
         self.vars = self._merge_branches(s.loc, snap_vars, then_vars,
-                                         self.vars)
+                                         self.vars, cv.predicate)
         self.facts = then_facts.intersect(self.facts)
+        self.facts.path = snap_facts.path
         out.append(T.TIf(self._operand_of(cv, s.cond, out), then_out,
                          else_out, line=s.loc.line))
         return self._terminated_join(s, then_term, else_term)
@@ -398,7 +411,7 @@ class Checker:
             return True
         return False
 
-    def _merge_branches(self, loc, before, a, b):
+    def _merge_branches(self, loc, before, a, b, condition):
         out = {}
         for name in set(before) | set(a) | set(b):
             va, vb, v0 = a.get(name), b.get(name), before.get(name)
@@ -410,12 +423,7 @@ class Checker:
                          f"    then: {TY.describe(va.vtype)}",
                          f"    else: {TY.describe(vb.vtype)}"])
                 m = va.clone()
-                # mask 谓词为 DNF 子句：仅保留两分支都成立的子句
-                # （按子句谓词 key 集合求交；保守正确）
-                b_keys = {tuple(sorted(p.key() for p in c))
-                          for c in vb.mask_preds}
-                m.mask_preds = [c for c in va.mask_preds
-                                if tuple(sorted(p.key() for p in c)) in b_keys]
+                m.predicate = P.select(condition, va.predicate, vb.predicate)
                 if va.expr is not None and vb.expr is not None and \
                         canon(va.expr) == canon(vb.expr):
                     m.expr = va.expr
@@ -440,7 +448,7 @@ class Checker:
                              f"    assigned: {TY.describe(v.vtype)}",
                              f"    before:   {TY.describe(v0.vtype)}"])
                     m = v0.clone()
-                    m.expr, m.mask_preds, m.contiguous_span = None, [], None
+                    m.expr, m.predicate, m.contiguous_span = None, P.unknown(), None
                     out[name] = m
             else:
                 out[name] = v0.clone()
@@ -460,29 +468,32 @@ class Checker:
                              f"parameters (resolved at specialization)")
         snap_vars = {k: v.clone() for k, v in self.vars.items()}
         snap_facts = self.facts.clone()
+        self.facts.path = P.conjunction(snap_facts.path, cv.predicate)
         then_out: list = []
         then_term = self.stmts(s.then_body, then_out)
         then_vars, then_facts = self.vars, self.facts
 
         self.vars = {k: v.clone() for k, v in snap_vars.items()}
         self.facts = snap_facts.clone()
+        self.facts.path = P.conjunction(snap_facts.path, P.negate(cv.predicate))
         else_out: list = []
         else_term = self.stmts(s.else_body, else_out)
 
         self.vars = self._merge_static_branches(s.loc, snap_vars, then_vars,
-                                               self.vars)
+                                               self.vars, cv.predicate)
         self.facts = then_facts.intersect(self.facts)
+        self.facts.path = snap_facts.path
         out.append(T.TStaticIf(self._operand_of(cv, s.cond, out), then_out,
                                else_out, line=s.loc.line))
         # 特化期分支唯一：双分支均终止 ⇒ 之后不可达（同 runtime-if）。
         return self._terminated_join(s, then_term, else_term)
 
-    def _merge_static_branches(self, loc, before, a, b):
+    def _merge_static_branches(self, loc, before, a, b, condition):
         """static-if 分支合并（放宽版）。
 
         - 两侧同类型（_same_type）或"特化相容"（_static_same_type：
           dtype/rank 相同且逐维 equal 或两侧均为纯 Const 符号式）→ 正常
-          合并（谓词按 DNF 子句求交、expr 仅 canon 相等保留，否则换保守
+          合并（谓词按条件选择保存、expr 仅 canon 相等保留，否则换保守
           代理符号——不携带区间事实，只支撑下游谓词直证）。
         - 两侧类型不相容 → static-variant：名字存在，使用点 TILA-TYPE-020。
         - 单侧赋值 → 同 runtime-if（maybe_undefined）；与 if 前类型不相容
@@ -495,17 +506,18 @@ class Checker:
                 if self._same_type(va.vtype, vb.vtype) or \
                         self._static_same_type(va.vtype, vb.vtype):
                     m = va.clone()     # 代表类型取 then 侧（特化期分支唯一）
-                    b_keys = {tuple(sorted(p.key() for p in c))
-                              for c in vb.mask_preds}
-                    m.mask_preds = [c for c in va.mask_preds
-                                    if tuple(sorted(p.key() for p in c))
-                                    in b_keys]
+                    m.predicate = P.select(condition, va.predicate, vb.predicate)
                     if va.expr is not None and vb.expr is not None:
                         if canon(va.expr) == canon(vb.expr):
                             m.expr = va.expr
                         else:
                             self.lane_counter += 1
                             m.expr = Sym(f"__sif{self.lane_counter}")
+                            if (is_nonneg_expr(va.expr, self.nonneg_syms) and
+                                    is_nonneg_expr(vb.expr, self.nonneg_syms)):
+                                self.nonneg_syms.add(m.expr.name)
+                            if shape_of(m):
+                                self.lane_axes[m.expr.name] = tuple(range(-len(shape_of(m)), 0))
                     else:
                         m.expr = None
                     m.contiguous_span = (va.contiguous_span
@@ -520,8 +532,8 @@ class Checker:
                 else:
                     m = va.clone()
                     m.static_variant = (va.vtype, vb.vtype)
-                    m.expr, m.mask_preds, m.contiguous_span, m.lit = \
-                        None, [], None, None
+                    m.expr, m.predicate, m.contiguous_span, m.lit = \
+                        None, P.unknown(), None, None
                     out[name] = m
             elif va is not None or vb is not None:
                 v = va or vb
@@ -533,13 +545,13 @@ class Checker:
                     if self._same_type(v.vtype, v0.vtype) or \
                             self._static_same_type(v.vtype, v0.vtype):
                         m = v0.clone()
-                        m.expr, m.mask_preds, m.contiguous_span = None, [], None
+                        m.expr, m.predicate, m.contiguous_span = None, P.unknown(), None
                         out[name] = m
                     else:
                         m = v.clone()
                         m.static_variant = (v.vtype, v0.vtype)
-                        m.expr, m.mask_preds, m.contiguous_span, m.lit = \
-                            None, [], None, None
+                        m.expr, m.predicate, m.contiguous_span, m.lit = \
+                            None, P.unknown(), None, None
                         out[name] = m
             else:
                 out[name] = v0.clone()
@@ -852,7 +864,9 @@ class Checker:
                     "(literal or Const parameter)", s.loc)
             step_op = T.TLit(step_v, D.i32)
 
-        loop_sym = Sym(f"__i_{s.var}")
+        loop_facts = self.facts.clone()
+        self.lane_counter += 1
+        loop_sym = Sym(f"__i_{s.var}_{self.lane_counter}")
         self.vars[s.var] = VarInfo(TY.ScalarT(D.i32), expr=loop_sym)
         # 归纳式：start <= i < end（sym_lo 含 / sym_hi 排他）。
         # 非负性只有起点结构非负时才登记（运行期负起点不能臆断）。
@@ -864,6 +878,23 @@ class Checker:
             self.nonneg_syms.add(loop_sym.name)
 
         before = dict(self.vars)        # 浅快照：未重赋值的名字保持同一对象
+        # Entry facts describe the initial value, not every iteration of a
+        # loop-carried value. Until invariant analysis exists, give carried
+        # values fresh identities before checking the body.
+        pending = list(s.body)
+        assigned = set()
+        while pending:
+            stmt = pending.pop()
+            if isinstance(stmt, Assign):
+                assigned.add(stmt.target)
+            elif isinstance(stmt, If):
+                pending.extend(stmt.then_body)
+                pending.extend(stmt.else_body)
+            elif isinstance(stmt, For):
+                pending.extend(stmt.body)
+        for name in assigned & before.keys():
+            if name != s.var:
+                self.vars[name] = self._forget_value(before[name])
         body_out: list = []
         self.loop_stack.append(before)
         # 循环体内的 return 按次终止该次迭代（body 块内部的不可达跳过
@@ -881,13 +912,26 @@ class Checker:
             if v is before[name]:
                 after[name] = v
             else:
-                m = v.clone()
-                m.expr, m.mask_preds, m.contiguous_span = None, [], None
-                after[name] = m
+                after[name] = self._forget_value(v)
         self.vars = after
+        # A loop can execute zero times; assumptions from its body do not
+        # dominate its exit. Each obligation retains its own interval snapshot.
+        self.facts = loop_facts
         out.append(T.TFor(s.var, self._operand_of(end, s.end, out), step_op,
                           body_out, line=s.loc.line, start=start_op))
         return False
+
+    def _forget_value(self, value):
+        out = value.clone()
+        out.expr, out.predicate, out.contiguous_span = None, P.unknown(), None
+        out.lit, out.is_const = None, False
+        dtype = self._dtype_of(out)
+        if dtype is not None and dtype.is_int:
+            self.lane_counter += 1
+            out.expr = Sym(f"__v{self.lane_counter}")
+            if shape_of(out):
+                self.lane_axes[out.expr.name] = tuple(range(-len(shape_of(out)), 0))
+        return out
 
     # ------------------------------------------------------------------
     # 表达式合成
@@ -941,6 +985,11 @@ class Checker:
             else:
                 vt = TY.MaskT(tuple(dims))
             m = v.clone()
+            remap = lambda expr: self._expand_index(expr, len(v.vtype.dims), e.axis)
+            if m.expr is not None:
+                m.expr = remap(m.expr)
+            m.predicate = P.map_atoms(v.predicate, remap, tuple(dims),
+                                      ("expand", e.axis, v.vtype.dims))
             m.vtype, m.contiguous_span, m.tir = vt, None, \
                 T.TExpand(vt, self._operand_of(v, e.value, out), e.axis)
             return m
@@ -1019,21 +1068,10 @@ class Checker:
                                 "mask combination requires two masks", e.loc)
             sh = self._broadcast(l.vtype.dims, r.vtype.dims, e.loc,
                                  "mask combination shapes")
-            # mask 谓词以 DNF 维护（bounds-safety.md §3.2）：
-            # mask_preds = 子句列表；子句 = 谓词列表（合取）。
-            #   A & B → 子句两两拼接（∧ 在析取范式上的分配律）
-            #   A | B → 子句并列（每个子句独立证明）
-            if e.op == "&":
-                clauses = [a + b for a in l.mask_preds for b in r.mask_preds]
-            else:
-                # `|`：零子句（无可提取谓词，如 float 比较）的一侧以空子句
-                # [[]] 参与——空子句在任何义务下都不可证，防止把另一侧的
-                # 子句误当作整个析取的必要条件（soundness）。
-                lc = l.mask_preds or [[]]
-                rc = r.mask_preds or [[]]
-                clauses = [list(c) for c in lc] + [list(c) for c in rc]
+            combine = P.conjunction if e.op == "&" else P.disjunction
+            clauses = combine(l.predicate, r.predicate)
             vt = TY.MaskT(sh)
-            return VarInfo(vtype=vt, mask_preds=clauses,
+            return VarInfo(vtype=vt, predicate=clauses,
                            tir=T.TBin(vt, e.op,
                                       self._operand_of(l, e.left, out),
                                       self._operand_of(r, e.right, out)))
@@ -1125,6 +1163,9 @@ class Checker:
                              "binary operand shapes")
         vt = TY.ScalarT(dt) if sh == () else TY.BlockT(TY.ScalarT(dt), sh)
         m = VarInfo(vtype=vt)
+        for operand in (l, r):
+            if type(operand.lit) is int:
+                operand.expr = Cst(operand.lit)
         if l.expr is not None and r.expr is not None and dt.is_int:
             if e.op == "+":
                 m.expr = l.expr + r.expr
@@ -1145,7 +1186,31 @@ class Checker:
                         break
         m.tir = T.TBin(vt, e.op, self._operand_of(l, e.left, out),
                        self._operand_of(r, e.right, out))
+        if dt.is_int:
+            m.tir.staged = (e.op in ("+", "-", "*", "//", "%") and
+                            self._is_const_index(l.expr) and
+                            self._is_const_index(r.expr))
+            m.tir.operand_dtype = dt
+            self._guard_index_math(m)
         return m
+
+    def _guard_index_math(self, value):
+        """Only retain mathematical index facts behind a launch overflow gate.
+
+        Data-dependent arithmetic remains modular and gets a fresh value identity;
+        it must be bounded by masks on the actual result, not mathematical rewrites.
+        """
+        if value.expr is None or value.tir.staged:
+            return
+        symbols = free_syms(value.expr)
+        trusted = (self.tk.implicit_names |
+                   {c.name for c in self.tk.consts})
+        if any(s not in trusted and not s.startswith(("pid", "__lane", "__i_"))
+               for s in symbols):
+            value.expr = None
+            value.contiguous_span = None
+        else:
+            value.tir.checked_index = True
 
     def _unaop(self, e: UnaOp, out):
         v = self.synth(e.operand, out)
@@ -1155,14 +1220,12 @@ class Checker:
                 raise TilaError("TILA-TYPE-019",
                                 f"'not' requires bool scalar, found "
                                 f"{TY.describe(v.vtype)}", e.loc)
-            return VarInfo(vtype=v.vtype, tir=T.TUna(
+            return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate), tir=T.TUna(
                 v.vtype, "not", self._operand_of(v, e.operand, out)))
         if e.op == "~":
             if isinstance(v.vtype, TY.MaskT):
-                # ~ 的谓词信息保守丢弃：单个空子句 = "可为真但无已知约束"，
-                # 任何义务在它之下都不可由 mask 证明（保持 sound 保守性，
-                # bounds-safety.md §3.2）
-                return VarInfo(vtype=v.vtype, mask_preds=[[]],
+                # Preserve negation and shared identity for the general solver.
+                return VarInfo(vtype=v.vtype, predicate=P.negate(v.predicate),
                                tir=T.TUna(v.vtype, "~",
                                           self._operand_of(v, e.operand, out)))
             dt = self._dtype_of(v)
@@ -1191,13 +1254,16 @@ class Checker:
             m.expr = v.expr * Cst(-1)
         m.tir = T.TUna(v.vtype, "-",
                        self._operand_of(v, e.operand, out))
+        if dt.is_int:
+            m.tir.staged = self._is_const_index(v.expr)
+            self._guard_index_math(m)
         return m
 
     @staticmethod
     def _cmp_index_expr(v: VarInfo):
         """比较参与者的符号索引式：int 字面量折为 Cst。
 
-        使 `offs < 1000` 这类对常量的比较也产生谓词（进入 mask DNF /
+        使 `offs < 1000` 这类对常量的比较也产生谓词（进入 mask DAG /
         assume 事实）；float 与无符号身份的值仍返回 None。
         """
         if v.expr is not None:
@@ -1230,17 +1296,22 @@ class Checker:
         pred = None
         le, re = self._cmp_index_expr(l), self._cmp_index_expr(r)
         if le is not None and re is not None:
-            pred = Pred(e.op, le, re)
+            pred = Pred(e.op, le, re, frozenset({P.Origin(P.STATIC, e.loc.line, "comparison")}))
+        predicate = P.atom(pred, e.loc.line, sh) if pred else P.unknown(e.loc.line, sh)
         if sh == ():
             vt = TY.ScalarT(D.bool_)
-            return VarInfo(vtype=vt, tir=T.TBin(
+            return VarInfo(vtype=vt, predicate=predicate, tir=T.TBin(
                 vt, e.op, self._operand_of(l, e.left, out),
-                self._operand_of(r, e.right, out)))
+                self._operand_of(r, e.right, out),
+                staged=self._const_dim_expr(e.left) is not None and
+                       self._const_dim_expr(e.right) is not None,
+                operand_dtype=D.common_type(dl, dr) if dl and dr else None))
         vt = TY.MaskT(sh)
-        # 单个比较 → 单子句单谓词的 DNF（bounds-safety.md §3.2）
-        return VarInfo(vtype=vt, mask_preds=[[pred]] if pred else [],
+        # Comparisons retain source locations and tile shape in the DAG.
+        return VarInfo(vtype=vt, predicate=predicate,
                        tir=T.TBin(vt, e.op, self._operand_of(l, e.left, out),
-                                  self._operand_of(r, e.right, out)))
+                                  self._operand_of(r, e.right, out),
+                                  operand_dtype=D.common_type(dl, dr) if dl and dr else None))
 
     def _boolop(self, e: BoolOp, out):
         vals = [self.synth(v, out) for v in e.values]
@@ -1258,7 +1329,11 @@ class Checker:
         for v, he in zip(vals[1:], e.values[1:]):
             tir = T.TBin(TY.ScalarT(D.bool_), e.op, tir,
                          self._operand_of(v, he, out))
-        return VarInfo(vtype=TY.ScalarT(D.bool_), tir=tir)
+        predicate = vals[0].predicate
+        combine = P.conjunction if e.op == "and" else P.disjunction
+        for value in vals[1:]:
+            predicate = combine(predicate, value.predicate)
+        return VarInfo(vtype=TY.ScalarT(D.bool_), predicate=predicate, tir=tir)
 
     # ------------------------------------------------------------------
     # 内建分派（intrinsics.md §2）
@@ -1356,9 +1431,11 @@ class Checker:
                             f"(got {start}..{end_v})", e.loc)
         self.lane_counter += 1
         lane = Sym(f"__lane{self.lane_counter}")
-        self.facts.sym_lo[lane.name] = Cst(0)
-        self.facts.sym_hi[lane.name] = dim
-        self.nonneg_syms.add(lane.name)
+        self.lane_axes[lane.name] = (-1,)
+        self.facts.sym_lo[lane.name] = Cst(start)
+        self.facts.sym_hi[lane.name] = end_dim
+        if start >= 0:
+            self.nonneg_syms.add(lane.name)
         vt = TY.BlockT(TY.ScalarT(D.i32), (dim,))
         return VarInfo(vtype=vt, expr=lane, contiguous_span=dim,
                        tir=T.TArange(vt, start, end_op))
@@ -1477,9 +1554,12 @@ class Checker:
             vt = TY.BlockT(TY.ScalarT(dt), v.vtype.dims)
         else:
             vt = TY.ScalarT(dt)
-        return VarInfo(vtype=vt, tir=T.TCast(vt, dt,
-                                             self._operand_of(v, e.args[0],
-                                                              out)))
+        source_dt = self._dtype_of(v)
+        preserves = (source_dt and source_dt.is_int and dt.is_int and
+                     D._INT_RANGE[dt][0] <= D._INT_RANGE[source_dt][0] and
+                     D._INT_RANGE[source_dt][1] <= D._INT_RANGE[dt][1])
+        return VarInfo(vtype=vt, expr=v.expr if preserves else None,
+                       tir=T.TCast(vt, dt, self._operand_of(v, e.args[0], out)))
 
     def _in_where(self, e, out):
         if len(e.args) != 3:
@@ -1673,24 +1753,24 @@ class Checker:
         if not ok:
             raise TilaError("TILA-TYPE-034",
                             "assume predicate must be bool/Mask", e.loc)
-        # v.mask_preds 为 DNF 子句（bounds-safety.md §3.2）。
-        # 只有单一（非空）合取子句可以整体注入事实环境：
-        # 析取（|）不是 sound 的全局事实——某个析取支为真不保证其余为真。
-        clauses = v.mask_preds
-        if len(clauses) > 1:
+        # Preserve the current surface-language restriction; the internal DAG
+        # can represent disjunction without treating its branches as facts.
+        if not P.is_conjunction(v.predicate):
             raise TilaError(
                 "TILA-CONST-004",
-                "assume predicate must be a conjunction: a disjunction "
-                "cannot be assumed as a global fact", e.loc,
-                [], ["拆分为逐条合取：ti.assume(a & b)（| 的两支不能同时假定）"])
-        if not clauses or not clauses[0]:
+                "assume currently requires a symbolic conjunction; "
+                "disjunction/negation support is deferred", e.loc,
+                [], ["仅在各条件均为真时使用 ti.assume(a & b)，不能把析取拆成合取"])
+        atoms = P.guaranteed(v.predicate)
+        if not atoms:
             raise TilaError(
                 "TILA-CONST-004",
                 "assume predicate must be symbolically expressible "
                 "(comparisons over index values)", e.loc,
                 [], ["数据依赖的谓词无法进入证明器；如确信安全，用 unsafe_load"])
-        for p in clauses[0]:
-            self.facts.add_pred(p)
+        for p in atoms:
+            self.facts.add_pred(replace(p, origins=frozenset({
+                P.Origin(P.USER, e.loc.line, f"assume({p.left} {p.op} {p.right})")})))
         out.append(T.TAssume(self._operand_of(v, e.args[0], out),
                              line=e.loc.line))
         return VarInfo(vtype=TY.UnitT())
@@ -1816,12 +1896,37 @@ class Checker:
             return list(arg.items)
         return [arg]
 
-    def _mask_preds_of(self, mv: VarInfo):
-        return list(mv.mask_preds)
+    def _expand_index(self, expr, rank, inserted_axis):
+        """Tile lane identities include their axes, so row and column views
+        of the same vector cannot prove bounds for one another.
+        Right-relative axes also make implicit left-padding broadcast stable.
+        """
+        if isinstance(expr, Cst):
+            return expr
+        if isinstance(expr, Sym):
+            axes = self.lane_axes.get(expr.name)
+            if axes is None:
+                return expr
+            new_axes = tuple(a - (rank + a < inserted_axis) for a in axes)
+            if new_axes == axes:
+                return expr
+            name = expr.name.split("@")[0] + "@" + ",".join(map(str, new_axes))
+            self.lane_axes[name] = new_axes
+            for bounds in (self.facts.sym_lo, self.facts.sym_hi):
+                if expr.name in bounds:
+                    bounds[name] = bounds[expr.name]
+            if expr.name in self.nonneg_syms:
+                self.nonneg_syms.add(name)
+            return Sym(name)
+        return type(expr)(self._expand_index(expr.left, rank, inserted_axis),
+                          self._expand_index(expr.right, rank, inserted_axis))
+
+    def _predicate_of(self, mv: VarInfo):
+        return mv.predicate
 
     def _check_mask(self, e, kw, expect_shape, out):
         if "mask" not in kw:
-            return None, []
+            return None, P.TRUE
         mv = self.synth(kw["mask"], out)
         if not isinstance(mv.vtype, TY.MaskT):
             raise TilaError("TILA-SHAPE-010",
@@ -1835,16 +1940,17 @@ class Checker:
                     e.loc,
                     [f"    mask: {mv.vtype.describe()}",
                      f"    access shape: ({', '.join(map(str, expect_shape))})"])
-        return mv, self._mask_preds_of(mv)
+        return mv, P.mapped(mv.predicate, expect_shape,
+                            ("broadcast", mv.vtype.dims, expect_shape))
 
     def _snapshot_preds(self):
-        return list(self.facts.preds.values())
+        return tuple(self.facts.preds.values())
 
-    def _add_obligation(self, kind, source, axis, coord, extent, mask_preds,
+    def _add_obligation(self, kind, source, axis, coord, extent, predicate,
                         loc_line):
-        ob = Obligation(kind, source, axis, coord, extent, mask_preds,
-                        loc_line)
-        ob.preds_snapshot = self._snapshot_preds()
+        ob = Obligation(kind, source, axis, coord, extent, predicate,
+                        loc_line, self._snapshot_preds(), self.facts.path,
+                        tuple(self.facts.sym_lo.items()), tuple(self.facts.sym_hi.items()))
         self.tk.obligations.append(ob)
         return ob
 
@@ -1878,6 +1984,9 @@ class Checker:
         coords = [self.synth(c, out) for c in coords_e]
         shape = ()
         for cv in coords:
+            if type(cv.lit) is int:
+                self._instantiate(cv.lit, D.i32, e.loc)
+                cv.vtype, cv.expr = TY.ScalarT(D.i32), Cst(cv.lit)
             dt = self._dtype_of(cv)
             if dt is None or not dt.is_int:
                 raise TilaError("TILA-TYPE-035",
@@ -1889,7 +1998,7 @@ class Checker:
         if shape == ():
             shape = ()
 
-        mask_v, mask_preds = self._check_mask(e, e.kwargs, shape, out)
+        mask_v, predicate = self._check_mask(e, e.kwargs, shape, out)
 
         if is_store:
             val = self.synth(e.args[2], out)
@@ -1920,7 +2029,7 @@ class Checker:
             for i, cv in enumerate(coords):
                 self._add_obligation(kind, bname, i, cv.expr
                                      if cv.expr is not None else None,
-                                     bt.dims[i], mask_preds, e.loc.line)
+                                     bt.dims[i], predicate, e.loc.line)
             out.append(T.TStore(
                 bname, [self._operand_of(cv, ce, out)
                         for cv, ce in zip(coords, coords_e)],
@@ -1952,7 +2061,7 @@ class Checker:
         for i, cv in enumerate(coords):
             self._add_obligation(kind, bname, i,
                                  cv.expr if cv.expr is not None else None,
-                                 bt.dims[i], mask_preds, e.loc.line)
+                                 bt.dims[i], predicate, e.loc.line)
         return VarInfo(vtype=vt, tir=T.TLoad(
             vt, bname,
             [self._operand_of(cv, ce, out)
@@ -1969,7 +2078,7 @@ class Checker:
         region_id = base_pt.region_id
         source_name = getattr(region_id, "name", "unknown")
         shape = shape_of(head)
-        mask_v, mask_preds = self._check_mask(e, e.kwargs, shape, out)
+        mask_v, predicate = self._check_mask(e, e.kwargs, shape, out)
 
         if is_store:
             if len(e.args) != 2:
@@ -1996,7 +2105,7 @@ class Checker:
             kind = "unsafe_store" if unsafe else "store"
             self.tk.effects.append(T.TEffect("Write", region_id))
             self._add_obligation(kind, f"ptr:{source_name}", None,
-                                 head.expr, extent, mask_preds, e.loc.line)
+                                 head.expr, extent, predicate, e.loc.line)
             out.append(T.TStore(
                 None, [], self._operand_of(head, e.args[0], out),
                 self._operand_of(val, e.args[1], out),
@@ -2027,7 +2136,7 @@ class Checker:
         kind = "unsafe_load" if unsafe else "load"
         self.tk.effects.append(T.TEffect("Read", region_id))
         self._add_obligation(kind, f"ptr:{source_name}", None,
-                             head.expr, extent, mask_preds, e.loc.line)
+                             head.expr, extent, predicate, e.loc.line)
         return VarInfo(vtype=vt, tir=T.TLoad(
             vt, None, [], self._operand_of(head, e.args[0], out),
             self._operand_of(mask_v, e.kwargs["mask"], out)

@@ -9,6 +9,8 @@ grid 元素为 int / ti.cdiv(a, b) / callable(meta)；launch_auto 的 grid
 
 from __future__ import annotations
 
+from . import numeric
+
 import ast
 import dataclasses
 import os
@@ -92,7 +94,8 @@ def _render_const_operand(node) -> str:
                 f"{_render_const_operand(node.right)})")
     return repr(node)
 _NP_DT = {np.dtype(dt.np_dtype).name: dt for dt in
-          (D.bool_, D.i8, D.i16, D.i32, D.i64, D.u8, D.f16, D.f32, D.f64)}
+          (D.bool_, D.i8, D.i16, D.i32, D.i64, D.u8, D.u16, D.u32, D.u64,
+           D.f16, D.f32, D.f64)}
 try:  # bf16：ml_dtypes 可用时 numpy bfloat16 数组可绑定（interp 同源）
     import ml_dtypes
     _NP_DT[np.dtype(ml_dtypes.bfloat16).name] = D.bf16
@@ -109,7 +112,10 @@ class _Cdiv:
     def value(self, meta: dict) -> int:
         a = self.a(meta) if callable(self.a) else self.a
         b = self.b(meta) if callable(self.b) else self.b
-        return -(-int(a) // int(b))
+        if type(a) is not int or type(b) is not int or a < 0 or b <= 0:
+            raise TilaLaunchContractError(
+                "TILA-TYPE-104", "cdiv grid requires exact integers a >= 0 and b > 0")
+        return -(-a // b)
 
 
 def cdiv(a, b):
@@ -132,6 +138,7 @@ class JITFunction:
         self.assume_launch = None                  # (preds, ast) 由装饰器注入
         self._kern_cache: dict = {}
         self.last_report: str = ""
+        self.last_proof_results: tuple = ()
 
     # ------------------------------------------------------------------
 
@@ -140,6 +147,8 @@ class JITFunction:
             return _Launcher(self, None)
         if not isinstance(grid, tuple):
             grid = (grid,)
+        if not 1 <= len(grid) <= 3:
+            raise TilaLaunchContractError("TILA-TYPE-104", "grid must have one to three axes")
         return _Launcher(self, grid)
 
     def launch_auto(self, *args, **kwargs):
@@ -162,12 +171,15 @@ class JITFunction:
         cenv = self._resolve_consts(consts)
         self._check_consts(cenv)
         self._check_deferred(cenv)
+        numeric_pending = numeric.validate(self.tk, cenv)
         # check/build 无 launch 数值：以符号 grid 契约代位（纯 pid 坐标 +
         # 维符号上界 ⇒ grid_ax == bound, step 1）。launch 期以数值复核
         # （精确维登记不匹配 ⇒ 无事实 ⇒ 义务失败拒绝执行），契约由
         # launcher 强制，此推导 sound。
         self._evaluate_obligations(cenv, grid_facts=self._symbolic_grid_facts(),
-                                   extra_preds=[])
+                                   extra_preds=[], launch_checked=False)
+        if numeric_pending:
+            self.last_report += "\n  integer launch contracts pending: " + "; ".join(dict.fromkeys(numeric_pending))
         src = lowering.Lowering(self.tk, _debug()).kernel_source()
         return src, self.tk.dump()
 
@@ -210,13 +222,12 @@ class JITFunction:
         不 raise）、不改动 tk / last_report。Const 解析同 materialize
         （缺值 raise TILA-CONST-007，精化违反 raise TILA-CONST-003）。
 
-        已知局限（有意不改 checker，见任务边界）：
+        当前边界：
         - grid 事实是 launch 期由 launcher / launch analysis 登记的契约，
           explain 的 Facts 里 grid_facts 为空——依赖 cdiv 战术（SafeUnder-
           Contract）的义务此处显示 Unknown 并注明，launch 时重新评估；
-        - checker 的 assume 全局谓词不持久化到 TKernel（只有 sym_hi/lo/
-          nonneg 快照）；但每条义务自带 preds_snapshot（访问点快照），
-          assume 路线的证明经由它照常渲染。
+        - 每条义务自带访问点的 predicates/path/interval 快照，保留 assume
+          来源；检查、launch 和 explain 共享不可变 ProofResult。
         """
         tk = self.tk
         cenv = self._resolve_consts(consts)
@@ -234,6 +245,10 @@ class JITFunction:
         L.append("  note: grid facts are launch-time contracts and are not "
                  "registered here; obligations relying on the cdiv tactic "
                  "may prove (SafeUnderContract) at launch")
+        pending = numeric.validate(tk, cenv)
+        if pending:
+            L.append("integer launch contracts (must pass before execution):")
+            L.extend("  " + msg for msg in dict.fromkeys(pending))
 
         L.append("types:")
         if tk.types:
@@ -264,6 +279,8 @@ class JITFunction:
         if tk.hints:
             for var, span in tk.hints:
                 L.append(f"  max_contiguous({var}, {span})")
+                for origin in sorted(tk.hint_origins.get(var, ())):
+                    L.append(f"    dependency: {origin.kind} at line {origin.line}: {origin.detail}")
         else:
             L.append("  (none)")
 
@@ -468,32 +485,40 @@ class JITFunction:
                     )
 
     def _evaluate_obligations(self, cenv: dict, grid_facts: dict,
-                              extra_preds: list):
+                              extra_preds: list, launch_checked=True):
+        from dataclasses import replace
+        from . import predicates as P
         facts = Facts()
         facts.num = dict(cenv)
         facts.grid_facts = grid_facts
+        facts.grid_checked = launch_checked
         facts.sym_hi = dict(self.tk.sym_hi)
         facts.sym_lo = dict(self.tk.sym_lo)
         for p in extra_preds:
-            facts.add_pred(p)
+            if launch_checked:
+                facts.add_pred(replace(p, origins=frozenset({
+                    P.Origin(P.CHECKED, detail="validated assume_launch predicate")})))
         results = []
         warn_diags = []
         for ob in self.tk.obligations:
-            state = evaluate_obligation(ob, facts, self.tk.nonneg_syms)
-            results.append((ob, state))
+            nonneg = self.tk.nonneg_syms | {name for name, value in cenv.items() if value >= 0}
+            result = evaluate_obligation(ob, facts, nonneg)
+            state = result.verdict
+            results.append((ob, result))
             if state == PROVEN_UNSAFE:
                 raise TilaError(     # 无条件 error（任何模式，bounds-safety §6）
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
                     Loc(ob.loc_line), [f"    {ob.describe()}"],
                     ["修正坐标、补 mask，或 unsafe_load/unsafe_store"])
-            if state == UNKNOWN:
+            if state == UNKNOWN and not (not launch_checked and result.pending_contracts):
                 warn = self._raise_unknown(ob)
                 if warn is not None:
                     warn_diags.append(warn)
         self.last_report = "\n".join(
-            f"  {ob.describe()} -> {st}" +
-            ("  (under launch contract)" if st == SAFE_UNDER_CONTRACT else "")
+            f"  {ob.describe()} -> {st.summary}" +
+            ("  (pending launch contract)" if st.pending_contracts else "")
             for ob, st in results)
+        self.last_proof_results = tuple(results)
         if warn_diags:
             self.last_report += "\n" + "\n".join(warn_diags)
         return results
@@ -516,23 +541,21 @@ class JITFunction:
         return text
 
     def _unknown_error(self, ob) -> TilaError:
-        # mask 谓词为 DNF 子句（bounds-safety.md §3.2）：扫描每个子句的
-        # 每个谓词找"错维"候选（比较了本轴坐标但上界不是本轴维符号）。
-        # 若目标谓词已在某个子句中出现（析取下仅其余子句未证），这不是
-        # 错维情形——回落到 BOUNDS-001 的 every-clause 报告。
+        # Scan DAG atoms for wrong-dimension diagnostics, without DNF expansion.
+        # Atom presence here is diagnostic only and never establishes a proof.
         from .dims import canon
         wrong = None
         goal_hit = False
         if ob.coord is not None and ob.extent is not None:
             goal_key = Pred("<", ob.coord, ob.extent).key()
-            for clause in ob.mask_preds:
-                for p in clause:
-                    if p.key() == goal_key:
-                        goal_hit = True
-                    elif p.op == "<" and \
-                            canon(p.left) == canon(ob.coord) and \
-                            canon(p.right) != canon(ob.extent):
-                        wrong = p
+            from .predicates import atoms
+            for p in atoms(ob.mask):
+                if p.key() == goal_key:
+                    goal_hit = True
+                elif p.op == "<" and \
+                        canon(p.left) == canon(ob.coord) and \
+                        canon(p.right) != canon(ob.extent):
+                    wrong = p
         if wrong is not None and not goal_hit:
             return TilaError(
                 "TILA-BOUNDS-002",
@@ -669,6 +692,7 @@ class _Launcher:
         for b in tk.buffers:
             t = tensors[b.name]
             dt, shape, strides, ptr = _tensor_info(t)
+            _check_index_metadata(shape, strides)
             if dt is not b.vtype.elem:
                 raise TilaLaunchContractError(
                     "TILA-TYPE-101",
@@ -705,6 +729,7 @@ class _Launcher:
         for p in tk.ptr_params:
             t = tensors[p.name]
             dt, shape, strides, ptr = _tensor_info(t)
+            _check_index_metadata(shape, strides)
             if dt is not p.vtype.elem:
                 raise TilaLaunchContractError(
                     "TILA-TYPE-101",
@@ -779,6 +804,15 @@ class _Launcher:
         # ---- Const 精化
         jf._check_consts(consts)
 
+        # Every implicit/explicit scalar crosses the same typed ABI boundary.
+        for s in tk.scalars:
+            if s.dtype.is_int:
+                v = scalar_vals[s.name]
+                lo, hi = numeric.limits(s.dtype)
+                if not lo <= v <= hi:
+                    raise TilaLaunchContractError(
+                        "TILA-NUM-001", f"scalar '{s.name}' does not fit {s.dtype.name}")
+
         # ---- grid 解析 + cdiv 模式登记（bounds-safety.md §5）
         meta = dict(dim_vals)
         meta.update(stride_vals)
@@ -801,15 +835,15 @@ class _Launcher:
                             Sym(step_sym) if isinstance(step_sym, str)
                             else Cst(step_sym))
                 else:
-                    gi = g(meta) if callable(g) else int(g)
+                    gi = g(meta) if callable(g) else g
                     # 精确维 grid：grid[ax] == 某维数值 ⇒ pid_ax < 该维（事实登记）
                     for dname, dval in dim_vals.items():
                         if dval == gi:
                             grid_facts[f"pid{ax}"] = (Sym(dname), Cst(1))
                             break
-                if gi < 0:
+                if type(gi) is not int or not 0 <= gi <= (1 << 31) - 1:
                     raise TilaLaunchContractError(
-                        "TILA-TYPE-104", f"grid[{ax}] must be >= 0, got {gi}")
+                        "TILA-TYPE-104", f"grid[{ax}] must be an exact int in [0, 2**31-1], got {gi}")
                 grid_ints.append(int(gi))
             grid = tuple(grid_ints)
 
@@ -830,6 +864,9 @@ class _Launcher:
 
         # ---- Stage 2：延迟约束 + 义务四态（strict/warn 由 TILA_SAFETY 决定）
         jf._check_deferred(consts)
+        if any(type(g) is not int or not 0 <= g <= (1 << 31) - 1 for g in grid):
+            raise TilaLaunchContractError("TILA-TYPE-104", "auto grid must fit nonnegative i32")
+        numeric.validate(tk, consts, scalar_vals, grid + (1,) * (3 - len(grid)))
         jf._evaluate_obligations(consts, grid_facts, extra_preds)
 
         # ---- 执行：torch+cuda+triton → GPU；否则 interp
@@ -854,8 +891,12 @@ class _Launcher:
             key = _triton_cache_key(jf, consts)
             if key not in jf._kern_cache:
                 src = lowering.Lowering(tk, _debug()).kernel_source()
-                ns: dict = {}
-                exec(compile(src, f"<tila:{tk.name}>", "exec"), ns)
+                # Triton retrieves Python source with inspect, including helpers.
+                import linecache
+                filename = f"<tila:{tk.name}:{id(jf)}:{_debug()}>"
+                linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
+                ns: dict = {"__name__": "tila_generated"}
+                exec(compile(src, filename, "exec"), ns)
                 jf._kern_cache[key] = ns[tk.name]
             kern = jf._kern_cache[key]
             # 实参序 = 签名序：buffer 张量 → ptr 参数张量 → 标量 → Const
@@ -950,6 +991,15 @@ def _bind_dim(dim_vals: dict, de: DimExpr, value: int, bname: str, axis: int):
     raise TilaLaunchContractError(
         "TILA-TYPE-102",
         f"buffer '{bname}' axis {axis}: unsupported shape expression {de}")
+
+
+def _check_index_metadata(shape, strides):
+    if any(not 0 <= n <= (1 << 31) - 1 for n in shape):
+        raise TilaLaunchContractError("TILA-NUM-001", "shape dimensions must fit nonnegative i32")
+    if any(not -(1 << 31) <= s <= (1 << 31) - 1 for s in strides):
+        raise TilaLaunchContractError("TILA-NUM-001", "element strides must fit i32")
+    if sum(max(0, n - 1) * abs(s) for n, s in zip(shape, strides)) > (1 << 63) - 1:
+        raise TilaLaunchContractError("TILA-NUM-001", "linear element offset must fit i64")
 
 
 def _tensor_info(t):

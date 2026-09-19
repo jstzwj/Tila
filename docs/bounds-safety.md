@@ -7,7 +7,8 @@
 边界检查是 Tila 的杀手级特性：**每个内存访问都必须被证明在界内**，
 证明的输入是类型系统的 shape 声明与 refinement 事实。M2 采用
 [ADR-011](adr/011-smt-proof-and-trust.md) 的 SMT 默认引擎：数学整数与
-有限位宽整数分别编码；当前实现仍是区间/DNF/grid 手写证明器。
+有限位宽整数分别编码（M2-03 待实现）。当前 M2-02 已使用不可变谓词 DAG、
+ProofResult 与来源集合，求解仍限于区间/直接匹配/grid 快速路径。
 
 ---
 
@@ -113,16 +114,20 @@ consider: cm = cols < N
 
 ### 3.2 Mask 组合
 
-当前实现的谓词按 **DNF 子句**组织：`&` 对子句做笛卡尔积、`|` 拼接子句、`~`
-保守地产生空子句（不携带可证信息）。证明器对每个子句独立做合取推理：
-义务的证明要求目标谓词在**每一个**子句下成立
-（`(C1 ∨ C2) ⇒ G ⟺ (C1 ⇒ G) ∧ (C2 ⇒ G)`）。`~` 引入的空子句使证明退化为
-Unknown（sound 保守），不产生错误 hint。比较操作数为字面量时同样
-产生谓词（`offs < 1000` 是合法谓词）。
+M2-02 已用共享、不可变的 **谓词 DAG** 保存 `And/Or/Not`，不分配展开 DNF。
+未知布尔值保留稳定身份；比较节点保留源位置和 shape，展开/broadcast 节点保留
+轴映射。同一向量的行视图和列视图使用不同 lane 身份，不能互相提供边界证明。
+运行期及 deferred-static 分支保留路径条件；分支赋值按条件选择保存谓词。
 
-M2 目标：用共享子表达式 DAG 保留 `And/Or/Not`，将 lane/broadcast 关系和
-路径条件一并编码到 SMT，不再强制展开 DNF；`~` 在支持的编码内直接表示否定。
-这项迁移尚未完成，当前 `~` 的保守边界仍以状态表为准。
+当前快速路径仅提取结构上必然成立的原子：And 取并集，Or 取共同原子，Not
+通常仍为 Unknown（公式本身不丢弃，双重否定等简单身份化简除外）。一般逻辑蕴含
+和否定编码留给 M2-03。比较含字面量时同样产生谓词。每条安全结论必须同时证明
+上下界；数据依赖索引通常需要 `(idx >= 0) & (idx < N)`。
+
+M2-01 已先加入整数 launch 门禁：保留数学表达式的索引节点须逐个验证无溢出，
+即使最终表达式发生抵消也不能省略中间检查。普通数据运算使用新符号身份，
+通过实际结果 mask 约束。materialize/explain 会列出待 launch 验证的整数契约，
+实际访问前重验；详见 [ADR-007](adr/007-integer-semantics.md)。
 
 ---
 
@@ -211,20 +216,29 @@ Const/字面量），`grid_ax = ceildiv(bound, STEP)`；未使用的轴为 1。
 
 ## 6. 四态结论与诊断策略
 
-当前实现及兼容显示使用以下四态：
+当前 ProofResult 的 verdict 使用以下四态：
 
 | 状态 | 含义 | 默认处理 |
 |---|---|---|
 | `ProvenSafe` | 事实足以证明逐轴在界内 | 通过 |
-| `SafeUnderContract` | 证明依赖 launch 契约 | 通过（报告标注依赖） |
+| `Exempted` | unsafe 显式豁免当前访问，不表示安全 | 通过，保留豁免记录 |
 | `Unknown` | 证不出，也未证伪 | strict：error；warn：warning |
 | `ProvenUnsafe` | 事实可证越界 | **无条件 error**（任何模式） |
 
-M2 将结论与信任来源拆开：内部 verdict 为 ProvenSafe / ProvenUnsafe /
+M2-02 已将结论与信任来源拆开：内部 verdict 为 ProvenSafe / ProvenUnsafe /
 Unknown / Exempted，dependencies 独立记录 StaticFact、CheckedLaunchContract
 和 UserAssumption。`SafeUnderContract` 保留为显示摘要；有用户假设时必须
 同时标注。unsafe 仅为 Exempted，不能作为后续 proof 或 hint 的安全依据。
-这项迁移尚未实现；当前聚合报告不能视为完整的信任来源审计。
+ProofResult 同时记录 trace、source_locations、reason 和候选反例。check、launch、
+explain 共用同一评估器，不回写 obligation。符号 grid 在 materialize 中只能成为
+pending contract：结果仍为 Unknown，可继续生成代码，实际 launch 验证后才激活。
+一般 Unknown 在 strict 下仍拒绝。
+
+访问点快照隔离更晚的 assume；分支合并取共同事实并合并来源；循环体假设不流出
+零次循环，loop-carried 值保守换新身份，不把初值假设当作循环不变量。直接互补或
+常量矛盾的 path/mask 标注不可达；涉及用户假设的矛盾返回 Unknown 并保留来源。
+带 mask/path 的区间越界但尚未确认可达时，只提供 Unknown 候选。更一般的矛盾、
+可达性及循环不变量分析仍待后续任务。
 
 ```text
 error[TILA-BOUNDS-001]:

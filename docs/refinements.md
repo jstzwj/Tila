@@ -96,7 +96,7 @@ checker 在类型环境 Γ 中为每个值同时维护**类型**与**事实集**
 | launch 契约注解 | `Positive/NonNegative/Range` 注入区间事实；`MultipleOf` 注入模等式事实；声明均由 launcher 先验证 |
 | `tila.assume(pred)` | `pred` 本身 |
 | Const 精化 | `BLOCK` 的 PowerOfTwo / Range |
-| 比较产生的 Mask | 谓词随 Mask 类型携带（`Mask[S] { offs < N }`）；当前 DNF，M2 迁移到布尔 DAG |
+| 比较产生的 Mask | 谓词以共享 DAG 携带（`Mask[S] { offs < N }`），保留源位置、lane 与 broadcast 映射 |
 | 加载/计算的 int 值 | 每个值获得符号身份（`__vN`），使 `assume` 与义务证明能作用于数据依赖值（gather 工作流） |
 
 ### 3.2 传播规则（事实如何流动）
@@ -169,7 +169,7 @@ x = tila.load(data, idx)                  # 现在 bounds 可证 ✓
 
 语义：
 
-- **checker**：`pred` 加入 Φ，之后的所有证明可见；
+- **checker**：`pred` 携带 UserAssumption 和源位置加入当前作用域 Φ，之后的访问点保存快照；
 - **debug 构建**：lower 为 `tl.device_assert(pred)`——错误假设在
   运行期被抓；
 - **release 构建**：仅作为编译器假设，零运行代价。
@@ -177,8 +177,10 @@ x = tila.load(data, idx)                  # 现在 bounds 可证 ✓
 约束：`pred` 必须是 Presburger 域内谓词；assume 的谓词本身不检查
 真伪（那是 device_assert 的事），但**每个 assume 都出现在诊断汇总里**。
 
-M2 目标：assume 注入带源码位置的 UserAssumption，其派生证明及 hint 继承
-依赖。debug 执行检查不使它自动成为 release 的无条件事实；矛盾假设不得隐藏。
+M2-02 已使派生证明继承 UserAssumption 依赖，debug 执行检查不使它自动成为
+release 的无条件事实。直接矛盾的假设返回 Unknown 并显示来源；一般矛盾检测待
+M2-03。当前 hint 仅从结构事实生成，记录 StaticFact 与源位置，不从 assume
+生成优化 hint；未来新增这类推导也必须传播依赖。
 
 ### 5.2 `tila.unsafe_load / tila.unsafe_store`
 
@@ -193,8 +195,8 @@ x = tila.unsafe_load(data, idx)     # 义务转移给程序员，报告汇总可
 unsafe 只是**局部豁免**（不产生任何事实）。两者都不可嵌套、不可
 全局开启。
 
-M2 目标：unsafe 的结果为 Exempted，不再用 ProvenSafe 表示；当前实现的
-内部结果与信任来源尚待迁移，见 ADR-011。
+M2-02 已使 unsafe 返回 Exempted，不再用 ProvenSafe 表示；不注入后续事实，
+见 ADR-011。
 
 ### 5.3 严格度模式
 

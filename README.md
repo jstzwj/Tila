@@ -74,8 +74,8 @@ def add_kernel(
   `load/store`、`unsafe_load/store`、`cast`、`where`、f16 `dot`、`sum/max`、
   `exp/exp2`、`reshape`、`assume`、单参数 `static_assert` 和
   `mask.any()/all()`；
-- **Bounds safety**：逐访问 obligation、区间/非负事实、Mask DNF、cdiv/grid
-  contract、`launch_auto`、四态结论以及 strict/warn 策略；
+- **Bounds safety**：逐访问 obligation、区间/非负事实、谓词 DAG、cdiv/grid
+  contract、`launch_auto`、ProofResult/信任来源以及 strict/warn 策略；
 - **审计**：`check`、`dump`、`build`、`explain`，可查看类型、事实、effect
   汇总、obligation 和 proof trace；
 - **CPU reference interpreter**：官方 add、softmax、matmul、self-attention 和
@@ -106,9 +106,15 @@ Python 子集 + ti.* 命名空间
 
 Bounds 当前采用无第三方依赖的区间、谓词和 grid-contract fast path。
 [ADR-011](docs/adr/011-smt-proof-and-trust.md) 已决定在 M2 将 Z3 作为默认通用
-证明引擎，保留小型快速路径并用布尔 DAG 替代强制 DNF 展开；尚未实现或新增
-求解器依赖。新设计仍要求整数语义对齐、信任来源追踪及资源预算；无法证明
+证明引擎；M2-02 已用布尔 DAG 替代强制 DNF，并分离证明结论与信任来源。
+Z3 集成、求解器依赖及资源预算尚未实现；无法证明
 的访问保持 `Unknown`，在默认 strict 模式下拒绝。
+
+M2-01 已按 [ADR-007](docs/adr/007-integer-semantics.md) 实现整数回绕、floor
+除法/取模、转换与移位定义域，并在每次 launch 前验证符号索引的中间溢出和
+shape/grid/标量范围。复杂数据依赖定义域目前保守拒绝，完整 SMT 尚待实施。
+新增整数 GPU 对照可运行 `PYTHONPATH=src python tests/gpu_integer_smoke.py`；
+已有本地验证，不构成完整 GPU CI 或跨版本支持承诺。
 
 ---
 
@@ -212,7 +218,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 近期工作优先级是：
 
 1. 在已完成的 M0/M1 上固定整数运算与证明的共同语义；
-2. 拆分证明结论与信任来源，接入默认 Z3、布尔 DAG、预算和缓存；
+2. 基于已实现的 DAG/ProofResult，接入默认 Z3、预算和缓存；
 3. 强化 interpreter、explain 与性质测试，独立评审 Mask/Const 易用性；
 4. 尽早验证小型 CPU/GPU 语义对照，并在 M3 完成固定支持矩阵与 GPU CI；
 5. 再推进 effect/race、泛型、target capability 和性能层。

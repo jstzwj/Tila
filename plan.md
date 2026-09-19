@@ -2,7 +2,7 @@
 
 状态：执行计划 v2；2026-09-19 按 ADR-011 更新 M2 证明架构
 
-基线日期：2026-09-19（M0/M1 已完成，M2 尚待实施）
+基线日期：2026-09-19（M0/M1、M2-01 已完成，M2 进行中）
 
 适用范围：语言规范、前端、类型系统、静态证明、TIR、Triton 后端、运行时、解释器、测试与文档。
 
@@ -47,14 +47,14 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：427 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
+- 当前测试基线：471 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
 
 ### 2.2 当前主要缺口
 
 - M0/M1 已完成状态表、公共语法对账、RegionId/Extent 拆分和 intrinsic registry；
-- 整数溢出、负数除法/取模、移位及索引转换尚需统一规范与执行语义；
-- 证明仍依赖手写区间/DNF/grid；默认 SMT、布尔 DAG 和资源预算尚未实现；
-- 证明结论与信任来源尚未正交，unsafe 的内部安全状态及 assume 依赖需迁移；
+- ADR-007 的基础整数语义/保守门禁已实现；完整有限位宽 SMT 与数据流证明仍缺；
+- 证明已使用共享 DAG、ProofResult 和来源集合；默认 SMT、资源预算及完整缓存尚未实现；
+- 当前快速路径只提取结构原子及区间/grid 事实，一般否定/矛盾/可达性分析仍待 M2-03；
 - alignment 只验证，没有完整反馈到 lowering；
 - GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
 - 完整 FP8、target capability 与泛型仍是未来能力；
@@ -823,12 +823,13 @@ device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔�
 
 ## 17. 下一步
 
-M0/M1 已完成。立即从 **Batch D / M2-01** 开始：先完成 ADR-007 的运算
-语义矩阵及整数边界测试，再实施 ADR-011 的信任结果和默认 SMT。依次推进
-M2-02 至 M2-06；Mask/Const 易用性使用独立变更，不混入求解器迁移。
+M0/M1、**M2-01/02 已完成**。下一步 **M2-03**：基于 ADR-007 与共享 DAG /
+ProofResult 接入默认 Z3，完成 Int/BitVec 编码、查询/累计预算及来源敏感缓存。
+依次完成 M2-04 至 M2-06；Mask/Const 易用性独立处理。
 
 同时推进 M3-01 的固定 GPU 环境，使 M2-08 的小型语义对照尽早可执行。
-本次文档更新只冻结架构方向，所有新增实现任务仍为 TODO。
+M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及 M3 的正式
+支持矩阵/持续 runner 仍待完成，不因一次本地通过升级为 DONE。
 
 ---
 
@@ -844,7 +845,7 @@ M2-02 至 M2-06；Mask/Const 易用性使用独立变更，不混入求解器迁
 | [ADR-004](docs/adr/004-refinement-construction-syntax.md) | Accepted | refinement 构造语法 | Batch B | 带参数 refinement 统一使用下标语法；Range 为闭区间，MultipleOf 为正整数，Aligned 为正的 2 次幂字节对齐 |
 | [ADR-005](docs/adr/005-const-type-domain.md) | Accepted | Const 类型域 | Batch B | 0.2.x 只支持 `Const[int]`；比较结果是 staged bool 而非可声明的 `Const[bool]`，bool/dtype Const 延后 |
 | [ADR-006](docs/adr/006-intrinsic-registry.md) | Accepted | intrinsic registry 形态 | Batch B | registry 管机器元数据和完整性门禁，复杂规则委托专用 checker，backend 覆盖以 typed TIR 为边界 |
-| ADR-007 | Proposed | 整数溢出与除法语义 | M2 interpreter 扩展前 | 与目标 dtype/Triton 对齐，规范定义负数 `//`、`%` 和移位边界 |
+| [ADR-007](docs/adr/007-integer-semantics.md) | Accepted | 整数溢出与除法语义 | M2-01 已完成 | runtime 回绕、floor 商余数、显式转换、定义域及索引门禁；基础 CPU/GPU 对照 |
 | ADR-008 | Proposed | reduction 精度 | M3 differential 前 | 输入、累加、返回 dtype 分开建模，不依赖后端隐式提升 |
 | ADR-009 | Proposed | target 支持矩阵 | GPU CI 建立前 | 首先固定一套 NVIDIA + Triton/PyTorch/CUDA 组合 |
 | ADR-010 | Proposed | effect/race 严格度 | M4 开始前 | bounds、effects、race 使用独立策略开关 |
@@ -876,7 +877,7 @@ M2-02 至 M2-06；Mask/Const 易用性使用独立变更，不混入求解器迁
 | ID | 状态 | 工作项 | 依赖 | 验收摘要 |
 |---|---|---|---|---|
 | M0-01 | DONE | Windows CLI/stdout UTF-8 | 无 | help/check/explain/examples 无编码异常；cp1252 子进程回归已覆盖 |
-| M0-02 | DONE | dev 依赖与零 skipped 基线 | 无 | `uv sync --extra dev` 后当前 `pytest -q`：427 passed、零 skipped |
+| M0-02 | DONE | dev 依赖与零 skipped 基线 | 无 | M1 退出历史基线 427 passed；当前基线见 §2.1/status.md，零 skipped |
 | M0-03 | DONE | 建立 `docs/status.md` | M0-02 | 类型、语法、intrinsic、proof、后端与未来能力均有唯一状态；公开 API/allowlist 有漂移测试 |
 | M0-04 | DONE | README 状态对账 | M0-03 | README 只承诺状态表中的闭环能力；测试数量/行数不硬编码，Partial/Designed 集中列为限制 |
 | M0-05 | DONE | roadmap 阶段对账 | M0-03 | roadmap 使用 M0–M6；FP8/effect/target/TypeVar 归属唯一，过期并行迁移方案已移除 |
@@ -889,8 +890,8 @@ M2-02 至 M2-06；Mask/Const 易用性使用独立变更，不混入求解器迁
 | M1-05 | DONE | intrinsic registry 完整元数据 | ADR-006 已接受 | 不可变 catalog 派生导出/表面形式；统一 arity/keyword 门禁；显式 checker map；effect/bounds、TIR backend、target、status/docs 与缓存 revision 自动一致性检查 |
 | M1-06 | DONE | 诊断契约与 Const 边界收口 | ADR-005/M1-05 | 机器诊断 registry；统一 location/phase/fix 渲染；ExactInt 全入口门禁；deferred static_assert；CLI 非 debug 无 traceback |
 | M1-07 | DONE | M1 Exit Audit | M1-01..06 | 四项退出标准逐项通过；审计中移除字符串/`None` 哨兵类型协议并收回 `p - offset` 超前声明；`docs/m1-exit-audit.md` 记录证据与 M2 交接边界 |
-| M2-01 | TODO | ADR-007 与整数语义对齐 | M1 完成 | 溢出、负数除法/取模、移位、cast、索引窄化规则与边界反例；CPU/lowering 同语义 |
-| M2-02 | TODO | DAG 与 ProofResult/信任来源 | ADR-011、M2-01 | path/mask/lane 身份保留；Exempted 局部性、assume 依赖传播、契约重验 |
+| M2-01 | DONE | ADR-007 与整数语义对齐 | M1 完成 | 回绕/floor 商余数/移位/cast/索引门禁与反例；452 项 CPU 回归、23 组本地 GPU 对照；完整 SMT 仍归 M2-03 |
+| M2-02 | DONE | DAG 与 ProofResult/信任来源 | ADR-011、M2-01 | 471 项 CPU 回归；共享 And/Or/Not、path/lane/broadcast、不可变 ProofResult、Exempted、来源/作用域隔离及契约重验；19 项专门回归 |
 | M2-03 | TODO | 默认 Z3、预算与缓存 | M2-02 | unsat/sat/unknown、近似反例可达性、超时/累计预算、编码及缓存隔离；纳入标准依赖 |
 | M2-04 | TODO | 数据流与 interpreter 收口 | M2-01/02 | 分支交集、循环不变量、数值语义与 non-contiguous 用例 |
 | M2-05 | TODO | 差异审计与性质测试 | M2-03/04 | 新旧结论差异逐项核查、布尔压力/溢出/假设污染测试；退役复杂 DNF |

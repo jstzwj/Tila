@@ -47,7 +47,8 @@ def test_equal_extents_do_not_merge_regions_and_effects_are_structured():
 
 
 def test_bounds_obligation_has_extent_but_no_region_identity_field():
-    ob = Obligation("load", "ptr:p", None, None, N, [])
+    from tila.predicates import TRUE
+    ob = Obligation("load", "ptr:p", None, None, N, TRUE)
     assert ob.extent == N
     assert ob.source == "ptr:p"
     assert not hasattr(ob, "region")

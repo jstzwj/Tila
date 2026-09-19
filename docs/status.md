@@ -6,11 +6,12 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`pytest -q` = 427 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 471 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
-通用证明引擎、布尔 DAG、整数编码与信任来源分离。以下新增项仍为 Designed；
-本次文档更新不改变当前 DNF/fast path、ExactInt 或 Mask 的实现边界。
+通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
+基础整数语义与 launch 门禁；M2-02 已实现 DAG、ProofResult、信任来源及作用域
+隔离。通用 SMT、预算与完整 proof 缓存尚未实现，ExactInt 和 Mask 的公开边界不变。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
@@ -45,6 +46,10 @@
 
 当前没有 GPU CI，因此本文没有任何能力标为 `GPU verified`。`Triton` 只表示有
 lowering 路径或源码 golden，不等价于真实 GPU 支持承诺。
+
+M2-01 新增可显式运行的 `tests/gpu_integer_smoke.py`，已在 RTX 3090 /
+PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照。
+这是一套有限的本地证据，不是完整支持矩阵或持续 GPU CI。
 
 ---
 
@@ -103,7 +108,7 @@ lowering 路径或源码 golden，不等价于真实 GPU 支持承诺。
 |---|---|---|---|
 | Scalar 参数 | `Implemented` | Check / CPU / Triton | dtype 注解形成运行期标量 |
 | `Block[T, Shape]` 内部类型 | `Implemented` | Check / CPU / Triton | 用户不直接声明 Block 参数，由内建推导 |
-| `Mask[Shape]` | `Implemented` | Check / CPU / Triton | 独立于 Block bool，携带 DNF 谓词用于 bounds |
+| `Mask[Shape]` | `Implemented` | Check / CPU / Triton | 独立于 Block bool，携带共享 DAG 谓词用于 bounds |
 | `Unit` | `Implemented` | Check | store/assume 等返回；赋值和参与运算会拒绝 |
 | `Const[int]` | `Implemented` | Check / CPU / Triton | 支持默认值、特化和 refinement；ADR-005 将其固定为 0.2.x 唯一公共 Const 参数域 |
 | `Const[int]` ExactInt 全入口门禁 | `Implemented` | Frontend / Specialize / Launch | 默认值、materialize/explain、CLI 和 launch override 均只接受 exact Python int；bool、float、字符串及 NumPy integer 拒绝 |
@@ -238,9 +243,10 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | 能力 | 状态 | 覆盖 | 当前边界/证据 |
 |---|---|---|---|
 | 算术 `+ - * / // %` | `Implemented` | Check / CPU / Triton | `/` 仅 Float，`// %` 仅 Int；dtype 转换严格 |
+| ADR-007 基础整数语义与数值门禁 | `Implemented` | Check / Specialize / Launch / CPU / Triton | runtime 回绕、floor 商余数、MIN/-1、移位/转换定义域；每次验证中间索引溢出及 i32 ABI，未知数据域保守拒绝 |
 | 整数位运算/移位 | `Implemented` | Check / CPU / Triton | 操作数须为兼容 Int dtype |
 | 比较与 Mask 谓词 | `Implemented` | Check / CPU / Triton | Block 比较生成 Mask 与可提取谓词 |
-| Mask `& | ~` | `Implemented` | Check / CPU / Triton | DNF 子句用于 bounds；析取逐子句证明 |
+| Mask `& | ~` | `Implemented` | Check / CPU / Triton | DAG 保留组合与否定；快速路径只提取必然成立的原子 |
 | `mask.any()/mask.all()` | `Implemented` | Check / CPU / Triton | 仅方法形式，归约为 scalar bool |
 | `where` | `Implemented` | Check / CPU / Triton | eager 两侧；dtype 必须一致，shape 可广播 |
 | `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；无真实 GPU CI |
@@ -269,14 +275,14 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 |---|---|---|---|
 | load/store proof obligation | `Implemented` | Check / Launch | Buffer 逐轴、Ptr 单 extent；访问点保存谓词快照 |
 | interval/nonnegative fast path | `Implemented` | Check | 无第三方依赖 |
-| mask DNF implication | `Implemented` | Check | `&`/`|` 有 sound 保守处理，`~` 通常退化 Unknown |
+| predicate DAG | `Implemented` | Check | 无 DNF 展开；共享子式、未知布尔身份、路径、源位置及 lane/broadcast 映射；`~` 通常仍 Unknown |
 | grid cdiv/exact-dim contract | `Implemented` | Launch | 显式 grid 和 launch_auto 均可登记事实 |
-| 四态结论 | `Implemented` | Check / Launch | ProvenSafe、SafeUnderContract、Unknown、ProvenUnsafe |
+| 四态结论 | `Implemented` | Check / Launch | ProvenSafe、ProvenUnsafe、Unknown、Exempted；SafeUnderContract 仅为已检查契约的显示摘要 |
 | `--safety strict/warn` | `Implemented` | CLI / Launch | Unknown 可降 warning；ProvenUnsafe 永远 error |
-| 默认 Z3 通用证明引擎 | `Designed` | — | ADR-011 替代可选 slow path 路线；尚无 solver protocol、Z3 集成或依赖 |
-| 布尔 DAG 与否定谓词 SMT 编码 | `Designed` | — | 将替代强制 DNF 展开；需保留 path/lane/broadcast 关系 |
-| 有限位宽 proof 与执行语义对齐 | `Designed` | — | ADR-007 待定；Int/BitVec、溢出/除法/移位及索引窄化需统一 |
-| ProofResult 信任来源与 Exempted | `Designed` | — | 结论和静态/契约/用户假设来源分开；当前 unsafe 内部结果仍需迁移 |
+| 默认 Z3 通用证明引擎 | `Designed` | — | ADR-011 替代可选 slow path；已有共享 ProofResult 接口，Z3 集成和依赖待 M2-03 |
+| 否定谓词 SMT 编码 | `Designed` | — | DAG 已保存 Not；一般逻辑求解待 M2-03 |
+| 有限位宽 proof 与执行语义对齐 | `Partial` | Specialize / Launch | ADR-007 基础语义及区间门禁已实现；完整 Int/BitVec SMT 编码仍待 M2-03 |
+| ProofResult 信任来源与 Exempted | `Implemented` | Check / Launch | 不可变结果、来源集合/位置/trace；assume 不泄漏作用域，unsafe 局部豁免；符号 grid 仅 pending，launch 每次重验 |
 | SMT 预算与完整证明缓存 | `Designed` | — | 查询及 kernel 总预算、公式大小、语义/信任依赖缓存和反例可达性待实现 |
 | 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
 | kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
@@ -304,7 +310,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Designed` | — | 当前测试目录没有真实 CUDA 执行测试 |
+| GPU differential | `Partial` | CPU / Triton | 显式整数 smoke 已在固定本地环境运行；官方示例全覆盖、CI 与支持矩阵仍待 M3 |
 | property/fuzz tests | `Designed` | — | 旧基线测试已归档，新实现尚未建立系统 property suite |
 
 ---

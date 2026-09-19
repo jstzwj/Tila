@@ -50,7 +50,8 @@ def test_runtime_start_runs_and_lowers():
     assert x[32] == 48.0 and x[63] == 48.0
 
     src, _ = k.materialize({"BLOCK": 32})
-    assert "range((pid * BLOCK), " in src
+    assert "range(tl.cast((pid * BLOCK), tl.int64), " in src
+    assert "i = tl.cast(_tila_loop_i, tl.int32)" in src
 
 
 def test_zero_start_has_no_start_operand():
@@ -64,7 +65,7 @@ def test_zero_start_has_no_start_operand():
     fors = [s for s in k.tk.body if isinstance(s, T.TFor)]
     assert fors[0].start is None
     src, _ = k.materialize()
-    assert "range(0, " in src
+    assert "range(tl.cast(0, tl.int64), " in src
 
 
 def test_non_int_start_rejected():

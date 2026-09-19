@@ -8,7 +8,8 @@ fast path = 区间抽象（仅 Const 数值参与，保证跨 launch 缓存可�
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from . import predicates as P
 
 from .dims import (Add, Cst, DimExpr, Mul, Sym, canon, equal, int_value)
 
@@ -16,13 +17,15 @@ PROVEN_SAFE = "ProvenSafe"
 SAFE_UNDER_CONTRACT = "SafeUnderContract"
 UNKNOWN = "Unknown"
 PROVEN_UNSAFE = "ProvenUnsafe"
+EXEMPTED = "Exempted"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Pred:
     op: str                 # < <= ==
     left: DimExpr
     right: DimExpr
+    origins: frozenset[P.Origin] = frozenset({P.Origin(P.STATIC)})
 
     def key(self):
         l, r, op = self.left, self.right, self.op
@@ -52,20 +55,32 @@ class Facts:
     # pid 符号 → (bound_expr, step_expr)：grid_ax == ceildiv(bound, step)
     # 且 0 <= pid < grid_ax（由 launcher 的 grid 契约登记）
     grid_facts: dict = field(default_factory=dict)
+    path: P.Predicate = P.TRUE
+    grid_checked: bool = False
 
     def clone(self) -> "Facts":
         return Facts(dict(self.var_exprs), dict(self.sym_lo), dict(self.sym_hi),
-                     dict(self.num), dict(self.preds), dict(self.grid_facts))
+                     dict(self.num), dict(self.preds), dict(self.grid_facts),
+                     self.path, self.grid_checked)
 
     def intersect(self, other: "Facts") -> "Facts":
         """分支合并：只保留两侧共同可推出的事实（保守正确）。"""
         out = self.clone()
         out.var_exprs = {k: v for k, v in out.var_exprs.items()
                          if other.var_exprs.get(k) == v}
-        out.preds = {k: p for k, p in out.preds.items() if k in other.preds}
+        out.preds = {k: replace(p, origins=p.origins | other.preds[k].origins)
+                     for k, p in out.preds.items() if k in other.preds}
+        for name in ("sym_lo", "sym_hi", "num", "grid_facts"):
+            a, b = getattr(self, name), getattr(other, name)
+            setattr(out, name, {k: v for k, v in a.items() if b.get(k) == v})
+        out.path = P.disjunction(self.path, other.path)
+        out.grid_checked = self.grid_checked and other.grid_checked
         return out
 
     def add_pred(self, pred: Pred):
+        previous = self.preds.get(pred.key())
+        if previous is not None:
+            pred = replace(pred, origins=previous.origins | pred.origins)
         self.preds[pred.key()] = pred
 
     # -- 数值区间（仅 Const 参与）----------------------------------------
@@ -129,18 +144,19 @@ def is_nonneg_expr(e: DimExpr, extra_nonneg: set[str]) -> bool:
 # 义务与求解
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class Obligation:
     kind: str               # load / store / unsafe_load / unsafe_store
     source: str             # 诊断用访问来源；不参与 effect/alias 身份分析
     axis: int | None        # Buffer 形式逐轴；Ptr 形式 None
     coord: DimExpr | None   # None = 数据依赖坐标（不可符号化）
     extent: DimExpr | None  # 数值上界；None = Ptr 为 UnknownExtent
-    mask_preds: list        # DNF 子句列表（bounds-safety.md §3.2）：
-                            # 子句 = Pred 合取；mask 为真 ⇒ 某一子句成立
+    mask: P.Predicate
     loc_line: int = 0
-    contract: bool = False  # 证明是否依赖 launch 契约（cdiv 战术）
-    preds_snapshot: list = field(default_factory=list)  # 访问点全局谓词
+    preds_snapshot: tuple = ()
+    path: P.Predicate = P.TRUE
+    sym_lo: tuple = ()
+    sym_hi: tuple = ()
 
     def describe(self):
         axis = f"axis {self.axis}" if self.axis is not None else "flat"
@@ -148,6 +164,37 @@ class Obligation:
         extent = self.extent if self.extent is not None else \
             "<unknown extent>"
         return f"{self.kind}[{self.source}] {axis}: 0 <= {coord} < {extent}"
+
+
+@dataclass(frozen=True)
+class ProofResult:
+    verdict: str
+    dependencies: frozenset[P.Origin] = frozenset()
+    trace: tuple[str, ...] = ()
+    source_locations: tuple[int, ...] = ()
+    reason: str = ""
+    candidate_counterexample: tuple = ()
+    pending_contracts: tuple[str, ...] = ()
+
+    @property
+    def summary(self):
+        state = self.verdict
+        kinds = {d.kind for d in self.dependencies}
+        if state == PROVEN_SAFE and P.CHECKED in kinds:
+            state = SAFE_UNDER_CONTRACT
+        if P.USER in kinds:
+            state += " [UserAssumption]"
+        return state
+
+    def render(self):
+        lines = [f"state: {self.summary}"]
+        lines.extend(f"proof: {item}" for item in self.trace)
+        if self.reason:
+            lines.append(f"reason: {self.reason}")
+        for origin in sorted(self.dependencies):
+            lines.append(f"dependency: {origin.kind} at line {origin.line}: {origin.detail}")
+        lines.extend(f"pending contract: {p}" for p in self.pending_contracts)
+        return "\n".join(lines)
 
 
 def _decompose_linear(e: DimExpr):
@@ -164,44 +211,81 @@ def _decompose_linear(e: DimExpr):
     return [(e, 1)]
 
 
-def evaluate_obligation(ob: Obligation, facts: Facts, nonneg_syms: set[str]) -> str:
-    """四态判定（bounds-safety.md §6）。mask 谓词在该访问点视为真。
+def evaluate_obligation(ob: Obligation, facts: Facts,
+                        nonneg_syms: set[str]) -> ProofResult:
+    """Pure proof interface shared by checking, launch and explain.
 
-    mask 谓词为 DNF（§3.2）：mask_preds = 子句的析取，子句 = 谓词的合取。
-    mask ⇒ goal 要求**每个子句**各自 ⇒ goal（析取支全部可证才算证明）；
-    任一子句失败 ⇒ Unknown。无 mask（零子句）与 `~` 产生的空子句 [[]]
-    都按"单个空子句"处理：仅凭全局事实证明。
+    The fast path extracts only structurally entailed atoms from the DAG.
+    General Boolean reasoning and reachability belong to the SMT adapter.
     """
+    locations = (ob.loc_line,) if ob.loc_line else ()
     if ob.kind.startswith("unsafe"):
-        return PROVEN_SAFE  # 义务被显式豁免（报告仍可见）
+        return ProofResult(EXEMPTED, source_locations=locations,
+                           reason="explicitly waived (unsafe access); no safety fact produced")
     if ob.coord is None or ob.extent is None:
-        return UNKNOWN      # 数据依赖坐标 / UnknownExtent 指针：不可符号化
-
-    clauses = ob.mask_preds if ob.mask_preds else [[]]
-    worst = PROVEN_SAFE
-    for clause in clauses:
-        st = _prove_clause(ob, facts, nonneg_syms, clause)
-        if st == PROVEN_UNSAFE:
-            return PROVEN_UNSAFE
-        if st is None:
-            return UNKNOWN
-        if st == SAFE_UNDER_CONTRACT:
-            worst = SAFE_UNDER_CONTRACT
-    return worst
-
-
-def _prove_clause(ob: Obligation, facts: Facts, nonneg_syms: set[str],
-                  clause: list):
-    """单子句证明：goal 在 facts.preds + snapshot + 子句谓词下可证？
-
-    返回 PROVEN_SAFE / SAFE_UNDER_CONTRACT / PROVEN_UNSAFE / None（未证出）。
-    判定逻辑在 _prove_clause_detail（explain 模式共享同一实现以保持一致）。
-    """
-    state, contract, _route = _prove_clause_detail(ob, facts, nonneg_syms,
-                                                   clause)
+        return ProofResult(UNKNOWN, source_locations=locations,
+                           reason="coordinate is data-dependent" if ob.coord is None
+                           else "pointer bound unknown (UnknownExtent)")
+    local = facts.clone()
+    local.sym_lo.update(ob.sym_lo)
+    local.sym_hi.update(ob.sym_hi)
+    condition = P.conjunction(ob.path, ob.mask)
+    clause = P.guaranteed(condition)
+    pool = tuple(local.preds.values()) + ob.preds_snapshot + clause
+    conflict = _contradiction(pool, local)
+    if conflict:
+        origins = frozenset(o for p in conflict for o in p.origins)
+        user = any(o.kind == P.USER for o in origins)
+        return ProofResult(UNKNOWN if user else PROVEN_SAFE, origins,
+                           source_locations=tuple(sorted(set(locations) |
+                               {o.line for o in origins if o.line})),
+                           reason="inconsistent premises involving UserAssumption; reachability unverified"
+                           if user else "unreachable access: contradictory path/mask predicates")
+    dependencies = set()
+    state, contract, route = _prove_clause_detail(
+        ob, local, nonneg_syms, clause, dependencies)
+    # Interval abstraction proves all candidate coordinates invalid, but cannot
+    # establish that a masked/conditional/assumed access is actually reached.
+    candidate = ()
+    if state == PROVEN_UNSAFE and (condition is not P.TRUE or any(
+            o.kind == P.USER for p in ob.preds_snapshot for o in p.origins)):
+        state = UNKNOWN
+        candidate = (("coordinate_interval", local.num_interval(ob.coord)),)
+        route += "; candidate only: access reachability has not been established"
+    pending = ()
     if contract:
-        ob.contract = True    # cdiv 战术命中（含 lower 未证出的 None 分支）
-    return state
+        if local.grid_checked:
+            dependencies.add(P.Origin(P.CHECKED, detail="validated launch grid"))
+        elif state in (PROVEN_SAFE, SAFE_UNDER_CONTRACT):
+            state = UNKNOWN
+            pending = ("grid must satisfy the recorded symbolic grid relation",)
+    verdict = PROVEN_SAFE if state == SAFE_UNDER_CONTRACT else state or UNKNOWN
+    locations = tuple(sorted(set(locations) | {d.line for d in dependencies if d.line}))
+    return ProofResult(verdict, frozenset(dependencies), (route,), locations,
+                       "pending launch contract" if pending else
+                       "fast path inconclusive; general solver required" if verdict == UNKNOWN else "",
+                       candidate, pending)
+
+
+def _contradiction(pool, facts):
+    """Only direct complementary/constant atoms; no general satisfiability claim."""
+    inverse = {"<": ">=", "<=": ">", ">": "<=", ">=": "<", "==": "!=", "!=": "=="}
+    seen = {}
+    for pred in pool:
+        op = inverse.get(pred.op)
+        if op is not None:
+            opposite = seen.get(replace(pred, op=op).key())
+            if opposite is not None:
+                return (opposite, pred)
+        seen[pred.key()] = pred
+        lo, hi = facts.num_interval(pred.left)
+        ro, rh = facts.num_interval(pred.right)
+        if None not in (lo, hi, ro, rh) and lo == hi and ro == rh:
+            truth = {"<": lo < ro, "<=": lo <= ro, ">": lo > ro,
+                     ">=": lo >= ro, "==": lo == ro, "!=": lo != ro}.get(pred.op)
+            if truth is False:
+                return (pred,)
+    return ()
 
 
 def _pred_text(p: Pred) -> str:
@@ -210,11 +294,10 @@ def _pred_text(p: Pred) -> str:
 
 
 def _pred_source(p: Pred, facts: Facts, ob: Obligation, clause: list) -> str:
-    """谓词来源标签（就近优先：mask 子句 > 访问点快照 > 事实集）。"""
-    key = p.key()
-    if any(c.key() == key for c in clause):
-        return "mask clause"
-    if any(s.key() == key for s in ob.preds_snapshot):
+    """Label the selected premise, not a different premise with the same key."""
+    if any(c is p for c in clause):
+        return "path/mask DAG"
+    if any(s is p for s in ob.preds_snapshot):
         return "global predicate snapshot at access point (assume/contract)"
     return "fact set"
 
@@ -225,27 +308,29 @@ def _iv(x) -> str:
 
 
 def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
-                         clause: list):
-    """_prove_clause 的可审计内核：同一判定逻辑（路线顺序、条件、短路全部
-    一致），额外产出证明路线文本。
+                         clause: tuple, dependencies: set):
+    """Small interval/direct-match/grid fast path over entailed DAG atoms.
 
-    返回 (state, contract, route)：
-    - state 与 _prove_clause 完全一致（四态语义不变）；
-    - contract = cdiv 战术命中（_prove_clause 据此回写 ob.contract；
-      本函数只读，不改动义务/事实——explain 模式的副作用底线）；
-    - route = 人类可读证明路线（surface-language.md §8 的义务证明链）。
+    Return (state, uses_grid, trace), accumulating only the premises used by
+    this query in its local dependency set. Never mutate facts or obligations.
     """
     pool = list(facts.preds.values()) + list(ob.preds_snapshot) + list(clause)
 
     # 下界：结构性非负（pid/lane/维/常量）或谓词直证
-    lower_ok = is_nonneg_expr(ob.coord, nonneg_syms)
+    lower_ok = is_nonneg_expr(ob.coord, nonneg_syms) or any(
+        equal(ob.coord, Sym(name)) for name in nonneg_syms)
+    coord_lo, _ = facts.num_interval(ob.coord)
+    lower_ok = lower_ok or (coord_lo is not None and coord_lo >= 0)
     lower_src = ("structural nonnegativity (pid/lane/dim/Const terms)"
                  if lower_ok else None)
+    if lower_ok:
+        dependencies.add(P.Origin(P.STATIC, detail=lower_src))
     if not lower_ok:
         low_key = Pred(">=", ob.coord, Cst(0)).key()
         for p in pool:
             if p.key() == low_key:
                 lower_ok = True
+                dependencies.update(p.origins)
                 lower_src = (f"predicate `{_pred_text(p)}` "
                              f"({_pred_source(p, facts, ob, clause)})")
                 break
@@ -260,6 +345,9 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
                      f"upper bound")
             if lower_src is not None:
                 route += f"; lower bound by {lower_src}"
+            dependencies.update(p.origins)
+            if not lower_ok:
+                return None, False, route + "; lower bound is unproven"
             return PROVEN_SAFE, False, route
 
     # (b) 数值区间：expr 仅含 Const（进入缓存键，可靠）
@@ -267,6 +355,7 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
     b_lo, b_hi = facts.num_interval(ob.extent)
     if hi is not None and b_lo is not None and hi < b_lo:
         if lower_ok:
+            dependencies.add(P.Origin(P.STATIC, detail="numeric interval"))
             return (PROVEN_SAFE, False,
                     f"numeric interval: coord {ob.coord} ∈ "
                     f"[{_iv(lo)}, {_iv(hi)}], extent {ob.extent} ∈ "
@@ -283,10 +372,6 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
         return (PROVEN_UNSAFE, False,
                 f"provably out of bounds: coord lower bound {lo} >= bound "
                 f"upper bound {b_hi}")
-    if lo is not None and b_lo is not None and lo >= b_lo and hi is not None and hi >= b_lo and lo == hi:
-        return (PROVEN_UNSAFE, False,
-                f"provably out of bounds: constant coord {lo} >= bound "
-                f"lower bound {b_lo}")
     if hi is not None and hi < 0:
         return (PROVEN_UNSAFE, False,
                 f"provably negative coordinate: upper bound {hi} < 0")
@@ -299,7 +384,7 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
         grid = facts.grid_facts.get(terms[0][0].name)
         if grid is not None and equal(grid[1], Cst(1)) and \
                 equal(grid[0], ob.extent) and lower_ok:
-            return (PROVEN_SAFE, False,
+            return (PROVEN_SAFE, True,
                     f"exact-dim grid fact: {terms[0][0].name} spans "
                     f"[0, {grid[0]}) with step 1 (registered at launch); "
                     f"lower bound by {lower_src}")
@@ -325,6 +410,7 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
             div_key = Pred("==", _mod(ob.extent, step), Cst(0)).key()
             div_pred = next((p for p in pool if p.key() == div_key), None)
             if div_pred is not None:
+                dependencies.update(div_pred.origins)
                 route = (f"cdiv tactic: {ob.coord} = {pid_name}*{step} + "
                          f"{lane_sym.name}; grid axis = "
                          f"ceildiv({g_bound}, {step}) ⇒ {pid_name} < "
@@ -341,7 +427,7 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
     # 全部路线未命中：说明证明缺口（explain 的 per-clause 失败清单）
     gap = (f"no upper-bound predicate `{ob.coord} < {ob.extent}` in scope "
            f"(fact set: {len(facts.preds)} pred(s); access-point snapshot: "
-           f"{len(ob.preds_snapshot)}; mask clause: {len(clause)}); numeric "
+           f"{len(ob.preds_snapshot)}; entailed DAG atoms: {len(clause)}); numeric "
            f"interval not decisive (coord ∈ [{_iv(lo)}, {_iv(hi)}], bound ∈ "
            f"[{_iv(b_lo)}, {_iv(b_hi)}]); no matching grid fact (grid facts "
            f"are launch-time contracts — not available here)")
@@ -353,49 +439,7 @@ def _prove_clause_detail(ob: Obligation, facts: Facts, nonneg_syms: set[str],
 
 def explain_obligation(ob: Obligation, facts: Facts,
                        nonneg_syms: set[str]) -> str:
-    """explain 模式的义务评估（surface-language.md §8 --explain）：
-    与 evaluate_obligation 相同的四态判定 + 逐子句证明路线，只读——
-    不置 ob.contract、不改 facts。
-
-    状态聚合与 evaluate_obligation 逐分支一致：unsafe 义务显式豁免；
-    数据依赖坐标 / UnknownExtent 指针为 Unknown；mask 谓词 DNF 下每个子句
-    各给一行路线（析取支全部可证才算证明，首个未证出/可证越界的子句
-    决定状态——其余子句仍列出以便审计）。
-    """
-    if ob.kind.startswith("unsafe"):
-        return (f"state: {PROVEN_SAFE}\n"
-                "proof: explicitly waived (unsafe access) — the obligation "
-                "is recorded but exempt from proof")
-    if ob.coord is None or ob.extent is None:
-        why = ("coordinate is data-dependent (no symbolic index expression)"
-               if ob.coord is None else
-               "pointer parameter has no Region — bound unknown")
-        return f"state: {UNKNOWN}\nproof: {why}; not provable statically"
-
-    clauses = ob.mask_preds if ob.mask_preds else [[]]
-    lines = []
-    decided = None        # 首个 PROVEN_UNSAFE / None 子句（评估器即刻定格）
-    saw_contract = False
-    for i, clause in enumerate(clauses, 1):
-        state, _contract, route = _prove_clause_detail(ob, facts, nonneg_syms,
-                                                       clause)
-        label = (f"clause {i}/{len(clauses)}" if ob.mask_preds
-                 else "no mask — global facts only")
-        lines.append(f"proof: {label}: {route}")
-        if decided is None:
-            if state == PROVEN_UNSAFE:
-                decided = PROVEN_UNSAFE
-            elif state is None:
-                decided = UNKNOWN
-        if state == SAFE_UNDER_CONTRACT:
-            saw_contract = True
-    if decided is not None:
-        final = decided
-    elif saw_contract:
-        final = SAFE_UNDER_CONTRACT
-    else:
-        final = PROVEN_SAFE
-    return f"state: {final}\n" + "\n".join(lines)
+    return evaluate_obligation(ob, facts, nonneg_syms).render()
 
 
 def _match_pid_times_step(term, step) -> str | None:

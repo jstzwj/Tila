@@ -95,7 +95,9 @@ float 只作为普通数值字面量。任意 Python 对象、可变容器和函
 不能用于 shape、arange bound、range step 或其他 Const int 语境。
 
 除零必须给出稳定的 `TILA-CONST` 诊断，不能退化为 Python traceback。`//`、`%` 对负数的
-结果和有限 dtype 溢出在 ADR-007 接受前不新增优化假设。
+结果和有限 dtype 溢出由已接受的 [ADR-007](007-integer-semantics.md) 定义：
+staged 整数保持任意精度及 floor 除法，runtime 整数按位宽回绕；新增数学
+索引推理必须有无溢出依据。
 
 ### static-if 与 `static_assert`
 

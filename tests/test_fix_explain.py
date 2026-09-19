@@ -56,7 +56,7 @@ def test_add_kernel_explain_sections_and_routes():
     # 即源码 `offs < N` 的规范形态）。
     assert "direct predicate `" in out
     assert "< N`" in out
-    assert "mask clause" in out
+    assert "path/mask DAG" in out
 
 
 # ---------------------------------------------------------------------------

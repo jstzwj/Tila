@@ -246,7 +246,7 @@ class TestPtrParamLowering:
 
     def test_materialize_signature_order(self):
         src, dump = self._kernel().materialize({"BLOCK": 64})
-        assert "def k(\n    x_ptr,\n    p_ptr,\n    N,\n    x_stride0,\n" \
+        assert "def k(\n    x_ptr,\n    p_ptr,\n    N: tl.int32,\n    x_stride0: tl.int32,\n" \
             "    BLOCK: tl.constexpr\n):" in src
         # 指针算术引用 ptr 参数实参名 p_ptr
         assert "(p_ptr + " in src

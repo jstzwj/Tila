@@ -60,6 +60,10 @@ _BOUNDS_FIX = "补充逐轴 mask/契约，或显式使用 unsafe 访问并接受
 
 
 _DIAGNOSTICS = {
+    **_specs("NUM", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE,
+                      DiagnosticPhase.LAUNCH), {
+        "001": "integer arithmetic domain or index overflow could not be validated",
+    }, default_fix="检查整数范围、除数、移位和转换；必要时显式扩大索引位宽"),
     **_specs("SYN", (DiagnosticPhase.FRONTEND,), {
         "000": "JIT entry or source retrieval failed",
         "001": "invalid Python syntax",

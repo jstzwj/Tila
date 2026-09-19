@@ -33,7 +33,7 @@ def scalar_base_kernel(
     BLOCK: ti.Const[int, ti.PowerOfTwo] = 128,
 ):
     offs = K + ti.arange(0, BLOCK)   # 运行期标量基：无可整除事实
-    mask = offs < N
+    mask = (offs >= 0) & (offs < N)
     ti.store(out, offs, ti.load(x, offs, mask=mask), mask=mask)
 
 
@@ -77,12 +77,12 @@ def test_canonical_pattern_splits_with_multiple_of():
     assert base_i < add_i < mo_i < mc_i
 
 
-def test_non_matching_pattern_keeps_old_emission():
-    """(b) 运行期标量基：不拆分、不发射 multiple_of。"""
+def test_non_matching_pattern_uses_modular_arithmetic_without_hint():
+    """Runtime scalar arithmetic lacks a no-wrap proof: no contiguous hint."""
     src, _ = scalar_base_kernel.materialize({})
     lines = [ln.strip() for ln in src.splitlines()]
-    assert "offs = (K + tl.arange(0, BLOCK))" in lines
-    assert "tl.max_contiguous(offs, BLOCK)" in lines
+    assert "offs = tl.cast((tl.cast(K, tl.int32) + tl.cast(tl.arange(0, BLOCK), tl.int32)), tl.int32)" in lines
+    assert "tl.max_contiguous(offs, BLOCK)" not in lines
     assert "tl.multiple_of(" not in src
     assert "offs_base" not in src
 

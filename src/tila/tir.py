@@ -83,12 +83,17 @@ class TBin(TExpr):
     op: str
     left: TOperand
     right: TOperand
+    staged: bool = False
+    checked_index: bool = False
+    operand_dtype: object = None
 
 
 @dataclass
 class TUna(TExpr):
     op: str
     operand: TOperand
+    staged: bool = False
+    checked_index: bool = False
 
 
 @dataclass
@@ -279,6 +284,7 @@ class TKernel:
     warnings: list = field(default_factory=list)
     notes: list = field(default_factory=list)   # static-if 解析等说明
     hints: list = field(default_factory=list)   # (var, span) max_contiguous 发射点
+    hint_origins: dict = field(default_factory=dict)  # name -> set[Origin]; no assume-derived hints yet
     deferred: list = field(default_factory=list)  # 特化期复查的 shape 等价约束
     refinements: dict = field(default_factory=dict)  # pid sym -> (bound_expr, step_expr) 由 launch 登记
     nonneg_syms: set = field(default_factory=set)   # 结构性非负符号（证明用）

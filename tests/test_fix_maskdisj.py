@@ -1,9 +1,6 @@
-"""A6 修复验证：mask 谓词的 DNF 表示与析取（|）证明（bounds-safety.md §3.2）。
+"""Mask 组合语义回归；M2-02 已迁移到共享 DAG，无 DNF 展开。
 
-mask_preds 现为"子句列表；子句 = 谓词合取"（析取范式）：
-  - `A & B` → 子句两两拼接（合取分配律）
-  - `A | B` → 子句并列；义务要求**每个**子句独立证明（every-clause 规则）
-  - `~A`    → 单个空子句 [[]]（保守：不可由 mask 证明任何事）
+快速路径仍保守处理一般否定；当前 assume 公开子集仍限符号合取。
 """
 
 import numpy as np
@@ -92,8 +89,7 @@ class TestMaskConjunctionRegression:
 
 class TestMaskNegationConservative:
     def test_negated_mask_still_rejected(self):
-        """(d) `~(offs >= N)` 蕴含 offs < N，但 ~ 的谓词信息被保守丢弃
-        ⇒ 仍 TILA-BOUNDS-001（记录既有保守行为；除非另有证明路径）。"""
+        """(d) Not 被 DAG 保留，但一般否定求解仍待 M2-03。"""
         @ti.jit
         def k(x: ti.Buffer[ti.f32, (N,), ti.ReadWrite],
               BLOCK: ti.Const[int, ti.PowerOfTwo] = 64):
@@ -126,7 +122,7 @@ class TestMaskNegationConservative:
 
 class TestAssumeDisjunctionRejected:
     def test_assume_over_disjunction_rejected(self):
-        """assume 的谓词为析取（多子句）⇒ 不是 sound 的全局事实，拒绝。"""
+        """assume 的当前公开子集不接受析取。"""
         with pytest.raises(TilaError) as ei:
             @ti.jit
             def k(idx_buf: ti.Buffer[ti.i32, (N,), ti.ReadOnly],
@@ -142,7 +138,7 @@ class TestAssumeDisjunctionRejected:
         assert ei.value.code == "TILA-CONST-004"
 
     def test_assume_negated_mask_rejected(self):
-        """assume(~m)：~ 产生空子句，无可注入谓词 ⇒ 拒绝（既有行为）。"""
+        """assume(~m) 仍在当前公开子集之外。"""
         with pytest.raises(TilaError) as ei:
             @ti.jit
             def k(x: ti.Buffer[ti.f32, (N,), ti.ReadWrite],

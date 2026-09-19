@@ -1,6 +1,6 @@
 # Tila 诊断契约与错误码目录
 
-状态：M1-06 实现基线（2026-09-18）。
+状态：M1-06 实现基线，M2-01 于 2026-09-19 新增数值契约诊断。
 
 本文定义用户可见诊断的兼容性契约。机器事实来源是
 `src/tila/errors.py::DIAGNOSTIC_REGISTRY`；测试会扫描 `src/tila/*.py` 中出现的所有具体
@@ -58,6 +58,7 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | `TILA-TYPE` | 012–036、101–105 | checker；101+ 为 launch 参数契约 |
 | `TILA-SHAPE` | 003–006、008–012 | checker/specialization shape |
 | `TILA-CONST` | 001–010 | Const/StagedBool/specialization |
+| `TILA-NUM` | 001 | 数值定义域、索引无溢出与 ABI 范围验证 |
 | `TILA-MEM` | 001–006 | memory capability/offset/alignment |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
 | `TILA-EFFECT` | 007 | effect warning |
@@ -68,6 +69,12 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 不得以占位代码伪装成当前能力。
 
 ## Const 诊断约定
+
+M2-01 的 `TILA-NUM-001` 覆盖除数非零、合法移位、有限且可表示的 float→int、
+索引中间值溢出和 shape/stride/标量 ABI 范围。已知非法值在 materialize 时拒绝，
+需要实参的契约每次 launch 检查；与 bounds strict/warn 独立，不能通过 unsafe
+内存操作豁免。grid 类型/轴数/range 继续使用 `TILA-TYPE-104`，Const 断言中的
+算术求值失败继续使用 `TILA-CONST-009`。
 
 - `TILA-CONST-008`：所有入口上的 ExactInt 失败。details 必须包含参数名、实际类型和值；
   Python bool、float、字符串、NumPy integer 和任意可转换对象均拒绝。

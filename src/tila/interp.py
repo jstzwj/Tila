@@ -13,6 +13,7 @@ import numpy as np
 from . import dtypes as D
 from . import tir as T
 from . import types as TY
+from . import numeric
 
 
 # Independent typed-TIR capability registry used by ADR-006 completeness gates.
@@ -88,7 +89,8 @@ class Interp:
             assert isinstance(arr, np.ndarray), "interp 需要 numpy 数组"
             arr = arr.reshape(-1)
             self.buffers[param.name] = (arr, (1,))
-        self.scalars = dict(scalars)
+        self.scalars = {p.name: np.asarray(scalars[p.name], dtype=_np_dtype(p.dtype))[()]
+                        for p in tk.scalars}
         self.consts = dict(consts)
         self.grid = grid
         self.debug = debug
@@ -222,6 +224,8 @@ class Interp:
                 return self.scalars[x.name]
             raise KeyError(x.name)
         if isinstance(x, T.TLit):
+            if x.dtype and x.dtype.is_float:
+                return np.asarray(x.value, dtype=_np_dtype(x.dtype))[()]
             return x.value
         return self.e(x, env, pids)
 
@@ -232,10 +236,27 @@ class Interp:
             return self.o(x, env, pids)
         if isinstance(x, T.TBin):
             l = self.o(x.left, env, pids)
+            if x.op == "and" and not bool(l):
+                return False
+            if x.op == "or" and bool(l):
+                return True
             r = self.o(x.right, env, pids)
+            dt = numeric.dtype(x.vt)
+            if x.staged:
+                l, r = np.asarray(l, dtype=object), np.asarray(r, dtype=object)
+                value = self._bin(x.op, l, r)
+                return value.item() if isinstance(value, np.ndarray) and value.ndim == 0 else value
+            if dt and dt.is_int:
+                return numeric.integer_binary(x.op, l, r, dt)
+            if x.operand_dtype and x.operand_dtype.is_int:
+                l, r = numeric.wrap(l, x.operand_dtype), numeric.wrap(r, x.operand_dtype)
             return self._bin(x.op, l, r)
         if isinstance(x, T.TUna):
             v = self.o(x.operand, env, pids)
+            dt = numeric.dtype(x.vt)
+            if dt and dt.is_int and not x.staged:
+                return numeric.wrap(-np.asarray(v).astype(object) if x.op == "-"
+                                    else ~np.asarray(v).astype(object), dt)
             if x.op == "-":
                 return -v
             if x.op == "~":
@@ -257,6 +278,18 @@ class Interp:
             raise RuntimeError(x.op)
         if isinstance(x, T.TCast):
             v = self.o(x.operand, env, pids)
+            if x.dtype.is_int:
+                a = np.asarray(v)
+                if a.dtype.kind == "f":
+                    lo, hi = numeric.limits(x.dtype)
+                    values = np.asarray(a, dtype=object)
+                    import math
+                    if any(not math.isfinite(z) or not lo <= math.trunc(z) <= hi
+                           for z in values.flat):
+                        from .errors import TilaError
+                        raise TilaError("TILA-NUM-001", "invalid float-to-integer cast")
+                    v = np.vectorize(math.trunc, otypes=[object])(values)
+                return numeric.wrap(v, x.dtype)
             return np.asarray(v).astype(_np_dtype(x.dtype)) if isinstance(v,
                                                                          np.ndarray) else \
                 np.asarray(v, dtype=_np_dtype(x.dtype))
@@ -295,6 +328,8 @@ class Interp:
             v = self.o(x.operand, env, pids)
             dt = x.vt.elem.dtype if isinstance(x.vt, TY.BlockT) else x.vt.dtype
             if x.op == "sum":
+                if dt.is_int:
+                    return numeric.wrap(np.sum(v.astype(object), axis=x.axis), dt)
                 r = np.sum(v, axis=x.axis, dtype=np.float32)
                 return np.asarray(r).astype(_np_dtype(dt))
             r = np.max(v, axis=x.axis)
