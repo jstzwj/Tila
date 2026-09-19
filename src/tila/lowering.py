@@ -36,6 +36,11 @@ def _tila_idiv(a, b, SIGNED: tl.constexpr, MIN: tl.constexpr, MOD: tl.constexpr)
     return (a // b).to(a.dtype)
 '''
 
+_FLOAT_MAXIMUM = '''@triton.jit
+def _tila_maximum(a, b):
+    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+'''
+
 
 # Typed TIR is the backend boundary (ADR-006). Values are stable symbolic
 # handler IDs; the implementation remains grouped in stmt()/e() for now.
@@ -102,9 +107,14 @@ class Lowering:
         out.append("")
         # The helper is emitted only when an integer division actually needs it.
         self.needs_integer_division = False
+        self.needs_float_maximum = False
         body = self.stmts(k.body, 1)
         if self.needs_integer_division:
             out.extend(_INTEGER_DIVISION.rstrip().splitlines())
+            out.append("")
+            out.append("")
+        if self.needs_float_maximum:
+            out.extend(_FLOAT_MAXIMUM.rstrip().splitlines())
             out.append("")
             out.append("")
         out.append("@triton.jit")
@@ -373,19 +383,19 @@ class Lowering:
         return f"# ?{x!r}"
 
     def _reduce(self, x: T.TReduce) -> str:
-        dt = self._elem_dtype(x.vt)
+        dt = x.output_dtype
         inner = self.o(x.operand)
         if x.op == "sum":
+            result = f"tl.sum({inner}, axis={x.axis}, dtype={x.accumulation_dtype.tl_name})"
+            return result if dt in (D.f32, D.f64) else f"tl.cast({result}, {dt.tl_name})"
+        # ADR-008: NumPy max propagates NaN; Triton's default max does not.
+        if dt.is_float:
+            self.needs_float_maximum = True
             if dt in (D.f16, D.bf16):
-                return (f"tl.cast(tl.sum({inner}, axis={x.axis}, "
-                        f"dtype=tl.float32), {dt.tl_name})")
-            if dt is D.f32 or dt is D.f64:
-                return f"tl.sum({inner}, axis={x.axis}, dtype=tl.float32)" \
-                    if dt is D.f32 else \
-                    f"tl.sum({inner}, axis={x.axis}, dtype=tl.float64)"
-            return f"tl.cast(tl.sum({inner}, axis={x.axis}, dtype={dt.tl_name}), {dt.tl_name})"
+                return f"tl.cast(tl.reduce(tl.cast({inner}, tl.float32), {x.axis}, _tila_maximum), {dt.tl_name})"
+            return f"tl.reduce({inner}, {x.axis}, _tila_maximum)"
         # max：Triton 对窄 dtype 以宽 dtype 返回——显式恢复
-        if dt in (D.f16, D.bf16):
+        if dt.is_int and dt.bits < 32:
             return f"tl.cast(tl.max({inner}, axis={x.axis}), {dt.tl_name})"
         return f"tl.max({inner}, axis={x.axis})"
 

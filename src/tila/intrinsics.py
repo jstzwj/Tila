@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 5  # ADR-015 typed constant bits
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 6  # ADR-008 reduction domains/NaN policy
 
 
 class SurfaceForm(str, Enum):

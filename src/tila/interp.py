@@ -330,8 +330,7 @@ class Interp:
             if x.op == "sum":
                 if dt.is_int:
                     return numeric.wrap(np.sum(v.astype(object), axis=x.axis), dt)
-                r = np.sum(v, axis=x.axis,
-                           dtype=np.float64 if dt is D.f64 else np.float32)
+                r = np.sum(v, axis=x.axis, dtype=_np_dtype(x.accumulation_dtype))
                 return np.asarray(r).astype(_np_dtype(dt))
             r = np.max(v, axis=x.axis)
             return np.asarray(r).astype(_np_dtype(dt))

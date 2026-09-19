@@ -1,6 +1,6 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M2-07a/b/c/d，下一步 M2-08 小型 CPU/GPU 语义对照
+状态：执行计划 v2；2026-09-19 完成 M2-08 固定环境 CPU/GPU 语义对照，下一步 M3 GPU 持续验收
 
 基线日期：2026-09-19（M0/M1、M2-01 至 M2-07 已完成，M2 进行中）
 
@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：798 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
+- 当前测试基线：832 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M2-08 GPU 70 节点/214 案例通过。
 
 ### 2.2 当前主要缺口
 
@@ -59,7 +59,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
 - 完整 FP8、target capability 与泛型仍是未来能力；
 - effect 只有聚合记录和局部 warning，race/uniformity/atomic 尚未形成系统；
-- M2-05 性质/差异审计、M2-06 explain golden、M2-07a/b/c/d 已完成；更广 fuzz 持续扩展，下一步 M2-08 系统对照。
+- M2-05 性质/差异审计、M2-06 explain golden、M2-07a/b/c/d、M2-08 固定 GPU 对照已完成；更广 fuzz 和持续 GPU 验收继续归后续阶段。
 
 ---
 
@@ -834,9 +834,10 @@ device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔�
 
 ## 17. 下一步
 
-M0/M1、**M2-01 至 M2-07 已完成**：
+M0/M1、**M2-01 至 M2-08 已完成**：
 ADR-012 至 ADR-015 分别覆盖布尔 tile mask、Const bool、宿主整数转换与显式舍入常量。
-下一步推进 **M2-08**，整合现有专项并扩展整数/cast/mask/归约的固定环境 CPU/GPU 对照。
+M2-08 已整合现有专项并扩展整数/cast/mask/归约的固定环境 CPU/GPU 对照，
+统一入口及局限见 [GPU 审计](docs/m2-gpu-audit.md)。下一步推进 M3 的持续 GPU 验收。
 Const bool 已自 0.3.0.dev0 开放，不回移至 0.2.x，不放宽 ExactInt。
 M2-06 的版本化审计格式与 golden 边界见 [explain 审计](docs/explain-audit.md)。
 M2-05 的有限穷举范围、差异台账与重放方式见 [证明审计](docs/m2-proof-audit.md)。
@@ -844,9 +845,8 @@ Mask/Const 易用性独立处理。
 M2-04 的不变量与可达性采用明确的保守子集，不包含一般递推求解，
 具体边界见 [数据流与解释器](docs/dataflow-interpreter.md)。
 
-同时推进 M3-01 的固定 GPU 环境，使 M2-08 的小型语义对照尽早可执行。
-M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及 M3 的正式
-支持矩阵/持续 runner 仍待完成，不因一次本地通过升级为 DONE。
+ADR-009 已固定本地 GPU 环境，M2-08 的有限语义对照已完成。
+M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升级为 DONE。
 
 ---
 
@@ -863,8 +863,8 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | [ADR-005](docs/adr/005-const-type-domain.md) | Accepted | Const 类型域 | Batch B | 0.2.x 只支持 `Const[int]`；比较结果是 staged bool 而非可声明的 `Const[bool]`，bool/dtype Const 延后 |
 | [ADR-006](docs/adr/006-intrinsic-registry.md) | Accepted | intrinsic registry 形态 | Batch B | registry 管机器元数据和完整性门禁，复杂规则委托专用 checker，backend 覆盖以 typed TIR 为边界 |
 | [ADR-007](docs/adr/007-integer-semantics.md) | Accepted | 整数溢出与除法语义 | M2-01 已完成 | runtime 回绕、floor 商余数、显式转换、定义域及索引门禁；基础 CPU/GPU 对照 |
-| ADR-008 | Proposed | reduction 精度 | M3 differential 前 | 输入、累加、返回 dtype 分开建模，不依赖后端隐式提升 |
-| ADR-009 | Proposed | target 支持矩阵 | GPU CI 建立前 | 首先固定一套 NVIDIA + Triton/PyTorch/CUDA 组合 |
+| ADR-008 | Accepted | reduction 精度 | M2-08 已实现 | 输入、累加、返回 dtype 与 NaN 策略明确建模 |
+| ADR-009 | Accepted | 本地 target 验收基线 | M2-08 已验证 | 固定 RTX 3090 + Triton/PyTorch/CUDA；正式支持和 CI 仍归 M3 |
 | ADR-010 | Proposed | effect/race 严格度 | M4 开始前 | bounds、effects、race 使用独立策略开关 |
 | [ADR-011](docs/adr/011-smt-proof-and-trust.md) | Accepted | 默认 SMT 与信任来源 | M2 证明迁移前 | Z3 + 布尔 DAG + 小型快速路径；Int/BitVec 分离、Exempted、预算及反例可达性 |
 | [ADR-012](docs/adr/012-boolean-tile-mask.md) | Accepted | 布尔 tile 与 Mask | M2-07a 已完成 | 受限消费者适配，保留类型与未知谓词身份 |
@@ -918,8 +918,8 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | M2-05 | DONE | 差异审计与性质测试 | M2-03/04 | 604 项 CPU 回归，新增 67 项专项；小位宽合法输入对穷举、SMT 对照/差异台账、固定种子布尔/控制流/广播、预算/缓存/来源隔离、失败见证重放；确认无复杂 DNF 执行入口，详见 docs/m2-proof-audit.md |
 | M2-06 | DONE | explain 与审计 golden | M2-03/05 | 628 项 CPU 回归，新增 24 项专项/15 份 golden；audit explain v1、信任来源/反例分类、预算修复建议、缓存与模型附件边界、CLI/错误 SMT 重放及两类 hint 依据；见 docs/explain-audit.md |
 | M2-07 | DONE | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b/c/d 均完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/11 组 GPU 对照，c 为 39 项宿主转换专项，d 为 39 项专项/两份 golden/46 组 GPU 按位对照；ADR-012 至 015 与状态表同步 |
-| M2-08 | TODO | 小型 CPU/GPU 语义对照 | M2-01、M3-01 | 整数/cast/mask/归约在固定环境对照；无 runner 明确未验证，不阻塞 CPU 检查 |
-| M3-01 | BLOCKED | GPU 支持矩阵 | ADR-009 | 依赖版本和 CI runner 明确 |
+| M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
+| M3-01 | BLOCKED | GPU 支持矩阵 | ADR-009 | 本地依赖基线已明确；持续 CI runner 与正式支持矩阵尚未建立 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

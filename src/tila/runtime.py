@@ -43,6 +43,7 @@ _TORCH_DT = {
     "float16": D.f16, "float32": D.f32, "float64": D.f64,
     "bfloat16": D.bf16, "int8": D.i8, "int16": D.i16, "int32": D.i32,
     "int64": D.i64, "uint8": D.u8, "bool": D.bool_,
+    "uint16": D.u16, "uint32": D.u32, "uint64": D.u64,
 }
 
 
@@ -757,7 +758,7 @@ class _Launcher:
                     "TILA-TYPE-101",
                     f"buffer '{b.name}' dtype mismatch",
                     [f"    declared: {b.vtype.elem.name}",
-                     f"    got:      {dt.name}"])
+                     f"    got:      {dt.name if dt is not None else 'unsupported dtype'}"])
             if len(shape) != len(b.vtype.dims):
                 raise TilaLaunchContractError(
                     "TILA-TYPE-102", f"buffer '{b.name}' rank mismatch",
@@ -794,7 +795,7 @@ class _Launcher:
                     "TILA-TYPE-101",
                     f"pointer parameter '{p.name}' dtype mismatch",
                     [f"    declared: {p.vtype.elem.name}",
-                     f"    got:      {dt.name}"])
+                     f"    got:      {dt.name if dt is not None else 'unsupported dtype'}"])
             if not _is_contiguous(shape, strides):
                 raise TilaLaunchContractError(
                     "TILA-TYPE-102",

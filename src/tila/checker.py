@@ -1922,7 +1922,12 @@ class Checker:
             raise TilaError("TILA-SHAPE-009",
                             f"{op} requires a block", e.loc)
         ax = e.args[1]
-        if not (isinstance(ax, Lit) and isinstance(ax.value, int)):
+        dt = x.vtype.elem.dtype
+        if dt is D.bool_:
+            raise TilaError("TILA-TYPE-028", "numeric reduction requires arithmetic dtype; use .any()/.all() for bool", e.loc)
+        if dt not in D.ARITH_DTYPES:
+            raise TilaError("TILA-TYPE-036", "storage-only dtype: cast before reduction", e.loc)
+        if not (isinstance(ax, Lit) and type(ax.value) is int):
             raise TilaError("TILA-CONST-002",
                             "reduce axis must be a literal int", e.loc)
         if ax.value not in range(len(x.vtype.dims)):

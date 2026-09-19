@@ -6,7 +6,15 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 798 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 832 passed、零 skipped
+
+M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节点、214 个语义
+案例通过，零 skipped。统一命令 `PYTHONPATH=src python tools/gpu_audit.py`，
+记录环境、源码、失败数据与重放命令；版本不符/无 GPU 不可验收。
+[ADR-008](adr/008-reduction-precision.md) 固定归约输入/累加/输出精度及 NaN 传播，
+[ADR-009](adr/009-gpu-validation-baseline.md) 固定本地组合。已修复宽无符号
+PyTorch dtype 绑定、窄整数 max 恢复、浮点 max NaN 一致性与 bool/FP8 归约门禁。
+正式 GPU CI、跨架构/版本支持矩阵仍未建立，归 M3。
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -280,7 +288,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `where` | `Implemented` | Check / CPU / Triton | eager 两侧；dtype 必须一致，shape 可广播 |
 | `dot` f16 输入 | `Implemented` | Check / CPU / Triton | rank-2，acc 支持 f16/f32；无真实 GPU CI |
 | `dot` bf16/FP8 输入 | `Designed` | — | 当前 `DOT_INPUT` 仅 f16 |
-| `sum/max` | `Implemented` | Check / CPU / Triton | axis 为字面量；返回 dtype 按当前规范恢复 |
+| `sum/max` | `Implemented` | Check / CPU / Triton | ADR-008：exact int axis；显式累加与输出 dtype、NaN 传播；12 dtype 双轴 GPU 对照；bool/FP8 先拒绝或 cast |
 | `min` reduction | `Deferred` | — | 尚未实现 |
 | `exp` | `Implemented` | Check / CPU / Triton | Float 域逐元素 |
 | `exp2` | `Implemented` | Check / CPU / Triton | 公共占位符、frontend、checker、interpreter 与 lowering 已对齐 |

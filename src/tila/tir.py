@@ -184,6 +184,20 @@ class TReduce(TExpr):
     operand: TOperand
     axis: int
 
+    @property
+    def input_dtype(self):
+        return self.vt.elem.dtype if isinstance(self.vt, TY.BlockT) else self.vt.dtype
+
+    @property
+    def accumulation_dtype(self):
+        from . import dtypes as D
+        dt = self.input_dtype
+        return D.f32 if self.op == "sum" and dt in (D.f16, D.bf16) else dt
+
+    @property
+    def output_dtype(self):
+        return self.input_dtype
+
 
 @dataclass
 class TLoad(TExpr):

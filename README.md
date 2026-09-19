@@ -124,6 +124,10 @@ shape/grid/标量范围。复杂数据依赖定义域目前保守拒绝，完整
 新增整数 GPU 对照可运行 `PYTHONPATH=src python tests/gpu_integer_smoke.py`；
 已有本地验证，不构成完整 GPU CI 或跨版本支持承诺。
 
+M2-08 统一验收入口：`PYTHONPATH=src python tools/gpu_audit.py`，固定环境、
+归约契约、覆盖范围及失败重放见 [GPU 语义审计](docs/m2-gpu-audit.md)。
+完整本地通过仍不代表已有持续 GPU CI。
+
 ---
 
 ## 安装与验证

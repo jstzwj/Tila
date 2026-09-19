@@ -12,9 +12,11 @@
 | [ADR-005](005-const-type-domain.md) | Accepted | Const 类型域与 staged bool 边界 |
 | [ADR-006](006-intrinsic-registry.md) | Accepted | Intrinsic registry 架构与完整性门禁 |
 | [ADR-007](007-integer-semantics.md) | Accepted | 整数回绕、floor 除法、转换、索引门禁与 ABI；M2-01 已实现 |
+| [ADR-008](008-reduction-precision.md) | Accepted | sum/max 输入、累加、输出 dtype 与 NaN 策略；M2-08 已实现 |
+| [ADR-009](009-gpu-validation-baseline.md) | Accepted | 固定本地 GPU 验收组合与重放；正式 CI/支持仍归 M3 |
 | [ADR-011](011-smt-proof-and-trust.md) | Accepted | M2-02/03 已实现 DAG/ProofResult、默认 Z3、预算及缓存；系统可达性/审计继续 |
 
-ADR-008 至 ADR-010 的议题仍在 `plan.md` 中处于 Proposed，尚未形成独立决策文件；
+ADR-010 的议题仍在 `plan.md` 中处于 Proposed，尚未形成独立决策文件；
 ADR-011 不替代 ADR-007 对具体整数运算语义的决策。
 
 M2-07 独立决策（ADR-012 至 ADR-015 均已接受并实现）：

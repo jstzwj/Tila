@@ -147,6 +147,12 @@ exp / exp2（均已实现）/ log / sqrt / rsqrt / abs / floor / ceil [未排期
 neg / +,−,*,/,%(整除语义按 dtype)                       逐元素，§6 转换规则
 ```
 
+归约精度见 [ADR-008](adr/008-reduction-precision.md)：sum 对 f16/bf16 使用 f32
+累加，f32/f64 保持累加精度，整数按输入位宽回绕；输出均保持输入 dtype。
+max 传播 NaN，窄 dtype 显式恢复；浮点 sum 不保证归约树或位级相同。
+bool 使用 `.any()`/`.all()`；FP8 先 cast。axis 仅接受非负范围内 exact int 字面量。
+masked load 的 other 正常参与归约，max 的默认零不适合全负输入。
+
 ### 2.8 形状操作
 
 ```text
