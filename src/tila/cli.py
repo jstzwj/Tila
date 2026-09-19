@@ -87,6 +87,10 @@ def main(argv=None):
     ap.add_argument("--explain", action="store_true",
                     help="check 通过后附加 --explain 审计输出"
                          "（类型环境/事实集/义务证明链/hint/效应，§8）")
+    ap.add_argument("--show-query", action="store_true",
+                    help="explain: append raw SMT-LIB replay queries; omitted from stable audit output")
+    ap.add_argument("--show-witness", action="store_true", help="explain: show solver-selected witness bindings")
+    ap.add_argument("--show-cache", action="store_true", help="explain: show per-call cache telemetry")
     ap.add_argument("--safety", choices=["strict", "warn"], default="strict",
                     help="bounds 义务严格度：strict（默认）Unknown → error；"
                          "warn → warning 后继续（refinements.md §5.3；"
@@ -117,7 +121,8 @@ def main(argv=None):
             if args.command == "explain":
                 # explain：不 materialize（Unknown 义务只展示、不 raise），
                 # 直接给出 §8 审计输出
-                print(k.explain(consts))
+                print(k.explain(consts, show_query=args.show_query,
+                                show_witness=args.show_witness, show_cache=args.show_cache))
                 continue
             src, tir = k.materialize(consts)
             if args.command == "check":
@@ -125,7 +130,8 @@ def main(argv=None):
                 print(f"✓ {name}: Stage 1 + Stage 2 (consts={label}) 通过")
                 print(k.report())
                 if args.explain:
-                    print(k.explain(consts))
+                    print(k.explain(consts, show_query=args.show_query,
+                                    show_witness=args.show_witness, show_cache=args.show_cache))
                 continue
             if args.command == "build":
                 os.makedirs(args.out, exist_ok=True)
@@ -141,6 +147,15 @@ def main(argv=None):
         return 0 if ok else 1
     except TilaError as e:
         print(e.render(), file=sys.stderr)
+        if args.show_witness and e.proof_result is not None and e.proof_result.candidate_counterexample:
+            print("witness bindings (model-specific):", file=sys.stderr)
+            for name, value in sorted(e.proof_result.candidate_counterexample):
+                print(f"  {name}: {value}", file=sys.stderr)
+        if args.show_cache and e.proof_result is not None:
+            print("proof cache telemetry: " + e.proof_result.cache_status, file=sys.stderr)
+        if args.show_query and e.proof_result is not None and e.proof_result.query:
+            print("SMT-LIB replay query:", file=sys.stderr)
+            print(e.proof_result.query.rstrip(), file=sys.stderr)
         return 2
     except TilaLaunchContractError as e:
         print(e, file=sys.stderr)

@@ -1,0 +1,22 @@
+error[TILA-BOUNDS-003]: out-of-bounds access is provable
+    at: line 3
+    phase: check, launch, specialize
+    load[data] axis 0: 0 <= 9 < 8
+    path: true
+    mask: true
+    conclusion: ProvenUnsafe (ProvenUnsafe)
+    state: ProvenUnsafe
+    source locations: line 3
+    trust sources:
+      - StaticFact: integer encoding and access-point intervals
+    proof route:
+      - exact scalar inputs and path; no load/loop abstraction
+    counterexample:
+      classification: confirmed reachable witness
+      bindings: omitted (use --show-witness; model choice is not stable)
+    unknown/pending:
+      reason: reachable scalar out-of-bounds access
+    proof cache: transparent (use --show-cache for per-call telemetry)
+    SMT-LIB replay: available with --show-query (omitted from stable audit)
+    fix:
+      修正坐标、补 mask（mask = offs < N），或 tila.unsafe_load

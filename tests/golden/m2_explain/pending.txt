@@ -1,0 +1,18 @@
+path: true
+mask: true
+conclusion: Unknown (Unknown)
+state: Unknown
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  (none)
+unknown/pending:
+  reason: pending launch contract
+  pending contract: grid must satisfy recorded relation
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  validate the recorded contracts on every launch

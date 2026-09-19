@@ -1,0 +1,17 @@
+path: true
+mask: true
+conclusion: Exempted (Exempted)
+state: Exempted
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  (none)
+unknown/pending:
+  reason: explicitly waived (unsafe access); no safety fact produced
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  unsafe is a local proof exemption, not evidence that the access is safe

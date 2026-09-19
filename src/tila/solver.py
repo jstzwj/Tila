@@ -292,8 +292,10 @@ class ProofSession:
             if self.config.cache_entries and key in _CACHE:
                 self.cache_hits += 1
                 _CACHE.move_to_end(key)
-                return _CACHE[key]
+                return replace(_CACHE[key], cache_status="hit")
             result = self.solve(ob, facts, nonneg, encoder, solver, goal, query)
+            result = replace(result, cache_status="disabled" if not self.config.cache_entries
+                             else "not-stored" if result.verdict == UNKNOWN else "miss")
             if self.config.cache_entries and result.verdict != UNKNOWN:
                 _CACHE[key] = result
                 while len(_CACHE) > self.config.cache_entries:

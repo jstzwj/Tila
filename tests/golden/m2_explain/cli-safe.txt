@@ -1,0 +1,43 @@
+kernel @safe_kernel — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: (none)
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  data : Buffer[i32, (8,), ReadOnly, UnknownAlignment]
+  data_stride0 : i32
+types:
+  data : Buffer[i32, (8,), ReadOnly, UnknownAlignment]
+  data_stride0 : i32
+  value : i32
+facts:
+  (none)
+obligations:
+  - load[data] axis 0: 0 <= 0 < 8
+      path: true
+      mask: true
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 3
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord 0 ∈ [0, 0], extent 8 ∈ [8, 8] ⇒ 0 < 8; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+hints:
+  (none)
+effects:
+  Read[BufferRegion[0:data]]
+aliases:
+  (none)
+warnings:
+  (none)
+notes:
+  (none)

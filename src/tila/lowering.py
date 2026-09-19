@@ -83,6 +83,7 @@ class Lowering:
         #   tl.constexpr 或字面量，运行期标量不可用）。
         self._pid_names = set()
         self._const_names = {c.name for c in tk.consts}
+        self.hint_audit = []
 
     # ------------------------------------------------------------------
 
@@ -150,6 +151,9 @@ class Lowering:
             split = self._multiple_of_split(s.name, s.value)
             if split is not None:
                 base, mul, rng, step = split
+                from .predicates import Origin, STATIC
+                self.hint_audit.append((f"multiple_of({base}, {self.o(step)})",
+                    (Origin(STATIC, s.line, "structural pid * step; integer launch guards required"),)))
                 add = T.TBin(s.value.vt, "+", T.TName(base), rng,
                              checked_index=s.value.checked_index)
                 out = [
@@ -161,6 +165,8 @@ class Lowering:
                 out = [f"{pad}{s.name} = {self.e(s.value)}"]
             if s.name in self.hint_after:
                 span = self.hint_after[s.name]
+                self.hint_audit.append((f"max_contiguous({s.name}, {self.dim(span)})",
+                                       tuple(sorted(self.tk.hint_origins.get(s.name, ())))))
                 out.append(f"{pad}tl.max_contiguous({s.name}, {self.dim(span)})")
             return out
         if isinstance(s, T.TStore):

@@ -225,13 +225,15 @@ class TilaError(Exception):
     """语言层 / 特化期静态错误（E 码族）。"""
 
     def __init__(self, code: str, title: str, loc: Loc | None = None,
-                 details: list[str] | None = None, fixes: list[str] | None = None):
+                 details: list[str] | None = None, fixes: list[str] | None = None,
+                 *, proof_result=None):
         self.spec = diagnostic_spec(code)
         self.code = code
         self.title = title
         self.loc = loc or Loc()
         self.details = details or []
         self.fixes = fixes or [self.spec.default_fix]
+        self.proof_result = proof_result
         super().__init__(self.render())
 
     def render(self) -> str:

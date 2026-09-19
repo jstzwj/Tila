@@ -1,0 +1,69 @@
+kernel @gather — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: (none)
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  data : Buffer[i32, (8,), ReadOnly, UnknownAlignment]
+  data_stride0 : i32
+  indices : Buffer[i32, (1,), ReadOnly, UnknownAlignment]
+  indices_stride0 : i32
+types:
+  data : Buffer[i32, (8,), ReadOnly, UnknownAlignment]
+  data_stride0 : i32
+  index : i32
+  indices : Buffer[i32, (1,), ReadOnly, UnknownAlignment]
+  indices_stride0 : i32
+  value : i32
+facts:
+  (none)
+obligations:
+  - load[indices] axis 0: 0 <= 0 < 1
+      path: true
+      mask: true
+      conclusion: ProvenSafe (ProvenSafe)
+      state: ProvenSafe
+      source locations: line 3
+      trust sources:
+        - StaticFact: numeric interval
+        - StaticFact: structural nonnegativity (pid/lane/dim/Const terms)
+      proof route:
+        - numeric interval: coord 0 ∈ [0, 0], extent 1 ∈ [1, 1] ⇒ 0 < 1; lower bound by structural nonnegativity (pid/lane/dim/Const terms)
+      counterexample:
+        (none)
+      unknown/pending:
+        (none)
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: not available
+      fix:
+        (none)
+  - load[data] axis 0: 0 <= __v1 < 8
+      path: true
+      mask: true
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 4
+      trust sources:
+        - StaticFact: integer encoding and access-point intervals
+      proof route:
+        - no upper-bound predicate `__v1 < 8` in scope (fact set: 0 pred(s); access-point snapshot: 0; entailed DAG atoms: 0); numeric interval not decisive (coord ∈ [?, ?], bound ∈ [8, 8]); no matching grid fact (grid facts are launch-time contracts — not available here); lower bound 0 <= __v1 also unproven (not structurally nonneg, no `__v1 >= 0` predicate)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+hints:
+  (none)
+effects:
+  Read[BufferRegion[1:indices]]
+  Read[BufferRegion[0:data]]
+aliases:
+  scope: static conservative defaults
+  MayAlias[BufferRegion[0:data], BufferRegion[1:indices]] (distinct external parameters are conservatively MayAlias)
+warnings:
+  (none)
+notes:
+  (none)

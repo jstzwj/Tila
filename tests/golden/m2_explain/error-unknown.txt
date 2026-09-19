@@ -1,0 +1,23 @@
+error[TILA-BOUNDS-001]: possible out-of-bounds access (cannot prove safety)
+    at: line 4
+    phase: check, launch, specialize
+        load[data] axis 0: 0 <= __v1 < 8
+        证明失败：缺少上界谓词或契约
+    path: true
+    mask: true
+    conclusion: Unknown (Unknown)
+    state: Unknown
+    source locations: line 4
+    trust sources:
+      - StaticFact: integer encoding and access-point intervals
+    proof route:
+      - no upper-bound predicate `__v1 < 8` in scope (fact set: 0 pred(s); access-point snapshot: 0; entailed DAG atoms: 0); numeric interval not decisive (coord ∈ [?, ?], bound ∈ [8, 8]); no matching grid fact (grid facts are launch-time contracts — not available here); lower bound 0 <= __v1 also unproven (not structurally nonneg, no `__v1 >= 0` predicate)
+    counterexample:
+      classification: candidate only; reachability unverified
+      bindings: omitted (use --show-witness; model choice is not stable)
+    unknown/pending:
+      reason: candidate counterexample; concrete reachability unverified
+    proof cache: transparent (use --show-cache for per-call telemetry)
+    SMT-LIB replay: available with --show-query (omitted from stable audit)
+    fix:
+      补 mask：mask = offs < N（逐轴），或 @ti.assume_launch 声明整除契约，或 ti.unsafe_load/unsafe_store 显式豁免

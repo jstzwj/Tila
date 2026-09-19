@@ -1,0 +1,4 @@
+  multiple_of(index_base, BLOCK)
+    dependency: StaticFact at line 4: structural pid * step; integer launch guards required
+  max_contiguous(index, BLOCK)
+    dependency: StaticFact at line 4: structural contiguous span; integer launch guards required

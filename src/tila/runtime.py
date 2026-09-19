@@ -27,7 +27,7 @@ from .dims import (Cst, DimExpr, Mul, Sym, equal, free_syms, int_value,
                    rewrite_syms)
 from .errors import Loc, TilaError, TilaLaunchContractError
 from .facts import (Facts, Pred, _decompose_linear, evaluate_obligation,
-                    explain_obligation, PROVEN_SAFE, PROVEN_UNSAFE,
+                    audit_result_lines, audit_fix, PROVEN_SAFE, PROVEN_UNSAFE,
                     SAFE_UNDER_CONTRACT, UNKNOWN)
 from .intrinsics import INTRINSIC_REGISTRY_SEMANTIC_REVISION
 from . import types as TY
@@ -214,11 +214,12 @@ class JITFunction:
             out.append(f"  hint: max_contiguous({var}, {span})")
         return "\n".join(out)
 
-    def explain(self, consts: dict | None = None) -> str:
+    def explain(self, consts: dict | None = None, *, show_query=False,
+                show_witness=False, show_cache=False) -> str:
         """--explain 审计输出（surface-language.md §8）：类型环境、事实集、
         义务证明链、发射的 hint、效应汇总 + warnings/notes——全部可审计。
 
-        只读：不 run lowering、不触发 strict 义务 error（Unknown 只展示，
+        只读：不编译/执行生成代码、不触发 strict 义务 error（Unknown 只展示，
         不 raise）、不改动 tk / last_report。Const 解析同 materialize
         （缺值 raise TILA-CONST-007，精化违反 raise TILA-CONST-003）。
 
@@ -241,7 +242,8 @@ class JITFunction:
         from .solver import ProofSession
         proof_session = ProofSession()
 
-        L = [f"kernel @{tk.name} — explain (surface-language.md §8)"]
+        L = [f"kernel @{tk.name} — audit explain v1"]
+        L.append("audit format: stable sections; raw SMT-LIB is opt-in")
         ctext = ", ".join(f"{k}={v}" for k, v in sorted(cenv.items()))
         L.append(f"  consts: {ctext if ctext else '(none)'}")
         L.append("  note: grid facts are launch-time contracts and are not "
@@ -252,9 +254,23 @@ class JITFunction:
             L.append("integer launch contracts (must pass before execution):")
             L.extend("  " + msg for msg in dict.fromkeys(pending))
 
+        L.append("parameters:")
+        parameters = []
+        parameters.extend((p.name, TY.describe(p.vtype)) for p in tk.buffers)
+        parameters.extend((p.name, TY.describe(p.vtype)) for p in tk.ptr_params)
+        parameters.extend((p.name, TY.RefinedScalar(p.dtype, p.refined).describe())
+                          for p in tk.scalars)
+        parameters.extend((p.name, TY.ConstT(p.name, p.refinements, p.default).describe())
+                          for p in tk.consts)
+        if parameters:
+            for name, desc in sorted(parameters):
+                L.append(f"  {name} : {desc}")
+        else:
+            L.append("  (none)")
+
         L.append("types:")
         if tk.types:
-            for n, t in tk.types.items():
+            for n, t in sorted(tk.types.items()):
                 L.append(f"  {n} : {TY.describe(t)}")
         else:
             L.append("  (none)")
@@ -278,10 +294,14 @@ class JITFunction:
             L.append("  (none)")
 
         L.append("hints:")
-        if tk.hints:
-            for var, span in tk.hints:
-                L.append(f"  max_contiguous({var}, {span})")
-                for origin in sorted(tk.hint_origins.get(var, ())):
+        # A private lowering instance records exactly the hints it would emit;
+        # it neither mutates TKernel nor compiles/executes generated code.
+        hint_emitter = lowering.Lowering(tk)
+        hint_emitter.stmts(tk.body, 1)
+        if hint_emitter.hint_audit:
+            for hint, origins in hint_emitter.hint_audit:
+                L.append(f"  {hint}")
+                for origin in origins:
                     L.append(f"    dependency: {origin.kind} at line {origin.line}: {origin.detail}")
         else:
             L.append("  (none)")
@@ -304,16 +324,27 @@ class JITFunction:
         else:
             L.append("  (none)")
 
+        # Keep semantic proof sections ahead of auxiliary optimization/effect
+        # metadata, while using exactly the existing metadata producers above.
+        auxiliary_start = L.index("hints:")
+        auxiliary = L[auxiliary_start:]
+        L = L[:auxiliary_start]
         L.append("obligations:")
+        replay = []
         if tk.obligations:
-            for ob in tk.obligations:
+            for ordinal, ob in enumerate(tk.obligations, 1):
                 L.append(f"  - {ob.describe()}")
-                for line in explain_obligation(ob, facts,
-                                               tk.nonneg_syms, proof_session).splitlines():
+                result = evaluate_obligation(ob, facts, tk.nonneg_syms,
+                                             proof_session)
+                for line in audit_result_lines(ob, result, show_witness=show_witness,
+                                               show_cache=show_cache):
                     L.append(f"      {line}")
+                if result.query:
+                    replay.append((ordinal, result.query))
         else:
             L.append("  (none)")
 
+        L.extend(auxiliary)
         L.append("warnings:")
         if tk.warnings:
             for w in tk.warnings:
@@ -342,6 +373,14 @@ class JITFunction:
                              f"numel equal")
                 else:               # 防御：未知 kind 原样列出
                     L.append(f"  {d['kind']}: {d.get('what', '')}")
+        if show_query:
+            L.append("SMT-LIB replay queries:")
+            if replay:
+                for ordinal, query in replay:
+                    L.append(f"  - obligation {ordinal}:")
+                    L.extend("    " + line for line in query.rstrip().splitlines())
+            else:
+                L.append("  (none)")
         return "\n".join(L)
 
     # -- Stage 2 内部 -------------------------------------------------------
@@ -513,8 +552,8 @@ class JITFunction:
             if state == PROVEN_UNSAFE:
                 raise TilaError(     # 无条件 error（任何模式，bounds-safety §6）
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
-                    Loc(ob.loc_line), [f"    {ob.describe()}"],
-                    ["修正坐标、补 mask，或 unsafe_load/unsafe_store"])
+                    Loc(ob.loc_line), [ob.describe(), *audit_result_lines(ob, result, include_fix=False)],
+                    ["修正坐标、补 mask，或 unsafe_load/unsafe_store"], proof_result=result)
             if state == UNKNOWN and not (not launch_checked and result.pending_contracts):
                 warn = self._raise_unknown(ob, result)
                 if warn is not None:
@@ -538,7 +577,11 @@ class JITFunction:
         """
         err = self._unknown_error(ob)
         if result is not None:
-            err.details.append(result.render())
+            if "budget" in result.reason or "inconsistent premises" in result.reason:
+                err.details = [ob.describe()]
+                err.fixes = [audit_fix(result)]
+            err.details.extend(audit_result_lines(ob, result, include_fix=False))
+            err.proof_result = result
         if os.environ.get("TILA_SAFETY", "strict") != "warn":
             raise err
         lines = err.render().split("\n")

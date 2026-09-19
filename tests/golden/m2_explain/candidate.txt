@@ -1,0 +1,20 @@
+path: true
+mask: true
+conclusion: Unknown (Unknown)
+state: Unknown
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  classification: candidate only; reachability unverified
+  x: -1
+  coordinate: -1
+  extent: 8
+unknown/pending:
+  reason: candidate counterexample; concrete reachability unverified
+proof cache: not-applicable
+SMT-LIB replay: available with --show-query (omitted from stable audit)
+fix:
+  provide valid lower/upper bounds; inspect the candidate or replay query

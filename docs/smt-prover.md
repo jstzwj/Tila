@@ -78,8 +78,9 @@ grid 检查状态、可达性输入/上下文精确性、编码版本、Z3 版�
 - 用户假设冲突、模型可能不可达、求解器预算不足：保持 Unknown 和审计信息。
 
 M2-05 已完成有界系统性质测试与结论差异审计，覆盖范围与重放方式见
-[证明审计](m2-proof-audit.md)。完整 explain golden 归 M2-06；一般循环不变量
-和可达性不在当前精确子集内。
+[证明审计](m2-proof-audit.md)。M2-06 已固定 [audit explain v1](explain-audit.md)
+和 CLI/关键错误 golden；模型、缓存遥测和原始查询是可选附件。
+一般循环不变量和可达性不在当前精确子集内。
 
 参考：[Z3 Bitvectors](https://microsoft.github.io/z3guide/docs/theories/Bitvectors/)、
 [资源参数](https://microsoft.github.io/z3guide/programming/Parameters/)。

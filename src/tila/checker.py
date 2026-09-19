@@ -12,7 +12,7 @@ from . import predicates as P
 from . import dtypes as D
 from .dims import (Cst, DimExpr, FloorDiv, Mod, Sym, canon, equal, free_syms)
 from .errors import Loc, TilaError, Warning_
-from .facts import (Facts, Obligation, Pred, evaluate_obligation,
+from .facts import (Facts, Obligation, Pred, evaluate_obligation, audit_result_lines,
                     is_nonneg_expr, PROVEN_UNSAFE)
 from . import types as TY
 from . import tir as T
@@ -265,12 +265,13 @@ class Checker:
         from .solver import ProofSession
         proof_session = ProofSession()
         for ob in self.tk.obligations:
-            if evaluate_obligation(ob, proof_facts, self.nonneg_syms, proof_session).verdict == \
-                    PROVEN_UNSAFE:
+            result = evaluate_obligation(ob, proof_facts, self.nonneg_syms, proof_session)
+            if result.verdict == PROVEN_UNSAFE:
                 raise TilaError(
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
-                    Loc(ob.loc_line), [f"    {ob.describe()}"],
-                    ["修正坐标、补 mask（mask = offs < N），或 tila.unsafe_load"])
+                    Loc(ob.loc_line), [ob.describe(), *audit_result_lines(ob, result, include_fix=False)],
+                    ["修正坐标、补 mask（mask = offs < N），或 tila.unsafe_load"],
+                    proof_result=result)
         self.tk.types = {n: v.vtype for n, v in self.vars.items()
                          if v.vtype is not None}
         self.tk.nonneg_syms = set(self.nonneg_syms)

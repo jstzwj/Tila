@@ -6,7 +6,7 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 604 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 628 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -15,7 +15,8 @@
 详见 [证明器实现边界](smt-prover.md)。M2-04 已收口活跃分支合并、简单循环不变量、
 零次循环出口和 CPU 内存访问语义，边界见 [数据流与解释器](dataflow-interpreter.md)。
 M2-05 已补小位宽穷举、性质测试、差异审计和失败重放，覆盖范围见
-[证明审计](m2-proof-audit.md)。ExactInt 和 Mask 的公开边界不变。
+[证明审计](m2-proof-audit.md)。M2-06 已固定 [audit explain v1](explain-audit.md)、
+CLI/关键错误 golden、反例与重放附件边界。ExactInt 和 Mask 的公开边界不变。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
@@ -157,7 +158,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | contiguous fact | `Implemented` | Check / Triton | 基于 arange 的事实生成 `tl.max_contiguous` |
 | multiple-of lowering fact | `Implemented` | Check / Triton | `pid*STEP + arange` 拆基并发射 `tl.multiple_of`，有 golden/负例测试 |
 | 内部 `StrideEq` / `Contiguous` facts | `Designed` | — | ADR-003 明确不提供公共构造；launch 推导与性能分析消费路径尚未闭环 |
-| fact provenance | `Partial` | Check | explain 能展示部分事实/证明链；尚无每条 hint 的完整来源对象 |
+| fact provenance | `Partial` | Check / Triton | ProofResult 记录信任来源；两类已发射 hint 均展示结构性依据/位置；不承诺最小证明或全局事实推导图 |
 
 ---
 
@@ -310,13 +311,13 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `TILA-SYN/TYPE/SHAPE/CONST/MEM/BOUNDS/EFFECT` | `Implemented` | Check / Launch | 当前错误码目录见 `docs/diagnostics.md`；兼容性变更必须同步 registry 与测试 |
 | `TILA-TARGET` 完整诊断族 | `Partial` | Launch | 缺 triton/CUDA tensor 有诊断；完整硬件 capability 尚无实现 |
 | `TILA-RACE/UNIFORM` | `Designed` | — | 错误码只存在于设计文档 |
-| `explain` 类型/事实/effect/obligation | `Implemented` | CLI | 有章节和只读/idempotent 测试 |
-| proof trace | `Partial` | CLI | fast path 可解释；尚无统一 provenance/solver trace |
+| `explain` 类型/事实/effect/obligation | `Implemented` | CLI | audit explain v1 固定章节/状态字段；CLI/诊断 golden、只读与跨 hash seed 回归 |
+| proof trace | `Partial` | CLI | fast/SMT 路线与信任来源统一展示，原始查询可选重放；非完整 Z3 proof/minimal core |
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
 | GPU differential | `Partial` | CPU / Triton | 显式整数 smoke 已在固定本地环境运行；官方示例全覆盖、CI 与支持矩阵仍待 M3 |
-| property/fuzz tests | `Designed` | — | 旧基线测试已归档，新实现尚未建立系统 property suite |
+| property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---
 

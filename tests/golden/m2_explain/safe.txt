@@ -1,0 +1,17 @@
+path: true
+mask: x < 8
+conclusion: ProvenSafe (ProvenSafe)
+state: ProvenSafe
+source locations: line 9, line 10
+trust sources:
+  - StaticFact line 9: comparison
+proof route:
+  - direct predicate `x < 8`; lower bound is nonnegative
+counterexample:
+  (none)
+unknown/pending:
+  (none)
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  (none)

@@ -181,6 +181,8 @@ class ProofResult:
     candidate_counterexample: tuple = ()
     pending_contracts: tuple[str, ...] = ()
     query: str = ""
+    # Presentation telemetry: semantic equality intentionally ignores cache use.
+    cache_status: str = field(default="not-applicable", compare=False)
 
     @property
     def summary(self):
@@ -198,12 +200,132 @@ class ProofResult:
         if self.reason:
             lines.append(f"reason: {self.reason}")
         if self.candidate_counterexample:
-            lines.append("counterexample candidate: " + ", ".join(
-                f"{name}={value}" for name, value in self.candidate_counterexample))
+            label = "confirmed counterexample" if self.verdict == PROVEN_UNSAFE else "counterexample candidate"
+            lines.append(label + ": " + ", ".join(
+                f"{name}={value}" for name, value in sorted(self.candidate_counterexample)))
         for origin in sorted(self.dependencies):
             lines.append(f"dependency: {origin.kind} at line {origin.line}: {origin.detail}")
         lines.extend(f"pending contract: {p}" for p in self.pending_contracts)
         return "\n".join(lines)
+
+
+def predicate_audit_text(root: P.Predicate) -> str:
+    """Stable identity-free Boolean DAG rendering for audit snapshots."""
+    memo, todo = {}, [(root, False)]
+    definitions, unknowns = [], {}
+    visited = set()
+    while todo:
+        node, ready = todo.pop()
+        if node in memo:
+            continue
+        if not ready:
+            visited.add(node)
+            if len(visited) > 256:
+                return "<predicate omitted: audit display budget exceeded (256 nodes)>"
+            todo.append((node, True))
+            todo.extend((child, False) for child in node.args if child not in memo)
+            continue
+        args = [memo[child] for child in node.args]
+        if node.op in ("true", "false"):
+            value = node.op
+        elif node.op == "unknown":
+            unknowns[node] = len(unknowns)
+            value = f"unknown#{unknowns[node]}"
+        elif node.op == "unknown_view":
+            value = f"view({args[0]}, axes={node.mapping})"
+        elif node.op == "atom":
+            value = f"{node.atom.left} {node.atom.op} {node.atom.right}"
+        elif node.op == "not":
+            value = f"not ({args[0]})"
+        elif node.op in ("and", "or"):
+            value = f"({args[0]}) {node.op} ({args[1]})"
+        elif node.op == "map":
+            # Mapping internals contain DimExpr objects; their dataclass repr
+            # is implementation detail, not an explain ABI.
+            value = f"mapped({args[0]})"
+        else:
+            value = f"unsupported-predicate[{node.op}]"
+        if len(value) > 256:
+            label = f"p{len(definitions)}"
+            definitions.append(f"{label} = {value}")
+            value = label
+        memo[node] = value
+    return "; ".join(definitions + [memo[root]])
+
+
+def audit_result_lines(ob: Obligation, result: ProofResult, *,
+                       show_witness=False, show_cache=False, include_fix=True) -> tuple[str, ...]:
+    """Stable explain subsection; raw SMT-LIB is opt-in replay material."""
+    lines = [f"path: {predicate_audit_text(ob.path)}",
+             f"mask: {predicate_audit_text(ob.mask)}",
+             f"conclusion: {result.summary} ({result.verdict})",
+             # Kept as a compatibility alias for scripts predating audit v1.
+             f"state: {result.summary}"]
+    locations = ", ".join(f"line {line}" for line in sorted(set(result.source_locations) | {ob.loc_line}) if line)
+    lines.append("source locations: " + (locations or "<kernel/implicit>"))
+    lines.append("trust sources:")
+    if result.dependencies:
+        for origin in sorted(result.dependencies):
+            detail = f": {origin.detail}" if origin.detail else ""
+            line = f" line {origin.line}" if origin.line else ""
+            lines.append(f"  - {origin.kind}{line}{detail}")
+    else:
+        lines.append("  - (none)")
+    lines.append("proof route:")
+    if result.trace:
+        lines.extend(f"  - {item}" for item in result.trace)
+    else:
+        lines.append("  - (none)")
+    lines.append("counterexample:")
+    if result.candidate_counterexample:
+        label = "confirmed reachable witness" if result.verdict == PROVEN_UNSAFE \
+            else "candidate only; reachability unverified"
+        lines.append(f"  classification: {label}")
+        pairs = sorted(result.candidate_counterexample,
+                       key=lambda item: (item[0] in ("coordinate", "extent"), item[0]))
+        if show_witness:
+            lines.extend(f"  {name}: {value}" for name, value in pairs)
+        else:
+            lines.append("  bindings: omitted (use --show-witness; model choice is not stable)")
+    else:
+        lines.append("  (none)")
+    lines.append("unknown/pending:")
+    if result.reason:
+        reason = ("solver returned unknown (solver-specific detail omitted)"
+                  if result.reason.startswith("Z3 unknown:") else result.reason)
+        lines.append(f"  reason: {reason}")
+    lines.extend(f"  pending contract: {item}" for item in result.pending_contracts)
+    if not result.reason and not result.pending_contracts:
+        lines.append("  (none)")
+    lines.append("proof cache: " + (result.cache_status if show_cache else
+                 "transparent (use --show-cache for per-call telemetry)"))
+    lines.append("SMT-LIB replay: " +
+                 ("available with --show-query (omitted from stable audit)" if result.query
+                  else "not available"))
+    if include_fix:
+        lines.extend(("fix:", "  " + audit_fix(result)))
+    return tuple(lines)
+
+
+def audit_fix(result: ProofResult) -> str:
+    if result.pending_contracts:
+        fix = "validate the recorded contracts on every launch"
+    elif result.verdict == PROVEN_UNSAFE:
+        fix = "correct the index or guard every active access with a valid bounds mask"
+    elif result.verdict == UNKNOWN:
+        if "budget" in result.reason:
+            fix = "simplify the obligation or explicitly raise the relevant TILA_PROOF budget"
+        elif "inconsistent premises" in result.reason:
+            fix = "correct contradictory assumptions; do not infer safety from them"
+        else:
+            fix = "provide valid lower/upper bounds; inspect the candidate or replay query"
+    elif result.verdict == EXEMPTED:
+        fix = "unsafe is a local proof exemption, not evidence that the access is safe"
+    elif any(o.kind == P.USER for o in result.dependencies):
+        fix = "verify user assumptions; TILA_DEBUG=1 checks them during CPU execution"
+    else:
+        fix = "(none)"
+    return fix
 
 
 def _decompose_linear(e: DimExpr):

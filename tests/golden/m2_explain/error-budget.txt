@@ -1,0 +1,21 @@
+error[TILA-BOUNDS-001]: possible out-of-bounds access (cannot prove safety)
+    at: line 3
+    phase: check, launch, specialize
+    load[data] axis 0: 0 <= 0 < 8
+    path: true
+    mask: true
+    conclusion: Unknown (Unknown)
+    state: Unknown
+    source locations: line 3
+    trust sources:
+      - (none)
+    proof route:
+      - (none)
+    counterexample:
+      (none)
+    unknown/pending:
+      reason: kernel cumulative proof budget exhausted during construction
+    proof cache: transparent (use --show-cache for per-call telemetry)
+    SMT-LIB replay: not available
+    fix:
+      simplify the obligation or explicitly raise the relevant TILA_PROOF budget

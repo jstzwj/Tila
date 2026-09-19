@@ -1,0 +1,17 @@
+path: true
+mask: true
+conclusion: ProvenSafe [UserAssumption] (ProvenSafe)
+state: ProvenSafe [UserAssumption]
+source locations: line 7, line 10
+trust sources:
+  - UserAssumption line 7: assume bound
+proof route:
+  - Z3: facts ∧ path ∧ mask ∧ ¬in_bounds is unsat
+counterexample:
+  (none)
+unknown/pending:
+  (none)
+proof cache: hit
+SMT-LIB replay: available with --show-query (omitted from stable audit)
+fix:
+  verify user assumptions; TILA_DEBUG=1 checks them during CPU execution

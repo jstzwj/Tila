@@ -1,0 +1,20 @@
+path: true
+mask: true
+conclusion: ProvenUnsafe (ProvenUnsafe)
+state: ProvenUnsafe
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  classification: confirmed reachable witness
+  x: -1
+  coordinate: -1
+  extent: 8
+unknown/pending:
+  reason: reachable scalar out-of-bounds access
+proof cache: miss
+SMT-LIB replay: available with --show-query (omitted from stable audit)
+fix:
+  correct the index or guard every active access with a valid bounds mask

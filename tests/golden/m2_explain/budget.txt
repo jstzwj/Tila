@@ -1,0 +1,17 @@
+path: true
+mask: true
+conclusion: Unknown (Unknown)
+state: Unknown
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  (none)
+unknown/pending:
+  reason: kernel cumulative proof budget exhausted
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  simplify the obligation or explicitly raise the relevant TILA_PROOF budget

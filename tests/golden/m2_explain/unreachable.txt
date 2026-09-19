@@ -1,0 +1,17 @@
+path: false
+mask: true
+conclusion: ProvenSafe (ProvenSafe)
+state: ProvenSafe
+source locations: line 10
+trust sources:
+  - (none)
+proof route:
+  - (none)
+counterexample:
+  (none)
+unknown/pending:
+  reason: unreachable access: Z3 proved premises unsatisfiable
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  (none)

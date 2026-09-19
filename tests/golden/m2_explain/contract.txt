@@ -1,0 +1,17 @@
+path: true
+mask: true
+conclusion: SafeUnderContract (ProvenSafe)
+state: SafeUnderContract
+source locations: line 10
+trust sources:
+  - CheckedLaunchContract: validated launch grid
+proof route:
+  - (none)
+counterexample:
+  (none)
+unknown/pending:
+  (none)
+proof cache: not-applicable
+SMT-LIB replay: not available
+fix:
+  (none)

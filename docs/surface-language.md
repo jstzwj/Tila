@@ -270,6 +270,10 @@ launcher 侧生成：张量绑定、`N`/grid 推导、契约（本例无）、
 
 ## 8. 诊断渲染规范
 
+M2-06 的稳定文本契约见 [audit explain v1](explain-audit.md)：默认固定章节与
+信任/反例分类；`--show-witness`、`--show-cache`、`--show-query` 分别开启具体
+见证、缓存遥测和原始 SMT-LIB。关键 bounds 错误同样支持这些附件。
+
 完整活动错误码、phase/severity 元数据和维护门禁见
 [`diagnostics.md`](diagnostics.md)。机器事实来源是 `DIAGNOSTIC_REGISTRY`。
 
