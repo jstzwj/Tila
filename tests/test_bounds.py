@@ -137,7 +137,8 @@ class TestEscapeHatches:
             ti.store(x, offs, v, mask=offs < N)
 
         x = np.ones(100, dtype=np.float32)
-        _run1d(k, 100, 64, x)     # 通过（义务被显式豁免，但记录在案）
+        with pytest.raises(IndexError, match="bounds check failed"):
+            _run1d(k, 100, 64, x)  # 豁免证明不等于让实际越界读取合法化
         assert any(o.kind == "unsafe_load" for o in k.tk.obligations)
 
     def test_assume_enables_gather(self):

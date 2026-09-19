@@ -23,9 +23,10 @@ MIN/-1 经目标位宽回绕。右移区分算术和逻辑移位。
 未知布尔向量的不同 lane 视图使用独立布尔身份；同一视图重复展开保留共享身份，
 避免将行条件与列条件误当同一布尔值而产生虚假的不可达证明。
 
-unsat 返回 ProvenSafe。SAT 模型带索引、extent 和输入符号值；当前只有无条件、
-常量域已证明越界的访问提升为 ProvenUnsafe，其余 SAT 仍是 Unknown 候选，不把
-加载值/循环/路径抽象模型声称为具体可达程序。扩大反例可达性识别归 M2-04/05。
+unsat 返回 ProvenSafe。SAT 模型带索引、extent 和输入符号值。M2-04 对首个访问的
+精确标量输入、常量与有限位宽定义确认可达，包括可编码的条件路径；其余 SAT
+仍是 Unknown 候选，不把加载值、lane、phi 或循环抽象模型声称为具体可达程序。
+具体限制和 CPU 重放证据见 [数据流与解释器](dataflow-interpreter.md)。
 结果依赖不承诺最小集合：SMT 路径保守记录全部查询来源，小型捷径记录使用的来源。
 `ProofResult.query` 保存可交给 Z3 重放的 SMT-LIB 越界查询；explain/错误信息展示
 原因、来源和候选模型，不默认打印整个查询。
@@ -60,7 +61,7 @@ kernel 都能在预算内完成；复杂非线性/混合 Int-BV 查询可能仍�
 ## 缓存与每次 launch 校验
 
 LRU 键包含规范化查询、定义域、来源及位置、访问身份、Const/实际 launch 绑定、
-grid 检查状态、编码版本、Z3 版本和所有预算配置。Unknown 不缓存，较低预算失败
+grid 检查状态、可达性输入/上下文精确性、编码版本、Z3 版本和所有预算配置。Unknown 不缓存，较低预算失败
 不会污染较高预算。缓存只保存纯 ProofResult，不复用有可变断言的 solver。
 
 `assume_launch`、shape/grid、refinement 和整数定义域校验发生在 proof cache
@@ -77,7 +78,7 @@ grid 检查状态、编码版本、Z3 版本和所有预算配置。Unknown 不�
 - 用户假设冲突、模型可能不可达、求解器预算不足：保持 Unknown 和审计信息。
 
 这覆盖本次迁移的关键差异；系统性质测试、更多循环不变量/可达性分析和完整
-explain golden 仍属于 M2-04 至 M2-06。
+explain golden 仍属于 M2-05/06；一般循环不变量和可达性不在当前精确子集内。
 
 参考：[Z3 Bitvectors](https://microsoft.github.io/z3guide/docs/theories/Bitvectors/)、
 [资源参数](https://microsoft.github.io/z3guide/programming/Parameters/)。

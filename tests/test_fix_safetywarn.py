@@ -57,11 +57,12 @@ def test_strict_default_rejects_unmasked_tail(monkeypatch):
     assert ei.value.code == "TILA-BOUNDS-001"
 
 
-# (b) warn：同一 launch 在解释器上运行，stderr 出 warning，last_report 记录
-def test_warn_mode_downgrades_and_runs(monkeypatch, capsys):
+# (b) warn 放行证明并记录 warning，但解释器仍拒绝实际 active 越界。
+def test_warn_mode_downgrades_but_does_not_hide_runtime_oob(monkeypatch, capsys):
     monkeypatch.setenv("TILA_SAFETY", "warn")
     x = np.ones(100, dtype=np.float32)
-    tail_kernel[(ti.cdiv(100, 64),)](x, BLOCK=64)      # 不抛
+    with pytest.raises(IndexError, match="bounds check failed"):
+        tail_kernel[(ti.cdiv(100, 64),)](x, BLOCK=64)
     err = capsys.readouterr().err
     assert "warning[TILA-BOUNDS-001]" in err
     assert "possible out-of-bounds access" in err      # 完整诊断被复用

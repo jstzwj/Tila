@@ -192,6 +192,9 @@ class _Builder:
         if isinstance(s, ast.AnnAssign):
             self._syn("TILA-SYN-022", "local variable annotations are not part of "
                       "the subset (locals are inferred)", s)
+        if isinstance(s, ast.AugAssign):
+            self._syn("TILA-SYN-002", "augmented assignment is not supported; "
+                      "write x = x + value instead of x += value", s)
         self._syn("TILA-SYN-002",
                   f"'{type(s).__name__}' is not part of the Tila subset", s)
 

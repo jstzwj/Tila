@@ -231,37 +231,55 @@ class Validator:
                          and self.fits(start, D.i32) and self.fits(end, D.i32)
                          and 0 < step[0] <= step[1] <= (1 << 31) - 1)
                 self.require(valid, "range start/end/positive step must fit i32")
+                if valid and start[0] >= end[1]:
+                    continue  # No body operation is evaluated on an empty range.
                 # i64 induction in lowering prevents the final increment overflowing i32.
                 before = dict(self.env)
-                # Loop-carried values may change; do not use their first iteration value.
-                for name in assigned_names(s.body) & before.keys():
+                # Same flat invariant domain as the checker: identity updates
+                # and assignments of the already-known constant are stable.
+                changed = assigned_names(s.body) - loop_invariants(s.body, before)
+                for name in changed & before.keys():
                     dt = self.types.get(name)
                     self.env[name] = limits(dt) if dt and dt.is_int else None
                 self.env[s.var] = (start[0], max(start[0], end[1] - 1)) if valid else None
                 self.types[s.var] = D.i32
-                self.stmts(s.body)
-                for name in assigned_names(s.body):
+                body_term = self.stmts(s.body)
+                for name in changed:
                     if name in before:
                         dt = self.types.get(name)
                         self.env[name] = limits(dt) if dt and dt.is_int else None
                 self.env.pop(s.var, None)
+                if body_term and valid and start[1] < end[0]:
+                    return True
             elif isinstance(s, (T.TIf, T.TStaticIf)):
                 cond = self.expr(s.cond)
                 if cond is not None and cond[0] == cond[1]:
-                    self.stmts(s.then_body if cond[0] else s.else_body)
+                    if self.stmts(s.then_body if cond[0] else s.else_body):
+                        return True
                 else:
                     before = dict(self.env)
-                    self.stmts(s.then_body)
+                    before_types = dict(self.types)
+                    left_term = self.stmts(s.then_body)
                     left = dict(self.env)
+                    left_types = dict(self.types)
                     self.env = dict(before)
-                    self.stmts(s.else_body)
-                    self.env = {k: (min(left[k][0], v[0]), max(left[k][1], v[1]))
-                                if v is not None and left.get(k) is not None else None
-                                for k, v in self.env.items() if k in left}
+                    self.types = before_types
+                    right_term = self.stmts(s.else_body)
+                    if left_term and right_term:
+                        return True
+                    if right_term:
+                        self.env, self.types = left, left_types
+                    elif not left_term:
+                        self.env = {k: (min(left[k][0], v[0]), max(left[k][1], v[1]))
+                                    if v is not None and left.get(k) is not None else None
+                                    for k, v in self.env.items() if k in left}
+                        self.types = {k: v for k, v in self.types.items()
+                                      if left_types.get(k) == v}
             elif isinstance(s, T.TReturn):
-                return
+                return True
             else:
                 self.expr(s)
+        return False
 
     def run(self):
         self.types = {s.name: s.dtype for s in self.tk.scalars}
@@ -275,8 +293,29 @@ def assigned_names(body):
         if isinstance(s, T.TAssign): names.add(s.name)
         elif isinstance(s, (T.TIf, T.TStaticIf)):
             names |= assigned_names(s.then_body) | assigned_names(s.else_body)
-        elif isinstance(s, T.TFor): names |= assigned_names(s.body)
+        elif isinstance(s, T.TFor): names |= {s.var} | assigned_names(s.body)
     return names
+
+
+def loop_invariants(body, before):
+    stable = set(before)
+    pending = list(body)
+    while pending:
+        stmt = pending.pop()
+        if isinstance(stmt, T.TAssign):
+            value = stmt.value
+            identity = isinstance(value, T.TName) and value.name == stmt.name
+            same_literal = (isinstance(value, T.TLit) and
+                            before.get(stmt.name) == (value.value, value.value))
+            if not (identity or same_literal):
+                stable.discard(stmt.name)
+        elif isinstance(stmt, (T.TIf, T.TStaticIf)):
+            pending.extend(stmt.then_body)
+            pending.extend(stmt.else_body)
+        elif isinstance(stmt, T.TFor):
+            stable.discard(stmt.var)
+            pending.extend(stmt.body)
+    return stable
 
 
 def validate(tk, consts, scalars=None, grid=None):

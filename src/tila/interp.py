@@ -1,7 +1,7 @@
 """Reference interpreter：TIR → NumPy（CPU 差分 oracle，docs/roadmap.md §8）。
 
 以 SPMD 方式逐 program instance 执行 body；masked lanes 不访问内存
-（clip 后以 where 恢复 other 语义），与 GPU 语义一致。
+（先选择 active lanes，再索引），与 GPU 语义一致。
 """
 
 from __future__ import annotations
@@ -164,53 +164,36 @@ class Interp:
     # ------------------------------------------------------------------
 
     def _store(self, arr, strides, coords, value, mask):
-        # 只写有效 lane：布尔筛选后散射写（clip 产生的重复索引不参与写，
-        # 与 GPU 不访问 masked lane 的语义一致）。
-        shape = np.broadcast_shapes(*[np.shape(c) for c in coords],
-                                    np.shape(value))
-        bc = []
-        for c, n in zip(coords, arr.shape):
-            c = np.asarray(c)
-            if c.ndim == 0:
-                bc.append(int(c))
-                continue
-            cc = np.broadcast_to(c, shape).astype(np.int64).copy()
-            np.clip(cc, 0, max(n - 1, 0), out=cc)
-            bc.append(cc)
+        shape, sel, idx = self._active_index(arr, coords, mask, np.shape(value))
         val = np.broadcast_to(np.asarray(value), shape)
-        if mask is None:
-            arr[tuple(bc)] = val
-            return
-        sel = np.broadcast_to(np.asarray(mask, dtype=bool), shape)
-        idx = tuple(c[sel] if isinstance(c, np.ndarray) else c for c in bc)
         arr[idx] = val[sel]
 
     def _load(self, arr, strides, coords, mask, other):
-        idx = self._index(arr, coords)
-        gathered = arr[idx]
-        if mask is not None:
-            m = np.broadcast_to(np.asarray(mask, dtype=bool),
-                                np.shape(gathered))
-            # checker 已保证 other 与 buffer 元素 dtype 精确一致；解释器也要
-            # 在值层落实该语义。特别是 ml_dtypes.bfloat16 与 Python int 0
-            # 不存在 NumPy 公共 promotion，直接 np.where 会报错。
-            o = np.asarray(0 if other is None else other, dtype=arr.dtype)
-            return np.where(m, gathered, o)
-        return gathered
+        shape, sel, idx = self._active_index(arr, coords, mask)
+        result = np.full(shape, 0 if other is None else other, dtype=arr.dtype)
+        result[sel] = arr[idx]
+        return result[()] if not shape else result
 
-    def _index(self, arr, coords):
-        """坐标 → 可安全索引的多元组（masked lanes 的越界坐标裁剪到界内，
-        结果由 where(mask, ...) 恢复语义——与 GPU 不访问 masked lane 一致）。"""
+    def _active_index(self, arr, coords, mask, value_shape=()):
+        """Select before indexing; validate before narrowing unsigned indices.
+
+        Active OOB raises even outside debug instead of clipping or wrapping.
+        NumPy coordinate indexing preserves the original array's view/strides.
+        """
+        shape = np.broadcast_shapes(*(np.shape(c) for c in coords),
+                                    np.shape(mask) if mask is not None else (),
+                                    value_shape)
+        sel = np.broadcast_to(np.asarray(True if mask is None else mask,
+                                         dtype=bool), shape)
         out = []
         for c, n in zip(coords, arr.shape):
-            c = np.asarray(c)
-            if c.ndim == 0:
-                out.append(int(min(max(int(c), 0), n - 1)) if n else 0)
-                continue
-            cc = c.astype(np.int64)
-            np.clip(cc, 0, max(n - 1, 0), out=cc)
-            out.append(cc)
-        return tuple(out)
+            active = np.broadcast_to(np.asarray(c), shape)[sel]
+            if np.any((active < 0) | (active >= n)):
+                error = AssertionError if self.debug else IndexError
+                raise error(f"interpreter bounds check failed: extent {n}, "
+                            f"active coordinates {active}")
+            out.append(active.astype(np.intp))
+        return shape, sel, tuple(out)
 
     # ------------------------------------------------------------------
 
@@ -250,6 +233,15 @@ class Interp:
                 return numeric.integer_binary(x.op, l, r, dt)
             if x.operand_dtype and x.operand_dtype.is_int:
                 l, r = numeric.wrap(l, x.operand_dtype), numeric.wrap(r, x.operand_dtype)
+            elif x.operand_dtype and x.operand_dtype.is_float:
+                target = _np_dtype(x.operand_dtype)
+                l, r = np.asarray(l, dtype=target), np.asarray(r, dtype=target)
+            if dt and dt.is_float:
+                # Follow the checked common dtype, including bf16/f32 pairs
+                # for which NumPy has no automatic promotion rule.
+                target = _np_dtype(dt)
+                l, r = np.asarray(l, dtype=target), np.asarray(r, dtype=target)
+                return np.asarray(self._bin(x.op, l, r), dtype=target)
             return self._bin(x.op, l, r)
         if isinstance(x, T.TUna):
             v = self.o(x.operand, env, pids)
@@ -312,8 +304,11 @@ class Interp:
             v = self.o(x.operand, env, pids)
             return v[:, None] if x.axis == 1 else v[None, :]
         if isinstance(x, T.TWhere):
-            return np.where(self.o(x.cond, env, pids),
-                            self.o(x.a, env, pids), self.o(x.b, env, pids))
+            target = _np_dtype(numeric.dtype(x.vt))
+            result = np.where(self.o(x.cond, env, pids),
+                              np.asarray(self.o(x.a, env, pids), dtype=target),
+                              np.asarray(self.o(x.b, env, pids), dtype=target))
+            return result[()] if result.ndim == 0 else result
         if isinstance(x, T.TDot):
             a = self.o(x.a, env, pids)
             b = self.o(x.b, env, pids)
@@ -330,7 +325,8 @@ class Interp:
             if x.op == "sum":
                 if dt.is_int:
                     return numeric.wrap(np.sum(v.astype(object), axis=x.axis), dt)
-                r = np.sum(v, axis=x.axis, dtype=np.float32)
+                r = np.sum(v, axis=x.axis,
+                           dtype=np.float64 if dt is D.f64 else np.float32)
                 return np.asarray(r).astype(_np_dtype(dt))
             r = np.max(v, axis=x.axis)
             return np.asarray(r).astype(_np_dtype(dt))

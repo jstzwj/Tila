@@ -160,6 +160,8 @@ class Obligation:
     sym_hi: tuple = ()
     value_types: tuple = ()
     value_defs: tuple = ()
+    reachability_inputs: tuple = ()
+    execution_context_exact: bool = True
 
     def describe(self):
         axis = f"axis {self.axis}" if self.axis is not None else "flat"

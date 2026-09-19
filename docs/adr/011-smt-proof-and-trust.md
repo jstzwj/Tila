@@ -87,8 +87,10 @@ lane/broadcast 映射；`facts.py` 的不可变 ProofResult 由 checker、launch
 不伪装成已检查契约。当前 hints 仅依赖结构性 StaticFact，不从 assume 推导。
 
 旧 DNF 构建已移除。M2-03 已接入 Boolean/Int/BitVec SMT 编码、定义域与前提一致性
-查询、候选模型及可重放查询、预算和来源敏感 LRU。常量无条件越界可确认为
-ProvenUnsafe，其余 SAT 保守标记 Unknown 候选；循环/数据流反例可达性的扩大仍待后续。
+查询、候选模型及可重放查询、预算和来源敏感 LRU。M2-04 进一步对首次访问的
+精确整数标量/常量和条件路径确认 SAT 可达，其余抽象模型保守标记 Unknown 候选。
+存活分支、整数 phi、简单不变量及零次循环关系已实现；一般循环求解仍未支持，
+具体范围见 [数据流与解释器](../dataflow-interpreter.md)。
 迁移还修复了仅有上界也判安全、后置/分支/循环假设污染及行列 lane 混同。
 
 1. 完成 ADR-007 与整数边界测试，建立统一谓词/ProofResult 接口。

@@ -238,7 +238,13 @@ pending contract：结果仍为 Unknown，可继续生成代码，实际 launch 
 零次循环，loop-carried 值保守换新身份，不把初值假设当作循环不变量。直接互补或
 常量矛盾的 path/mask 标注不可达；涉及用户假设的矛盾返回 Unknown 并保留来源。
 带 mask/path 的区间越界但尚未确认可达时，只提供 Unknown 候选。M2-03 已用 Z3
-检查一般逻辑矛盾；更完整的数据流/循环反例可达性和不变量分析仍待后续任务。
+检查一般逻辑矛盾；M2-04 增加存活分支、整数 phi、简单循环不变量和零次出口关系。
+首次内存访问的精确整数标量条件路径可以确认 SAT 可达，其余抽象情况仍为 Unknown；
+详见 [数据流与解释器](dataflow-interpreter.md)。
+
+CPU 解释器只索引 active lanes，不裁剪越界坐标。active 越界在 debug 下触发
+AssertionError，非 debug 下触发 IndexError；全 false mask 不访问空数组。
+`unsafe` 与 `--safety=warn` 只放行证明，不豁免实际内存检查。debug 同时执行 assume 断言。
 
 ```text
 error[TILA-BOUNDS-001]:

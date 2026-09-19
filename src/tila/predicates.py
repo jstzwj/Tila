@@ -57,6 +57,11 @@ def disjunction(a, b):
     if (a.op == "not" and a.args[0] is b or
             b.op == "not" and b.args[0] is a):
         return TRUE
+    if a.op == b.op == "and" and a.args[0] is b.args[0]:
+        left, right = a.args[1], b.args[1]
+        if (left.op == "not" and left.args[0] is right or
+                right.op == "not" and right.args[0] is left):
+            return a.args[0]
     return Predicate("or", (a, b))
 
 

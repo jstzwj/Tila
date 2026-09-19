@@ -6,13 +6,15 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 505 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 537 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
 基础整数语义与 launch 门禁；M2-02 已实现 DAG、ProofResult、信任来源及作用域
 隔离。M2-03 已接入默认 Z3、Int/BitVec、预算与有界进程内 proof 缓存，
-详见 [证明器实现边界](smt-prover.md)。ExactInt 和 Mask 的公开边界不变。
+详见 [证明器实现边界](smt-prover.md)。M2-04 已收口活跃分支合并、简单循环不变量、
+零次循环出口和 CPU 内存访问语义，边界见 [数据流与解释器](dataflow-interpreter.md)。
+ExactInt 和 Mask 的公开边界不变。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见
@@ -163,15 +165,15 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | 能力 | 状态 | 覆盖 | 当前边界/证据 |
 |---|---|---|---|
 | 普通赋值 | `Implemented` | Check / CPU / Triton | 不支持解构赋值和任意 Python 对象 |
-| runtime `if/elif/else` | `Implemented` | Check / CPU / Triton | 条件必须为 scalar bool，分支合并执行同型规则 |
+| runtime `if/elif/else` | `Implemented` | Check / CPU / Triton | scalar bool；只合并存活前驱，确定赋值与整数 phi 条件等式 |
 | 模块常量 constexpr-if | `Implemented` | Check | Stage 1 直接折叠 |
 | Const 参数 static-if | `Implemented` | Check / CPU / Triton | TStaticIf 延迟到特化；variant 使用点诊断已覆盖 |
-| `for i in tila.range(...)` | `Implemented` | Check / CPU / Triton | 唯一循环；step 为正 Const，start 支持 0 或运行期 int |
+| `for i in tila.range(...)` | `Implemented` | Check / CPU / Triton | step 为正 Const，start/end 支持整数标量/字面量；归纳变量新名字，简单不变量与零次出口关系 |
 | loop-carried 类型稳定性 | `Implemented` | Check | dtype/shape 漂移拒绝 |
 | 裸 `return` | `Implemented` | Check / CPU / Triton | 支持提前结束当前 program instance |
 | 值 `return` | `Deferred` | Check | 定向拒绝；kernel 结果写入输出 Buffer |
 | `while`、`break/continue` | `Deferred` | Check | 不属于当前 Python 子集 |
-| `+=` 显式累加器 | `Designed` | — | 当前表面语言没有稳定支持承诺 |
+| `+=` 显式累加器 | `Deferred` | Check | 定向拒绝，提示改写为普通赋值 |
 | 闭包、嵌套函数、任意 Python 调用 | `Deferred` | Check | 静态子集定向拒绝 |
 
 ---
@@ -285,7 +287,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | 有限位宽 proof 与执行语义对齐 | `Partial` | Specialize / Launch | Int/BitVec 编码覆盖回绕、floor 商余、整数 cast、位运算/移位；加载内容/复杂数据流仍近似，浮点不进入 SMT |
 | ProofResult 信任来源与 Exempted | `Implemented` | Check / Launch | 不可变结果、来源集合/位置/trace；assume 不泄漏作用域，unsafe 局部豁免；符号 grid 仅 pending，launch 每次重验 |
 | SMT 预算与证明缓存 | `Implemented` | Check / Specialize / Launch | timeout/rlimit、kernel 时间/查询数、构建大小；来源/版本/绑定隔离的有界 LRU，Unknown 不缓存；launch 契约仍逐次重验 |
-| SAT 反例可达性 | `Partial` | Check / Launch | 常量无条件越界可确认；其余模型明确标记 Unknown 候选；一般循环/数据流可达性待后续 |
+| SAT 反例可达性 | `Partial` | Check / Launch | 首次访问的精确整数标量/常量/条件路径可确认；加载、phi、lane、循环及前序内存效果仍为 Unknown 候选 |
 | 布尔 tile 作为执行 mask | `Designed` | — | 与是否携带边界谓词分开；待独立接口设计，不自动开放当前 API |
 | kernel effect 汇总 | `Implemented` | Check | `Read/Write[region]` 出现在 report/explain；当前为聚合列表 |
 | per-instruction effect IR | `Designed` | — | TLoad/TStore 尚无统一原生 effect 字段 |

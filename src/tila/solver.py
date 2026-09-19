@@ -2,7 +2,7 @@
 
 Mathematical expressions are justified by the mandatory numeric launch gate.
 Runtime definitions wrap through BitVec; opaque loads/loop values overapproximate
-execution, so SAT is only a candidate unless the access is fully constant.
+execution, so SAT is only a candidate outside exact scalar dataflow.
 """
 from collections import OrderedDict
 from dataclasses import dataclass, replace
@@ -18,7 +18,7 @@ from .errors import TilaError
 from .facts import (ProofResult, fast_obligation, PROVEN_SAFE, PROVEN_UNSAFE,
                     UNKNOWN, EXEMPTED)
 
-ENCODING_VERSION = 1
+ENCODING_VERSION = 2
 _CACHE = OrderedDict()
 _LOCK = RLock()  # Z3's default context and the process cache are shared.
 
@@ -283,6 +283,7 @@ class ProofSession:
                 self.config, normalized, tuple(sorted(encoder.origins)), ob.loc_line,
                 ob.source, ob.kind, facts.grid_checked, facts.launch_bindings,
                 ob.path is P.TRUE, ob.mask is P.TRUE,
+                ob.reachability_inputs, ob.execution_context_exact,
                 (D.free_syms(ob.coord) | D.free_syms(ob.extent)) <= facts.num.keys(),
                 tuple(d.sexpr() for d in encoder.domain))).encode()).hexdigest()
             self.elapsed_ms = elapsed_before + (monotonic() - start) * 1000
@@ -342,14 +343,45 @@ class ProofSession:
                           for name, value in sorted(encoder.symbols.items()))
         candidate += (("coordinate", str(model.eval(encoder.expr(ob.coord), model_completion=True))),
                       ("extent", str(model.eval(encoder.expr(ob.extent), model_completion=True))))
-        # Only a constant, unconditional access is currently an exact reachable
-        # encoding. A symbolic SAT model may involve load/loop abstractions.
+        # Exact scalar dataflow (including guarded finite-width arithmetic) can
+        # witness an execution. Loads, lanes and loop abstractions cannot.
         fast = fast_obligation(ob, facts, nonneg)
-        closed = (D.free_syms(ob.coord) | D.free_syms(ob.extent)) <= facts.num.keys()
-        if (closed and fast.verdict == PROVEN_UNSAFE and
-                ob.path is P.TRUE and ob.mask is P.TRUE):
-            return result(PROVEN_UNSAFE, "reachable constant out-of-bounds access", candidate)
+        if self.exact_reachability(ob, facts, deps):
+            return result(PROVEN_UNSAFE, "reachable scalar out-of-bounds access", candidate,
+                          ("exact scalar inputs and path; no load/loop abstraction",))
         if fast.pending_contracts:
             return replace(fast, candidate_counterexample=candidate, query=query)
         return result(UNKNOWN, "candidate counterexample; concrete reachability unverified",
                       candidate, fast.trace)
+
+    @staticmethod
+    def exact_reachability(ob, facts, dependencies):
+        if not ob.execution_context_exact or any(o.kind == P.USER for o in dependencies):
+            return False
+        allowed = set(ob.reachability_inputs) | set(facts.num)
+        definitions = dict(ob.value_defs)
+        needed = set(D.free_syms(ob.coord) | D.free_syms(ob.extent))
+        for root in (ob.path, ob.mask):
+            for node in P.nodes(root):
+                if node.op in ("unknown", "unknown_view"):
+                    return False
+                if node.op == "atom":
+                    needed.update(D.free_syms(node.atom.left) | D.free_syms(node.atom.right))
+        for pred in tuple(facts.preds.values()) + ob.preds_snapshot:
+            needed.update(D.free_syms(pred.left) | D.free_syms(pred.right))
+        # Interval-only identities (lanes and induction variables) are not
+        # executable scalar inputs, even when their intervals have SAT models.
+        for name, value in tuple(facts.sym_lo.items()) + tuple(facts.sym_hi.items()) + ob.sym_lo + ob.sym_hi:
+            needed.add(name)
+            needed.update(D.free_syms(value))
+        seen = set()
+        while needed:
+            name = needed.pop()
+            if name in allowed or name in seen:
+                continue
+            if name not in definitions:
+                return False
+            seen.add(name)
+            _, _, left, right = definitions[name]
+            needed.update(D.free_syms(left) | D.free_syms(right))
+        return True

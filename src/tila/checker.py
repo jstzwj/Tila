@@ -110,6 +110,7 @@ class Checker:
         self.lane_axes = {}  # symbol -> right-relative tile axes (scalar symbols absent)
         self.value_types = {}
         self.value_defs = {}
+        self.execution_context_exact = True
         self.loop_stack: list[dict] = []
         self.regions: dict[str, TY.RegionId] = {}
         self.tk = T.TKernel(kern.name, [], [], [], [])
@@ -402,10 +403,8 @@ class Checker:
         else_out: list = []
         else_term = self.stmts(s.else_body, else_out)
 
-        self.vars = self._merge_branches(s.loc, snap_vars, then_vars,
-                                         self.vars, cv.predicate)
-        self.facts = then_facts.intersect(self.facts)
-        self.facts.path = snap_facts.path
+        self._join_live_branches(s.loc, snap_vars, then_vars, then_facts,
+                                then_term, else_term, cv.predicate)
         out.append(T.TIf(self._operand_of(cv, s.cond, out), then_out,
                          else_out, line=s.loc.line))
         return self._terminated_join(s, then_term, else_term)
@@ -419,9 +418,43 @@ class Checker:
             return True
         return False
 
+    def _join_live_branches(self, loc, before, then_vars, then_facts,
+                            then_term, else_term, condition, static=False):
+        # Only predecessors that reach the continuation participate in a join.
+        # In particular, a guard followed by return dominates the continuation.
+        if then_term:
+            return
+        if else_term:
+            self.vars, self.facts = then_vars, then_facts
+            return
+        merge = self._merge_static_branches if static else self._merge_branches
+        else_vars = self.vars
+        self.vars = merge(loc, before, then_vars, else_vars, condition)
+        self.facts = then_facts.intersect(self.facts)
+        # Integer phi values have fresh identities, constrained on each edge.
+        # This preserves guards on merged indices without leaking either value.
+        for name, merged in self.vars.items():
+            a, b = then_vars.get(name), else_vars.get(name)
+            if (a is not None and b is not None and merged.expr is not None
+                    and a.expr is not None and b.expr is not None
+                    and canon(a.expr) != canon(b.expr)):
+                choice = P.select(condition,
+                    P.atom(Pred("==", merged.expr, a.expr)),
+                    P.atom(Pred("==", merged.expr, b.expr)))
+                self.facts.path = P.conjunction(self.facts.path, choice)
+
+    @staticmethod
+    def _join_value_flags(m, a, b):
+        m.maybe_undefined = a.maybe_undefined or b.maybe_undefined
+        if not (type(a.lit) is type(b.lit) and a.lit == b.lit):
+            m.lit = None
+        m.is_const = (a.is_const and b.is_const and
+                      (m.lit is not None or (a.expr is not None and
+                       b.expr is not None and canon(a.expr) == canon(b.expr))))
+
     def _merge_branches(self, loc, before, a, b, condition):
         out = {}
-        for name in set(before) | set(a) | set(b):
+        for name in sorted(set(before) | set(a) | set(b)):
             va, vb, v0 = a.get(name), b.get(name), before.get(name)
             if va is not None and vb is not None:
                 if not self._same_type(va.vtype, vb.vtype):
@@ -431,12 +464,18 @@ class Checker:
                          f"    then: {TY.describe(va.vtype)}",
                          f"    else: {TY.describe(vb.vtype)}"])
                 m = va.clone()
+                self._join_value_flags(m, va, vb)
                 m.predicate = P.select(condition, va.predicate, vb.predicate)
                 if va.expr is not None and vb.expr is not None and \
                         canon(va.expr) == canon(vb.expr):
                     m.expr = va.expr
                 else:
-                    m.expr = None
+                    m.expr = self._forget_value(m).expr
+                    if isinstance(m.expr, Sym):
+                        # A phi selects already-typed values; it performs no
+                        # arithmetic. Int equality is exact here and avoids an
+                        # unnecessary additional BV2Int boundary in SMT.
+                        self.value_types.pop(m.expr.name, None)
                 m.contiguous_span = (va.contiguous_span
                                      if canon(va.contiguous_span) ==
                                      canon(vb.contiguous_span)
@@ -487,10 +526,8 @@ class Checker:
         else_out: list = []
         else_term = self.stmts(s.else_body, else_out)
 
-        self.vars = self._merge_static_branches(s.loc, snap_vars, then_vars,
-                                               self.vars, cv.predicate)
-        self.facts = then_facts.intersect(self.facts)
-        self.facts.path = snap_facts.path
+        self._join_live_branches(s.loc, snap_vars, then_vars, then_facts,
+                                then_term, else_term, cv.predicate, static=True)
         out.append(T.TStaticIf(self._operand_of(cv, s.cond, out), then_out,
                                else_out, line=s.loc.line))
         # 特化期分支唯一：双分支均终止 ⇒ 之后不可达（同 runtime-if）。
@@ -508,12 +545,13 @@ class Checker:
           时同样 static-variant。
         """
         out = {}
-        for name in set(before) | set(a) | set(b):
+        for name in sorted(set(before) | set(a) | set(b)):
             va, vb, v0 = a.get(name), b.get(name), before.get(name)
             if va is not None and vb is not None:
                 if self._same_type(va.vtype, vb.vtype) or \
                         self._static_same_type(va.vtype, vb.vtype):
                     m = va.clone()     # 代表类型取 then 侧（特化期分支唯一）
+                    self._join_value_flags(m, va, vb)
                     m.predicate = P.select(condition, va.predicate, vb.predicate)
                     if va.expr is not None and vb.expr is not None:
                         if canon(va.expr) == canon(vb.expr):
@@ -829,6 +867,13 @@ class Checker:
     # -- For ----------------------------------------------------------------
 
     def _for(self, s: For, out):
+        if s.var in self.vars:
+            raise TilaError("TILA-TYPE-023",
+                            "loop induction variable must use a fresh name "
+                            "(shadowing an existing variable is not supported)", s.loc)
+        # Interval induction abstracts iteration counts/early returns. Do not
+        # promote SAT witnesses in or after a loop to confirmed executions.
+        self.execution_context_exact = False
         # 起点：字面量 0（既有形态）或 int 标量（运行期起点，如
         # FlashAttention 两段 KV 循环的 lo = pid * BLOCK_M）。
         start_op = None
@@ -851,6 +896,9 @@ class Checker:
                 start_op = self._operand_of(st, s.start, out)
                 start_expr = st.expr
         end = self.synth(s.end, out)
+        if isinstance(end.lit, int) and not isinstance(end.lit, bool):
+            end.vtype = TY.ScalarT(D.i32)
+            end.expr = Cst(end.lit)
         if not (isinstance(end.vtype, TY.ScalarT) and end.vtype.dtype.is_int):
             raise TilaError("TILA-TYPE-024",
                             f"loop end must be an int scalar, found "
@@ -873,6 +921,7 @@ class Checker:
             step_op = T.TLit(step_v, D.i32)
 
         loop_facts = self.facts.clone()
+        outer_vars = dict(self.vars)
         self.lane_counter += 1
         loop_sym = Sym(f"__i_{s.var}_{self.lane_counter}")
         self.vars[s.var] = VarInfo(TY.ScalarT(D.i32), expr=loop_sym)
@@ -882,33 +931,42 @@ class Checker:
             self.facts.sym_lo[loop_sym.name] = start_expr
         if end.expr is not None:
             self.facts.sym_hi[loop_sym.name] = end.expr
-        if start_expr is None or is_nonneg_expr(start_expr, self.nonneg_syms):
+        if start_expr is not None and is_nonneg_expr(start_expr, self.nonneg_syms):
             self.nonneg_syms.add(loop_sym.name)
 
         before = dict(self.vars)        # 浅快照：未重赋值的名字保持同一对象
-        # Entry facts describe the initial value, not every iteration of a
-        # loop-carried value. Until invariant analysis exists, give carried
-        # values fresh identities before checking the body.
+        # Entry facts describe initial values. Only the flat invariant domain
+        # below may retain them for all iterations; other values get widened.
         pending = list(s.body)
         assigned = set()
+        invariant = set(before)
         while pending:
             stmt = pending.pop()
             if isinstance(stmt, Assign):
                 assigned.add(stmt.target)
+                # A deliberately small inductive invariant: identity updates.
+                identity = isinstance(stmt.value, Name) and stmt.value.id == stmt.target
+                initial = before.get(stmt.target)
+                same_literal = (isinstance(stmt.value, Lit) and initial is not None
+                                and type(stmt.value.value) is type(initial.lit)
+                                and stmt.value.value == initial.lit)
+                if not (identity or same_literal):
+                    invariant.discard(stmt.target)
             elif isinstance(stmt, If):
                 pending.extend(stmt.then_body)
                 pending.extend(stmt.else_body)
             elif isinstance(stmt, For):
+                assigned.add(stmt.var)
+                invariant.discard(stmt.var)
                 pending.extend(stmt.body)
-        for name in assigned & before.keys():
+        for name in (assigned - invariant) & before.keys():
             if name != s.var:
                 self.vars[name] = self._forget_value(before[name])
         body_out: list = []
         self.loop_stack.append(before)
-        # 循环体内的 return 按次终止该次迭代（body 块内部的不可达跳过
-        # 由 stmts 处理）；循环本身不终止外围块——执行可能在第 1 次迭代
-        # 返回，但静态可达性保持保守：后续语句照常检查。
-        self.stmts(s.body, body_out)
+        # return exits the whole program instance. Unless a nonempty range is
+        # known, the zero-iteration path still reaches the continuation.
+        body_term = self.stmts(s.body, body_out)
         self.loop_stack.pop()
 
         # 循环出口：loop-local 名字失效；carried（被重赋值的）保守清事实；
@@ -917,17 +975,39 @@ class Checker:
         for name, v in self.vars.items():
             if name == s.var or name not in before:
                 continue
-            if v is before[name]:
-                after[name] = v
+            if name in invariant:
+                after[name] = before[name]
             else:
                 after[name] = self._forget_value(v)
         self.vars = after
+        # A literal empty range cannot modify any outer value. Its body still
+        # gets type checked, with contradictory induction bounds for accesses.
+        known_empty = (isinstance(start_expr, Cst) and isinstance(end.expr, Cst)
+                       and start_expr.value >= end.expr.value)
+        known_nonempty = (isinstance(start_expr, Cst) and isinstance(end.expr, Cst)
+                          and start_expr.value < end.expr.value)
+        if known_empty:
+            self.vars = outer_vars
         # A loop can execute zero times; assumptions from its body do not
         # dominate its exit. Each obligation retains its own interval snapshot.
         self.facts = loop_facts
+        if start_expr is not None and end.expr is not None:
+            empty = P.atom(Pred(">=", start_expr, end.expr))
+            if body_term:
+                # Every entered iteration returns from the program. Only the
+                # zero-trip edge can reach code after this loop.
+                self.facts.path = P.conjunction(self.facts.path, empty)
+            for name, value in self.vars.items():
+                initial = outer_vars.get(name)
+                if (initial is not None and initial.expr is not None and
+                        value.expr is not None and
+                        canon(initial.expr) != canon(value.expr)):
+                    unchanged = P.atom(Pred("==", value.expr, initial.expr))
+                    self.facts.path = P.conjunction(self.facts.path,
+                        P.disjunction(P.negate(empty), unchanged))
         out.append(T.TFor(s.var, self._operand_of(end, s.end, out), step_op,
                           body_out, line=s.loc.line, start=start_op))
-        return False
+        return body_term and known_nonempty
 
     def _forget_value(self, value):
         out = value.clone()
@@ -1987,8 +2067,14 @@ class Checker:
         ob = Obligation(kind, source, axis, coord, extent, predicate,
                         loc_line, self._snapshot_preds(), self.facts.path,
                         tuple(self.facts.sym_lo.items()), tuple(self.facts.sym_hi.items()),
-                        tuple(self.value_types.items()), tuple(self.value_defs.items()))
+                        tuple(self.value_types.items()), tuple(self.value_defs.items()),
+                        tuple(p.name for p in self.tk.scalars if p.dtype.is_int
+                              and p.name in self.tk.explicit_scalars),
+                        self.execution_context_exact)
         self.tk.obligations.append(ob)
+        # Later memory operations may depend on the success/effects of this
+        # access. Only the first access gets exact scalar reachability for now.
+        self.execution_context_exact = False
         return ob
 
     def _access_buffer(self, e, out, head, bt: TY.BufferT, is_store, unsafe):

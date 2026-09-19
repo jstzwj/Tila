@@ -123,7 +123,7 @@ def test_cache_reuses_success_but_isolates_origin_binding_and_budget():
     assert P.USER in {o.kind for o in proof.dependencies}
     assert session.cache_hits == 1
     result = session.prove(ob, Facts(num={"i": -1}), set())
-    assert result.verdict == UNKNOWN
+    assert result.verdict == PROVEN_UNSAFE
     assert ProofSession(ProofConfig(rlimit=1)).prove(ob, Facts(), {"i"}).verdict == UNKNOWN
     assert ProofSession().prove(ob, Facts(), {"i"}).verdict == PROVEN_SAFE
 
@@ -228,7 +228,7 @@ def test_wraparound_prevents_false_mathematical_proof():
         value_types=(("index", "i32"), ("bounded", "i32")),
         value_defs=(("bounded", ("wrap", "i32", Add(index, Cst(1)), Cst(0))),))
     result = evaluate_obligation(ob, Facts(num={"index": 2**31 - 1}), {"index"})
-    assert result.verdict == UNKNOWN
+    assert result.verdict == PROVEN_UNSAFE
     assert ("coordinate", str(-2**31)) in result.candidate_counterexample
 
 

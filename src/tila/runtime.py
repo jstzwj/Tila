@@ -926,7 +926,13 @@ class _Launcher:
                         "TILA-TARGET-005",
                         "CUDA tensor without triton backend——用 CPU 张量/"
                         "numpy 走 interpreter，或安装 triton")
-                np_bufs[param.name] = t.detach().numpy()
+                if t.dtype == torch.bfloat16:
+                    # Same-width views preserve storage/offset/strides, including
+                    # writes to non-contiguous output tensors; no float32 copy.
+                    np_bufs[param.name] = t.detach().view(torch.uint16).numpy().view(
+                        interp_mod._np_dtype(D.bf16))
+                else:
+                    np_bufs[param.name] = t.detach().numpy()
             else:
                 np_bufs[param.name] = np.asarray(t)
         interp_mod.run_kernel(tk, np_bufs, scalar_vals, consts, grid,
