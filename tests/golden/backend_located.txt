@@ -1,0 +1,7 @@
+error[TILA-TARGET-010]: backend compilation or loading failed
+    at: line 2: ti.load(x, i)
+    ^
+    phase: target
+    backend phase: compile
+    fix:
+      检查源位置与编译参数；资源超限时减小 tile 或调整 num_warps；保留 backend_artifact 供重放

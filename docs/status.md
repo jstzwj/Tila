@@ -6,15 +6,18 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 877 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 884 passed、零 skipped
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；专用 GPU runner 和 workflow 已配置，
-当前覆盖 112 个 GPU 测试节点/256 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 115 个 GPU 测试节点/259 个语义案例，初始支持仅 RTX 3090/SM86。
 默认分支定时验收须合并验证分支后启用；操作与边界见 [GPU 支持](gpu-support.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
 本阶段已通过本地严格验收；不将此前远端 CI 结果视为当前修改的 CI 证据。
+
+M3-03 已增加语句级 source map、编译/加载诊断与重放附件、shared-memory/线程硬门禁，
+寄存器/spill 仅记录性能信息；边界与使用方式见 [后端诊断](backend-diagnostics.md)。
 
 M2-08 已完成 [固定环境 GPU 审计](m2-gpu-audit.md)：70 个 pytest 节点、214 个语义
 案例通过，零 skipped。统一命令 `PYTHONPATH=src python tools/gpu_audit.py`，
@@ -102,7 +105,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | Stage 1 定义期检查 | `Implemented` | Check | 装饰函数时完成子集、类型、shape、capability 和 obligation 生成 |
 | Stage 2 Const 特化 | `Implemented` | Check | 默认值/CLI const/launch const、延迟 shape 约束和 bounds 求值 |
 | NumPy reference interpreter | `Implemented` | CPU | add、matmul、attention、控制流、Ptr 1D 等路径有测试 |
-| Triton 源码 lowering | `Partial` | Triton | 已有结构/静态 target verifier，未知节点明确失败；编译后资源检查和完整 source map 待续 |
+| Triton 源码 lowering | `Partial` | Triton | 结构/静态 target verifier、语句 source map、编译诊断及 shared-memory/线程硬门禁已实现；其他架构与完整性能分析待续 |
 | CUDA 自动后端选择 | `Partial` | Triton | 集中检查同设备、RTX 3090/SM86、Triton 3.6.0、grid/tile/dot 限制；完整组合由严格审计认证 |
 | 特化缓存 | `Implemented` | Triton | 进程内 JIT callable 缓存含源码、Const/位模式、debug、target UUID/软件版本、num_warps、dtype/布局/alignment；不承诺持久化或容量上限 |
 | Source map/后端错误回映射 | `Designed` | — | 尚无 Tila 源位置到 Triton 编译错误的完整映射 |
@@ -356,7 +359,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 112 节点/256 案例，五个官方示例多配置；默认分支调度待合并、完整 dtype/target 矩阵仍待 M3 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 115 节点/259 案例，五个官方示例多配置；默认分支调度待合并、完整 dtype/target 矩阵仍待 M3 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

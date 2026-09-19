@@ -33,8 +33,8 @@ f16/f32 输出、二维输入，已知 K 至少 16。离线 symbolic shape 延�
 specialization 检查，执行前不能留下未解析的 tile 维度。CPU 仍允许非二次幂 tile。
 
 这是结构与已实现 target 规则的门禁，不替代类型检查、SSA/dominance 或安全证明。
-编译后二进制的寄存器/shared-memory 资源检查、完整 source map 与更广操作矩阵
-仍待后续阶段，不能推导“所有通过 verifier 的程序都必然通过后端编译”。
+M3-03 已补 [编译后硬资源门禁与语句 source map](backend-diagnostics.md)；更广操作
+矩阵与性能分析仍待后续阶段，不能推导“所有通过 verifier 的程序都必然通过后端编译”。
 
 ## 缓存指纹
 

@@ -75,6 +75,14 @@ TRITON_TIR_HANDLERS = MappingProxyType({
 TRITON_TIR_OPS = frozenset(TRITON_TIR_HANDLERS)
 
 
+class _SourceLine(str):
+    """Carry a Tila line through recursive emission without changing source text."""
+    def __new__(cls, text, line):
+        obj = super().__new__(cls, text)
+        obj.line = line
+        return obj
+
+
 class Lowering:
     def __init__(self, tk: T.TKernel, debug_asserts: bool = False):
         self.tk = tk
@@ -136,6 +144,8 @@ class Lowering:
         if not body:
             body = ["    pass"]
         out.extend(body)
+        self.source_map = {i: line.line for i, line in enumerate(out, 1)
+                           if isinstance(line, _SourceLine) and line.line}
         return "\n".join(out) + "\n"
 
     def launch_args(self):
@@ -155,7 +165,9 @@ class Lowering:
         out = []
         pad = "    " * depth
         for s in stmts:
-            out.extend(self.stmt(s, depth, pad))
+            out.extend(line if isinstance(line, _SourceLine) else
+                       _SourceLine(line, getattr(s, "line", 0))
+                       for line in self.stmt(s, depth, pad))
         return out
 
     def stmt(self, s: T.TStmt, depth, pad) -> list[str]:

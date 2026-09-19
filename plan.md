@@ -1,6 +1,6 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M3-02 launch/target/缓存收口，下一步编译后资源诊断与 source map
+状态：执行计划 v2；2026-09-19 完成 M3-03 编译后资源诊断与 source map；默认分支持续验收仍待合并
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：877 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 112 节点/256 案例。
+- 当前测试基线：884 passed、零 skipped（dev 环境已包含 `ml_dtypes`）；M3 GPU 覆盖扩展至 115 节点/259 案例。
 
 ### 2.2 当前主要缺口
 
@@ -921,7 +921,7 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
 | M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁/专用 runner；CI run 35440453081：CPU 842/GPU 104 节点通过、附件重放 8 项通过；待合并默认分支启用每日调度 |
 | M3-02 | DONE | launch/target 检查与缓存收口 | M3-01 | grid/零启动、集中 capability、结构与静态 target verifier、源码/ABI/布局缓存隔离、hint/alignment 负测试；本地 CPU 877/GPU 112 节点通过，边界见 docs/launch-target.md |
-| M3-03 | TODO | 编译后资源诊断与 source map | M3-02 | 检查寄存器/shared-memory 等编译产物限制；将后端失败映射到 Tila 源位置，扩展诊断 golden；不扩大未经验证的 target 支持范围 |
+| M3-03 | DONE | 编译后资源诊断与 source map | M3-02 | 语句映射、稳定编译/加载诊断、附件编译重放、shared-memory/线程硬门禁；寄存器/spill 仅作性能信息；3 份 golden 与真实 GPU 负测试；范围见 docs/backend-diagnostics.md |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

@@ -141,10 +141,13 @@ class JITFunction:
         import hashlib
         import inspect
         self.source_fingerprint = hashlib.sha256(inspect.getsource(fn).encode()).hexdigest()
+        self.tila_source = hir.source
+        self.source_start_line = inspect.getsourcelines(fn)[1]
         self.assume_launch = None                  # (preds, ast) 由装饰器注入
         self._kern_cache: dict = {}
         self.last_report: str = ""
         self.last_proof_results: tuple = ()
+        self.last_backend_resources = None
 
     # ------------------------------------------------------------------
 
@@ -675,6 +678,7 @@ class _Launcher:
     def __call__(self, *args, **kwargs):
         target_policy.validate_options(self.num_warps)
         jf = self.jf
+        jf.last_backend_resources = None
         tk = jf.tk
         dim_vals: dict[str, int] = {}
         stride_vals: dict[str, int] = {}
@@ -989,8 +993,18 @@ class _Launcher:
                     "TILA-TARGET-004",
                     "tensor is on CUDA but triton is not installed")
             device = next(iter(tensors.values())).device
-            src = lowering.Lowering(tk, _debug()).kernel_source()
+            emitter = lowering.Lowering(tk, _debug())
+            src = emitter.kernel_source()
             bindings = _binding_signature(tk, tensors)
+            from .backend import preflight, failure
+            from dataclasses import asdict
+            context = {"kernel": tk.name, "tila_source": jf.tila_source,
+                       "source_file": jf.fn.__code__.co_filename,
+                       "source_start_line": jf.source_start_line,
+                       "consts": consts, "scalars": scalar_vals,
+                       "grid": grid, "num_warps": self.num_warps,
+                       "debug": _debug(), "target": asdict(self.target),
+                       "bindings": bindings, "argument_order": emitter.launch_args()}
             key = _triton_cache_key(jf, consts, target=self.target, num_warps=self.num_warps,
                                     source=src, bindings=bindings)
             if key not in jf._kern_cache:
@@ -1000,7 +1014,11 @@ class _Launcher:
                 filename = f"<tila:{tk.name}:{hashlib.sha256(src.encode()).hexdigest()}>"
                 linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
                 ns: dict = {"__name__": "tila_generated"}
-                exec(compile(src, filename, "exec"), ns)
+                try:
+                    exec(compile(src, filename, "exec"), ns)
+                except Exception as exc:
+                    raise failure(exc, phase="source", source=src,
+                                  source_map=emitter.source_map, context=context) from exc
                 jf._kern_cache[key] = ns[tk.name]
             kern = jf._kern_cache[key]
             # 实参序 = 签名序：buffer 张量 → ptr 参数张量 → 标量 → Const
@@ -1009,6 +1027,8 @@ class _Launcher:
             args += [scalar_vals[s.name] for s in tk.scalars]
             args += [consts[c.name] for c in tk.consts]
             with torch.cuda.device(device):
+                jf.last_backend_resources = preflight(kern, args, grid, self.num_warps,
+                    source=src, source_map=emitter.source_map, context=context)
                 kern[grid](*args, num_warps=self.num_warps)
             return
         # interp：numpy 视图（torch CPU 张量共享内存）；ptr 参数以自身名
