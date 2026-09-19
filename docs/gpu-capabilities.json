@@ -179,19 +179,22 @@
       "shape": "Rank 2, matching K>=16, power-of-two tile dimensions",
       "evidence": [
         "tests/gpu_examples.py::test_matmul",
-        "tests/gpu_examples.py::test_self_attention"
+        "tests/gpu_examples.py::test_self_attention",
+        "tests/gpu_matrix_gaps.py::test_dot_accumulator_dtype"
       ],
-      "limits": "Evidence: f16 inputs, f32 accumulator/output. Checker also permits f16 output; bf16/f32/FP8 inputs rejected."
+      "limits": "f16 inputs; f16/f32 acc and output. f16 acc is promoted to f32 for computation and result rounded to f16 immediately. 16x32x16, contiguous/transposed, 4/8 warps, fixed random and RNE cases; bf16/f32/FP8 inputs rejected."
     },
     "zeros": {
       "verified_dtypes": [
-        "f32"
+        "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+        "f16", "bf16", "f32", "f64"
       ],
-      "shape": "2D accumulator tiles",
+      "shape": "(16,) and (4,4) tiles, plus f32 matmul accumulators",
       "evidence": [
-        "tests/gpu_examples.py::test_matmul"
+        "tests/gpu_examples.py::test_matmul",
+        "tests/gpu_matrix_gaps.py::test_tile_dtype_matrix"
       ],
-      "limits": "Other arithmetic/boolean zeros remain outside this row's measured dtype coverage."
+      "limits": "All 13 non-FP8 dtypes tested bitwise at these shapes; not every rank/tile-size cross-product. FP8 execution rejected."
     },
     "sum": {
       "verified_dtypes": [
@@ -289,13 +292,15 @@
     },
     "reshape": {
       "verified_dtypes": [
-        "i32"
+        "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+        "f16", "bf16", "f32", "f64"
       ],
-      "shape": "8 -> (2,4) -> 8",
+      "shape": "8 -> (2,4) -> 8; 16 -> 16 or (4,4) -> 16",
       "evidence": [
-        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics"
+        "tests/gpu_capabilities.py::test_structural_and_explicit_unsafe_intrinsics",
+        "tests/gpu_matrix_gaps.py::test_tile_dtype_matrix"
       ],
-      "limits": "Element count preserved; additional dtype/rank cross-products not certified."
+      "limits": "All 13 non-FP8 dtypes tested with integer extrema and floating special values, bitwise identity; additional rank/tile-size cross-products not certified."
     },
     "any": {
       "verified_dtypes": [

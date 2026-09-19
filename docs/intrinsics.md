@@ -134,6 +134,12 @@ dot(a: Block[A, (M, K)], b: Block[B, (K, N)],
         hardware: 组合 ∈ target 支持表（TILA-TARGET）
 ```
 
+点积当前执行契约：输入仅 f16；无 acc 时输出 f32，有 acc 时输出保持 acc 的
+f16/f32 dtype。f16 acc 先精确提升到 f32，计算后在 dot 结果处立即 RNE 舍回 f16；
+后续 cast 到 f32 不能恢复丢失的位。累加顺序不要求 CPU/GPU 按位相同，测试采用
+f64 参考与按 K 的 f32 累加误差界，再计入 f16 输出舍入。
+bf16/f32/FP8 输入仍拒绝。固定 target 的实测范围见 [矩阵补测](m3-matrix-followup.md)。
+
 ### 2.7 归约与逐元素
 
 ```text

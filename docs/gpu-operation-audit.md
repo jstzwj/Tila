@@ -20,11 +20,11 @@ GPU 验收，也不是所有 dtype × shape × stride × 控制流组合的完�
 | cast | 四种浮点的 16 个组合；既有整数/布尔案例 | 有限边界、RNE 中点、signed zero、NaN/Inf；不是所有整数/浮点交叉组合 |
 | constant | f16/bf16/f32/f64 | ADR-015 46 个按位案例；仅有限源值，无 FP8 |
 | where、广播 | bool/i32 的既有案例，bf16 外积广播，attention 的 f32 | eager 两分支；不能用来隐藏不安全内存访问 |
-| dot | f16 输入、f32 累加/输出；二维、K 尾块、转置 stride | bf16/f32/FP8 输入由 checker 拒绝；f16 输出尚未列入本行 GPU 承诺 |
-| zeros | f32 二维累加 tile | matmul/attention；其他 dtype 仍只有各自已有前端/CPU 覆盖，不扩张 GPU 承诺 |
+| dot | f16 输入，f32 计算、f16/f32 acc 与输出；二维、K 尾块、转置 stride | 后续补测修复 f16 acc 编译与中间舍入；bf16/f32/FP8 输入仍拒绝 |
+| zeros | bool + 12 arithmetic dtype，一维/二维 tile | 后续补测 16 元素与 (4,4)，加既有 matmul/attention f32；不是所有形状认证 |
 | sum/max | 12 arithmetic dtype，二维双轴、带 mask 一维 | ADR-008，NaN/Inf/signed zero、窄输出、整数回绕；bool/FP8 拒绝 |
 | exp/exp2 | f16/bf16/f32/f64，一维尾块、特殊值、窄中间结果 | 本阶段新增；下述计算/舍入与容差规则 |
-| reshape | i32，8 → (2,4) → 8 | 元素数保持；未认证全部 dtype/rank 组合 |
+| reshape | bool + 12 arithmetic dtype，16 → (4,4) 或 16 → 16；既有 i32 的 8 → (2,4) → 8 | 元素数和位模式保持；未认证全部 rank/shape 组合 |
 | any/all | bool lane reduction | 既有 68 组布尔专项；不是数值归约 |
 | assume | scalar 符号谓词，debug 成功断言路径 | 用户信任来源不变；不在共享 runner 上故意触发 device assert |
 | static_assert | 编译期 bool | checker-only，通过后擦除，无需存在 Triton runtime opcode |
@@ -59,6 +59,9 @@ f64=2e-14，atol=0；NaN 位置、Inf 符号参与比较。这是该案例集的
 默认 Const、全新 JIT 对象、debug=0、strict；保留 explain 中真实 Unknown 和 launch
 契约，不把尚未 launch 的状态改写为 ProvenSafe。更新 snapshot 时必须审查语义变化，
 不能因测试失败直接重新生成接受。CPU output 与 GPU differential 沿用已有示例测试。
+
+后续 [M3 矩阵补测](m3-matrix-followup.md)另覆盖官方 add 的 12 arithmetic dtype
+专门化、尾块和 4/8 warps；未改变公开示例的 f32 签名或引入泛型能力。
 
 ## M3 退出条件核查
 

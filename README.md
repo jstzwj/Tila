@@ -241,13 +241,14 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 M0/M1/M2 已完成；M3-02 至 M3-05 已完成 launch/target 门禁、后端诊断、操作/dtype
 审计及限定范围的 alignment hint 发射。M3-06 退出审计已完成，结论为 **NOT READY**。
-固定环境支持本地 GPU 验收；已新增 GitHub 托管 CPU CI 配置（推送后启用），
-自动 GPU CI 已撤下，隔离 GPU 持续验收与原计划的矩阵证据差距仍待关闭。
+固定环境支持本地 GPU 验收；GitHub 托管 CPU CI 首个 run 已成功，回归/golden
+附件已核实。[矩阵补测](docs/m3-matrix-followup.md)已覆盖限定形状的 dot f16 输出、
+zeros/reshape 与 add 多 dtype；自动 GPU CI 已撤下，隔离 GPU 持续验收仍缺失。
 
 近期工作优先级是：
 
-1. 取得托管 CPU CI 首次运行证据，评审退出审计列出的 dtype/shape 范围差距；
-2. 保持本地 GPU 验收与重放，为公开项目建立隔离 GPU CI，不连接开发者机器；
+1. 后续修改持续运行托管 CPU CI 与本地 GPU gate，保留矩阵边界及失败重放；
+2. 有独立 GPU 资源后建立隔离 GPU CI；目前没有 runner，不连接开发者机器补位；
 3. M3 验收完成后，再推进 M4 effect/race，以及后续泛型、target capability 和性能层。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

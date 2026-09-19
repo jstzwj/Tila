@@ -2,7 +2,9 @@
 
 M3-06 新增 [.github/workflows/cpu.yml](../.github/workflows/cpu.yml)，仅使用 GitHub
 托管的 `ubuntu-24.04`，Python 3.11.9。触发入口为 main push、pull_request 和手动
-workflow_dispatch。配置提交到远端后才会生效；没有远端成功 run 就不宣称已通过托管验收。
+workflow_dispatch。[首次托管运行](https://github.com/jstzwj/Tila/actions/runs/35448123253)
+已通过：提交 b269aba 的 926 项回归、零 skipped，JUnit 附件已下载核对，包含 15 个
+官方示例 golden。后续修改必须取得各自的验收证据，不能沿用旧提交的成功状态。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
@@ -38,7 +40,7 @@ CPU 回归环境，不冒充 Python 3.11.9 的固定 GPU 基线。GPU 严格验�
 [ci/gpu/uv.lock](../ci/gpu/uv.lock) 重建的环境。
 
 该 conda 环境已通过 926 项测试、零 skipped，且确认 torch 为 CPU-only、未安装
-Triton、`pip check` 无错误。GitHub 托管首个成功 run 仍待提交推送后取得。
+Triton、`pip check` 无错误。后续矩阵补测的本地基线见 [补测记录](m3-matrix-followup.md)。
 
 当前只配置 Linux/Python 3.11 的单个 CPU job。最低 Python 3.10、更新 Python、
 Windows CI、独立 lint/type job 尚未建立。自动 GPU CI 已撤下，本工作流不能补足它。

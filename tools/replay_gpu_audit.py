@@ -30,6 +30,9 @@ def main():
     argv = [str(source / "ci/gpu/.venv/bin/python"), "-m", "pytest",
             "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "tests/gpu_alignment.py", "-v", "--tb=long", "--showlocals",
             f"--junitxml={run / 'results.xml'}"]
+    # New matrix coverage must replay too; historical artifacts lack this file.
+    if (source / "tests/gpu_matrix_gaps.py").is_file():
+        argv.append("tests/gpu_matrix_gaps.py")
     if args.case:
         argv += ["-k", args.case]
     # Replay is diagnostic. Only gpu_audit.py can mark baseline acceptance.

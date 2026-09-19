@@ -6,16 +6,17 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 926 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 937 passed、零 skipped
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
-当前覆盖 160 个 GPU 测试节点/304 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 300 个 GPU 测试节点/444 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
-M3-06 [退出审计](m3-exit-audit.md)已完成，结论 **NOT READY**：GPU 持续验收缺失，
-原计划的 dtype/shape 范围与现有证据仍有差距，整个 M3 保持 IN_PROGRESS。
-新增 [GitHub 托管 CPU CI 配置](cpu-ci.md)，运行全量回归/golden；配置尚未推送时
-不宣称远端验收已通过，也不将 CPU 结果视为 GPU 证据。
+M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)已完成：
+补齐限定形状的 zeros/reshape dtype、add 多 dtype、dot f16 输出并修复编译差异。
+结论仍为 **NOT READY**：没有独立 GPU runner，自动 GPU 持续验收缺失。
+[GitHub 托管 CPU CI](cpu-ci.md)首个 run 已成功，运行回归/golden；不将 CPU
+结果视为 GPU 证据，未测的 shape/stride/架构组合不作支持承诺。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
@@ -373,7 +374,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 160 节点/304 案例，五个官方示例多配置；逐 intrinsic 证据见 gpu-capabilities.json，公开项目的隔离 CI 待建立，未覆盖组合不作承诺 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 300 节点/444 案例，五个官方示例多配置和 dtype 补测；逐 intrinsic 证据见 gpu-capabilities.json，隔离 GPU CI 待建立，未覆盖组合不作承诺 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

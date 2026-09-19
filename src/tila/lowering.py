@@ -416,6 +416,11 @@ class Lowering:
         if isinstance(x, T.TWhere):
             return f"tl.where({self.o(x.cond)}, {self.o(x.a)}, {self.o(x.b)})"
         if isinstance(x, T.TDot):
+            # The accumulator's declared dtype is the result dtype. Compute
+            # half-output dot in f32, then round here (not at a later store).
+            if x.vt.elem.dtype is D.f16:
+                acc = f", tl.cast({self.o(x.acc)}, tl.float32)" if x.acc is not None else ""
+                return f"tl.cast(tl.dot({self.o(x.a)}, {self.o(x.b)}{acc}), tl.float16)"
             if x.acc is not None:
                 return f"tl.dot({self.o(x.a)}, {self.o(x.b)}, {self.o(x.acc)})"
             return f"tl.dot({self.o(x.a)}, {self.o(x.b)})"

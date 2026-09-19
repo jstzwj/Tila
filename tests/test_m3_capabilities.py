@@ -6,9 +6,41 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from m3_capability_support import elementwise
+from m3_capability_support import elementwise, dot_kernel, tile_kernel
 from tila.errors import TilaError
 from tila.intrinsics import INTRINSICS, Availability
+from tila.lowering import Lowering
+
+
+def test_half_dot_rounds_before_widening(tmp_path):
+    kernel = dot_kernel(tmp_path)
+    a = np.zeros((16, 32), np.float16)
+    b = np.zeros((32, 16), np.float16)
+    a[:, 0] = 1
+    b[0, :] = np.resize(np.array([2**-11, 3 * 2**-11, -2**-12, 2**-10], np.float16), 16)
+    c = np.ones((16, 16), np.float16)
+    out = np.zeros((16, 16), np.float32)
+    reference = a.astype(np.float64) @ b.astype(np.float64) + c
+    expected = reference.astype(np.float16).astype(np.float32)
+    assert np.any(expected != reference)
+    kernel[(1,)](a, b, c, out)
+    np.testing.assert_array_equal(out, expected)
+    source = Lowering(kernel.tk).kernel_source()
+    assert 'tl.cast(tl.dot(av, bv, tl.cast(cv, tl.float32)), tl.float16)' in source
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "f32", "f64", "i8", "f8e4m3fn", "f8e5m2"])
+def test_dot_unsupported_inputs_rejected(dtype, tmp_path):
+    with pytest.raises(TilaError, match="TILA-TYPE-031"):
+        dot_kernel(tmp_path, input_dtype=dtype)
+
+
+@pytest.mark.parametrize("dtype", ["f8e4m3fn", "f8e5m2"])
+@pytest.mark.parametrize("operation", ["zeros", "reshape"])
+def test_fp8_tile_build_rejected(dtype, operation, tmp_path):
+    kernel = tile_kernel(tmp_path, dtype, operation, 2)
+    with pytest.raises(TilaError, match="TILA-TARGET-009"):
+        kernel.materialize({})
 
 
 @pytest.mark.parametrize("dtype", ["f8e4m3fn", "f8e5m2"])

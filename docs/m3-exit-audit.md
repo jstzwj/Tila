@@ -3,6 +3,10 @@
 日期：2026-09-19。审计结论：**NOT READY，整个 M3 仍 IN_PROGRESS**。
 M3-06 的审计交付已完成，不等于 M3 的退出条件全部满足。本次不增加语言或后端功能。
 
+后续更新：[CPU CI 首次成功与矩阵补测](m3-matrix-followup.md)已完成；以下基线表
+保留初审的 160 节点证据，当前严格 gate 已扩至 300 节点/444 案例。自动 GPU CI
+仍缺失，因此退出结论不变。
+
 ## 审计基线与证据
 
 审计对象为 `0.3.0.dev0`，实现基线 commit
@@ -58,14 +62,14 @@ JUnit 保留在 `artifacts/cpu/results.xml`。CPU workflow 已检查 YAML/命令
 1. **GPU 持续验收缺失。** 需要适合公开项目、与开发者机器隔离的 GPU 执行环境，
    恢复严格 gate、失败/版本漂移/skip 非零退出、可重放且可公开的附件，并取得实际
    远端运行证据。此项仍归 M3-01；没有时间表就不能写成“每日调度待启用”。
-2. **计划范围与已测矩阵仍不一致。** 计划 §8 M3.3/3.4 提到 FP8 编译、add 多 dtype、
-   更广 matmul 精度配置；现有示例 add 只有 f32，dot 只有 f16 输入/f32 累加输出，
-   FP8 参数和中间 cast 在 Tila 层拒绝。zeros GPU 仅 f32、reshape 仅 i32，dot 的
-   f16 输出也未取得本矩阵 GPU 证据。需逐项补证据，或明确评审缩减退出范围及拒绝
-   契约；本次审计不自行修改原退出标准来宣告通过。
-3. **CPU 托管运行与更广平台证据分开记录。** 本次新增 GitHub 托管 Linux CPU CI
-   配置与固定依赖，覆盖回归/golden；配置尚未提交推送时没有远端 run 证据。最低
-   Python、Windows 和其他 Python CI 尚未建立，见 [CPU CI](cpu-ci.md)。
+2. **矩阵差距已在限定范围补证据，不能扩大为全组合认证。** 后续补测覆盖 dot
+   f16/f32 acc 与输出、zeros/reshape 的 13 个非 FP8 dtype、add 的 12 arithmetic
+   dtype。按用户确认的“不扩充新功能、不支持的组合明确限制”，计划 §8 已明确
+   FP8 执行及 bf16/f32 dot 输入仍拒绝；它们不是当前执行支持项。更广 shape/rank/
+   stride 组合仍未认证，具体范围见 [补测记录](m3-matrix-followup.md)。
+3. **CPU 托管运行已通过，更广平台仍无证据。** b269aba 的首次托管 run 及附件
+   已核实；不能充当后续修改的远端证据。最低 Python、Windows 和其他 Python CI
+   尚未建立，见 [CPU CI](cpu-ci.md)。
 
 其他架构/版本、完整 FP8、race/atomic/uniformity、泛型和性能层保持未验证/后续阶段，
 不因本次通过扩大支持范围。`--exploratory` 只放宽审计环境门禁，不绕过 runtime 的
@@ -80,5 +84,6 @@ PYTHONPATH=src ci/gpu/.venv/bin/python tools/gpu_audit.py --output artifacts/ci-
 ```
 
 多卡机器可用 CUDA_VISIBLE_DEVICES 指定一张空闲卡；不记录主机地址/UUID 到公开文档。
-后续先取得托管 CPU CI 首次成功记录，再评审 M3 退出范围与证据缺口，最后解决隔离
-GPU 持续验收。M3-02..05 保留限定范围 DONE；M3-01 和整个 M3 不能标记完成。
+托管 CPU CI 首次记录与本轮矩阵补测已完成。用户目前没有独立 GPU runner/服务器，
+隔离 GPU 持续验收继续保留为未完成。M3-02..05 保留限定范围 DONE；M3-01 和整个
+M3 不能标记完成。后续代码变更继续运行 CPU CI 与本地严格 GPU gate。
