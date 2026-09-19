@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 .venv/
 trash/
+artifacts/m2-proof-audit/

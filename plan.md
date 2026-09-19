@@ -47,7 +47,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前测试基线：537 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
+- 当前测试基线：604 passed、零 skipped（dev 环境已包含 `ml_dtypes`）。
 
 ### 2.2 当前主要缺口
 
@@ -823,9 +823,10 @@ device 一致性/launch 扩展归 M3。当前从 Batch D 开始，并提前衔�
 
 ## 17. 下一步
 
-M0/M1、**M2-01 至 M2-04 已完成**。下一步 **M2-05**：系统差异/性质测试，
-重点审计 SMT 与执行结论、布尔压力、整数边界、循环/假设污染及缓存隔离；
-随后完成 M2-06 审计 golden。Mask/Const 易用性独立处理。
+M0/M1、**M2-01 至 M2-05 已完成**。下一步 **M2-06**：explain 与审计 golden，
+固定结论/信任来源、候选/确认反例、不可达路径及 Unknown 原因的可复核输出。
+M2-05 的有限穷举范围、差异台账与重放方式见 [证明审计](docs/m2-proof-audit.md)。
+Mask/Const 易用性独立处理。
 M2-04 的不变量与可达性采用明确的保守子集，不包含一般递推求解，
 具体边界见 [数据流与解释器](docs/dataflow-interpreter.md)。
 
@@ -896,7 +897,7 @@ M2-01 已在本地 GPU 完成整数相关对照；M2-08 的更广语义覆盖及
 | M2-02 | DONE | DAG 与 ProofResult/信任来源 | ADR-011、M2-01 | 471 项 CPU 回归；共享 And/Or/Not、path/lane/broadcast、不可变 ProofResult、Exempted、来源/作用域隔离及契约重验；19 项专门回归 |
 | M2-03 | DONE | 默认 Z3、预算与缓存 | M2-02 | 505 项 CPU 回归；34 项 SMT 专项；固定 Z3 4.16.0.0，Int/BitVec、否定/析取、候选反例、预算/缓存隔离与重放查询；边界见 docs/smt-prover.md |
 | M2-04 | DONE | 数据流与 interpreter 收口 | M2-01/02/03 | 537 项 CPU 回归；32 项新专项；活跃分支/整数 phi、简单不变量/零次出口、标量反例重放、非连续/广播/bf16/f64/debug；23 组 GPU 整数对照；保守边界见 docs/dataflow-interpreter.md |
-| M2-05 | TODO | 差异审计与性质测试 | M2-03/04 | 新旧结论差异逐项核查、布尔压力/溢出/假设污染测试；退役复杂 DNF |
+| M2-05 | DONE | 差异审计与性质测试 | M2-03/04 | 604 项 CPU 回归，新增 67 项专项；小位宽合法输入对穷举、SMT 对照/差异台账、固定种子布尔/控制流/广播、预算/缓存/来源隔离、失败见证重放；确认无复杂 DNF 执行入口，详见 docs/m2-proof-audit.md |
 | M2-06 | TODO | explain 与审计 golden | M2-03/05 | 信任来源、候选反例、不可达路径、Unknown 原因及 hint 依据可复核 |
 | M2-07 | TODO | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | 布尔 tile mask 语义与实现；Const bool、宿主整数白名单、显式舍入常量分别评审，开放前新增 ADR |
 | M2-08 | TODO | 小型 CPU/GPU 语义对照 | M2-01、M3-01 | 整数/cast/mask/归约在固定环境对照；无 runner 明确未验证，不阻塞 CPU 检查 |

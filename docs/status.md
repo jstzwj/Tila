@@ -6,7 +6,7 @@
 
 对应版本：`0.2.0` 开发基线
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 537 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 604 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -14,7 +14,8 @@
 隔离。M2-03 已接入默认 Z3、Int/BitVec、预算与有界进程内 proof 缓存，
 详见 [证明器实现边界](smt-prover.md)。M2-04 已收口活跃分支合并、简单循环不变量、
 零次循环出口和 CPU 内存访问语义，边界见 [数据流与解释器](dataflow-interpreter.md)。
-ExactInt 和 Mask 的公开边界不变。
+M2-05 已补小位宽穷举、性质测试、差异审计和失败重放，覆盖范围见
+[证明审计](m2-proof-audit.md)。ExactInt 和 Mask 的公开边界不变。
 
 本文回答一个问题：**当前代码究竟支持什么？** 设计目标和未来排期分别见
 `design-principles.md` 与 `../plan.md`；M1 冻结项的逐项证据见

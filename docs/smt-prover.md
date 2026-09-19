@@ -77,8 +77,9 @@ grid 检查状态、可达性输入/上下文精确性、编码版本、Z3 版�
 - `i32_max + 1`：按位宽得到 i32_min；不得借用无界整数的非负结论。
 - 用户假设冲突、模型可能不可达、求解器预算不足：保持 Unknown 和审计信息。
 
-这覆盖本次迁移的关键差异；系统性质测试、更多循环不变量/可达性分析和完整
-explain golden 仍属于 M2-05/06；一般循环不变量和可达性不在当前精确子集内。
+M2-05 已完成有界系统性质测试与结论差异审计，覆盖范围与重放方式见
+[证明审计](m2-proof-audit.md)。完整 explain golden 归 M2-06；一般循环不变量
+和可达性不在当前精确子集内。
 
 参考：[Z3 Bitvectors](https://microsoft.github.io/z3guide/docs/theories/Bitvectors/)、
 [资源参数](https://microsoft.github.io/z3guide/programming/Parameters/)。
