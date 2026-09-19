@@ -204,7 +204,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
   uniformity 尚未实现；
 - TypeVar、公开 capability 集合、target database 和性能诊断尚未实现；
 - 默认 SMT 证明器为 Z3，尚无公开可插拔 solver 接口；已发射 hint 记录来源，五个官方
-  示例已有 TIR、Triton source 和 explain golden，M3 最终退出审计仍待完成；
+  示例已有 TIR、Triton source 和 explain golden，M3 退出审计已完成但仍有阻塞项；
 - `full/trans/cat/min/log/sqrt/rsqrt/abs/floor/ceil` 等内建尚未实现。
 
 这些限制是显式的工程状态，不会被默认为“由 Triton 自动支持”。
@@ -217,6 +217,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 |---|---|
 | [docs/status.md](docs/status.md) | **当前能力的唯一状态清单** |
 | [docs/m1-exit-audit.md](docs/m1-exit-audit.md) | M1 冻结项、退出条件与自动化证据 |
+| [docs/m3-exit-audit.md](docs/m3-exit-audit.md) | M3 退出审计、已通过范围与剩余阻塞项 |
+| [docs/cpu-ci.md](docs/cpu-ci.md) | GitHub 托管 CPU 回归/golden 配置与本地复现 |
 | [docs/gpu-support.md](docs/gpu-support.md) | 固定 GPU 环境、本地验收与重放 |
 | [docs/gpu-operation-audit.md](docs/gpu-operation-audit.md) | 操作/dtype 证据、支持边界与 M3 退出条件核查 |
 | [plan.md](plan.md) | M0–M6 实施计划、ADR、任务台账和退出标准 |
@@ -238,13 +240,14 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 `trash/`，不再代表当前 Tila。
 
 M0/M1/M2 已完成；M3-02 至 M3-05 已完成 launch/target 门禁、后端诊断、操作/dtype
-审计及限定范围的 alignment hint 发射。固定环境支持本地 GPU 验收；适合公开项目的
-隔离 CI 仍待建立，M3 最终退出审计尚未完成。
+审计及限定范围的 alignment hint 发射。M3-06 退出审计已完成，结论为 **NOT READY**。
+固定环境支持本地 GPU 验收；已新增 GitHub 托管 CPU CI 配置（推送后启用），
+自动 GPU CI 已撤下，隔离 GPU 持续验收与原计划的矩阵证据差距仍待关闭。
 
 近期工作优先级是：
 
-1. 完成 M3-06 退出审计，逐条核对支持矩阵、编译/执行证据、诊断与 hint 来源；
-2. 保持本地 CPU/GPU 验收与重放，并为公开项目设计隔离 CI，明确未验证组合的边界；
+1. 取得托管 CPU CI 首次运行证据，评审退出审计列出的 dtype/shape 范围差距；
+2. 保持本地 GPU 验收与重放，为公开项目建立隔离 GPU CI，不连接开发者机器；
 3. M3 验收完成后，再推进 M4 effect/race，以及后续泛型、target capability 和性能层。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

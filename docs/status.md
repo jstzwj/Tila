@@ -12,6 +12,11 @@ M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保
 当前覆盖 160 个 GPU 测试节点/304 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
+M3-06 [退出审计](m3-exit-audit.md)已完成，结论 **NOT READY**：GPU 持续验收缺失，
+原计划的 dtype/shape 范围与现有证据仍有差距，整个 M3 保持 IN_PROGRESS。
+新增 [GitHub 托管 CPU CI 配置](cpu-ci.md)，运行全量回归/golden；配置尚未推送时
+不宣称远端验收已通过，也不将 CPU 结果视为 GPU 证据。
+
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
 本阶段已通过本地严格验收；不将此前远端 CI 结果视为当前修改的 CI 证据。

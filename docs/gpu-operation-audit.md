@@ -64,16 +64,17 @@ f64=2e-14，atol=0；NaN 位置、Inf 符号参与比较。这是该案例集的
 
 | 条件 | 本阶段结论 |
 |---|---|
-| 一个固定真实 CUDA 环境全绿 | 本地严格验收；新的远端 CI 证据待提交后获取 |
+| 一个固定真实 CUDA 环境全绿 | 本地严格验收；当前无自动 GPU CI |
 | 核心示例 CPU/GPU differential | 五个官方示例已有证据，15 份 golden 补齐 |
 | Implemented intrinsic 有编译证据 | 每项有索引；static_assert 为 checker-only；证据限清单标注的 dtype/shape |
 | unsupported target、device、launch 诊断 | M3-02/03 已覆盖，本次增加 FP8 storage/中间 cast 门禁 |
 | optimization hint 有来源 | 既有 hint 有来源与负测试；alignment 契约到新增 hint 的发射仍待下一阶段 |
-| 持续验收 | 专用 runner 已建立，M3-01 的默认分支每日调度仍待合并启用 |
+| 持续验收 | 自动 GPU CI 已撤下，仅保留本地严格验收；托管 CPU CI 不能替代 GPU 证据 |
 
 本阶段不宣布整个 M3 完成。后续 M3-05 已完成限定范围的
-[alignment 契约到 hint 发射](alignment-hints.md)，下一步为 M3 最终退出审计；
-主分支调度是独立的未完成项。上表为 M3-04 时点的核查记录。
+[alignment 契约到 hint 发射](alignment-hints.md)。[M3-06 最终退出审计](m3-exit-audit.md)
+结论为 NOT READY，持续 GPU 验收和完整范围仍有缺口。上表的能力记录限 M3-04 范围，
+CI 状态已按当前情况更正。
 
 ## 运行入口
 

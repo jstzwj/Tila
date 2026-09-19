@@ -9,3 +9,4 @@ trash/
 artifacts/m2-proof-audit/
 artifacts/m2-gpu-audit/
 artifacts/ci-gpu/
+artifacts/cpu/

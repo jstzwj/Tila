@@ -1,6 +1,6 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M3-05 alignment hint 发射闭环；下一步 M3 退出审计，公开项目的隔离 CI 待建立
+状态：执行计划 v2；2026-09-19 完成 M3-06 退出审计，结论 NOT READY；新增托管 CPU CI 配置，隔离 GPU CI 与矩阵证据缺口仍待关闭
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -55,8 +55,8 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - ADR-007 的整数语义/保守门禁、有限位宽 SMT 与受限数据流证明已实现；
 - 证明已使用共享 DAG、ProofResult、默认 Z3、Int/BitVec、预算及有界进程内缓存；
 - 一般加载内容/循环/数据流可达性仍保守近似，SAT 不自动升级为 ProvenUnsafe；
-- alignment 只验证，没有完整反馈到 lowering；
-- GPU device/target 检查、真实 CUDA 测试和 differential 测试不足；
+- alignment 已反馈一维 stride-1 Buffer/Ptr 基地址 hint，更一般布局仍保守；
+- GPU device/target 门禁和固定组合 differential 已验证；自动 GPU CI 已撤下，dtype/shape 全组合证据不足；
 - 完整 FP8、target capability 与泛型仍是未来能力；
 - effect 只有聚合记录和局部 warning，race/uniformity/atomic 尚未形成系统；
 - M2-05 性质/差异审计、M2-06 explain golden、M2-07a/b/c/d、M2-08 固定 GPU 对照已完成；更广 fuzz 和持续 GPU 验收继续归后续阶段。
@@ -482,6 +482,10 @@ SafeUnderContract 保留显示兼容；unsafe 不再伪装成 ProvenSafe。
 
 ### M3 退出标准
 
+2026-09-19 [M3-06 审计](docs/m3-exit-audit.md)结论为 NOT READY：以下条件在
+已列举子集有本地证据，但 M3-01 持续 GPU 验收以及 M3.3/3.4 的范围差距尚未关闭。
+本次审计不缩减退出标准来宣布完成；FP8 等拒绝路径不能充当执行支持证据。
+
 - 支持矩阵中的至少一个真实 CUDA 环境全绿；
 - 四个官方示例 CPU/GPU differential 通过；
 - 所有 Implemented intrinsic 的 Triton lowering 可编译；
@@ -656,7 +660,9 @@ Layout 进入用户类型语法前必须完成：
 
 ### 12.1 CI 矩阵
 
-最小 CI：
+当前仅新增 GitHub 托管 Linux/Python 3.11 CPU 回归与 golden 配置；尚未推送时
+不视为远端验收已通过。自动 GPU CI 已撤下，保留本地严格验收。
+配置与复现见 [CPU CI](docs/cpu-ci.md)。以下是目标矩阵，不是当前已运行的 job 清单：
 
 | Job | 内容 |
 |---|---|
@@ -846,7 +852,7 @@ M2-04 的不变量与可达性采用明确的保守子集，不包含一般递�
 具体边界见 [数据流与解释器](docs/dataflow-interpreter.md)。
 
 ADR-009 已固定本地 GPU 环境，M2-08 的有限语义对照已完成。
-M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升级为 DONE。
+M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍待完成，不因本地通过升级为 DONE。
 
 ---
 
@@ -919,12 +925,12 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M2-06 | DONE | explain 与审计 golden | M2-03/05 | 628 项 CPU 回归，新增 24 项专项/15 份 golden；audit explain v1、信任来源/反例分类、预算修复建议、缓存与模型附件边界、CLI/错误 SMT 重放及两类 hint 依据；见 docs/explain-audit.md |
 | M2-07 | DONE | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b/c/d 均完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/11 组 GPU 对照，c 为 39 项宿主转换专项，d 为 39 项专项/两份 golden/46 组 GPU 按位对照；ADR-012 至 015 与状态表同步 |
 | M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
-| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁、本地 GPU 验收及重放保留；远端机器注册、自动 workflow 和含部署细节的 Actions 记录撤下，公开项目的隔离 CI 待建立 |
+| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁、本地 GPU 验收及重放保留；自动 GPU workflow/机器注册已撤下；M3-06 新增托管 CPU CI 配置不替代隔离 GPU 持续验收 |
 | M3-02 | DONE | launch/target 检查与缓存收口 | M3-01 | grid/零启动、集中 capability、结构与静态 target verifier、源码/ABI/布局缓存隔离、hint/alignment 负测试；本地 CPU 877/GPU 112 节点通过，边界见 docs/launch-target.md |
 | M3-03 | DONE | 编译后资源诊断与 source map | M3-02 | 语句映射、稳定编译/加载诊断、附件编译重放、shared-memory/线程硬门禁；寄存器/spill 仅作性能信息；3 份 golden 与真实 GPU 负测试；范围见 docs/backend-diagnostics.md |
 | M3-04 | DONE | 操作/dtype 支持矩阵与编译覆盖审计 | M3-03 | 22 项 intrinsic 证据索引、36 项 GPU 新案例、窄 exp/exp2 修复、FP8 target 门禁；五个示例 15 份 golden；CPU 910/GPU 151 节点通过；见 docs/gpu-operation-audit.md |
 | M3-05 | DONE | alignment 契约到 hint 的发射闭环 | M3-04 | 一维 stride-1 Buffer/Ptr 的基地址字节提示，独立 checked 来源、explain golden、缓存隔离与逐次契约校验；CPU 926/GPU 160 节点通过；范围见 docs/alignment-hints.md |
-| M3-06 | TODO | M3 退出审计 | M3-01..05 | 逐条核对支持矩阵/编译与语义证据/诊断/hint 来源；确认未验证范围和默认分支 CI 状态，未满足项不得标记完成 |
+| M3-06 | DONE | M3 退出审计 | M3-01..05 现有成果 | docs/m3-exit-audit.md：NOT READY；本地 GPU 160 节点/304 案例复验通过，托管 CPU CI 配置建立；GPU 持续验收及原计划与 dtype/shape 证据差距仍阻止整个 M3 完成 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 
