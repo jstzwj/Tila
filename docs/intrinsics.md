@@ -97,7 +97,14 @@ buf.ptr : Buffer[T, (N,), Access, Alignment] → Ptr  仅 rank-1、launch stride
 ```text
 cast[U](x: T | Block[T, S] | Mask?—否)            → U | Block[U, S]
     T ≠ U 必须显式；FP8 只能经此进出 Float
+constant[U](value: exact Python int/float source) → Scalar[U] (Stage1Known)
+    U ∈ {f16, bf16, f32, f64}；源仅字面量、模块常量及一元负号
+    直接 RNE/ties-even，按目标位模式保存；非有限/溢出拒绝
 ```
+
+`constant` 是 kernel 内显式舍入构造，不是 Const 参数，也不是运行时 cast。
+原生 float 按已解析的 binary64 值舍入，不承诺源码十进制实数的精确值。
+构造/存储保留带符号零与次正规数；后续算术的次正规数行为由相应运算/target 决定。
 
 ### 2.5 选择与逻辑
 

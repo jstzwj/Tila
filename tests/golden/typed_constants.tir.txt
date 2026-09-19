@@ -1,0 +1,29 @@
+kernel @snapshot_constants
+  buffer a : Buffer[f16, (1,), WriteOnly, UnknownAlignment]  region=BufferRegion[0:a]
+  buffer b : Buffer[bf16, (1,), WriteOnly, UnknownAlignment]  region=BufferRegion[1:b]
+  buffer c : Buffer[f32, (1,), WriteOnly, UnknownAlignment]  region=BufferRegion[2:c]
+  buffer d : Buffer[f64, (1,), WriteOnly, UnknownAlignment]  region=BufferRegion[3:d]
+  scalar a_stride0 : i32
+  scalar b_stride0 : i32
+  scalar c_stride0 : i32
+  scalar d_stride0 : i32
+  {
+  store a[0] <- constant[f16](bits=0x2e66, value=0.0999755859375)
+  store b[0] <- constant[bf16](bits=0x3dcd, value=0.10009765625)
+  store c[0] <- constant[f32](bits=0x80000000, value=-0.0)
+  store d[0] <- constant[f64](bits=0x3fb999999999999a, value=0.1)
+  }
+  obligation store[a] axis 0: 0 <= 0 < 1
+  obligation store[b] axis 0: 0 <= 0 < 1
+  obligation store[c] axis 0: 0 <= 0 < 1
+  obligation store[d] axis 0: 0 <= 0 < 1
+  effect Write[BufferRegion[0:a]]
+  effect Write[BufferRegion[1:b]]
+  effect Write[BufferRegion[2:c]]
+  effect Write[BufferRegion[3:d]]
+  alias MayAlias[BufferRegion[0:a], BufferRegion[1:b]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:a], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[0:a], BufferRegion[3:d]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:b], BufferRegion[2:c]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[1:b], BufferRegion[3:d]] (distinct external parameters are conservatively MayAlias)
+  alias MayAlias[BufferRegion[2:c], BufferRegion[3:d]] (distinct external parameters are conservatively MayAlias)

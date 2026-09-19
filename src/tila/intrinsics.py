@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 4  # ADR-013 typed Const parameter domains
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 5  # ADR-015 typed constant bits
 
 
 class SurfaceForm(str, Enum):
@@ -46,6 +46,7 @@ class StageRule(str, Enum):
     CONST_INT_INPUT = "const-int-input"
     LOOP_CONTROL = "loop-control"
     EXPLICIT_CAST = "explicit-cast"
+    TYPED_CONSTANT = "typed-constant"
     FACT_INJECTION = "fact-injection"
     STATIC_ASSERT = "static-assert"
     METHOD_REDUCTION = "method-reduction"
@@ -187,6 +188,8 @@ INTRINSICS: tuple[IntrinsicSpec, ...] = (
           target=TargetRequirement.GLOBAL_MEMORY_V0, anchor="2.3"),
     _spec("cast", forms=(SurfaceForm.SUBSCRIPT_CALL,), arity=(1, 1),
           stage=StageRule.EXPLICIT_CAST, tir=("TCast",), anchor="2.4"),
+    _spec("constant", forms=(SurfaceForm.SUBSCRIPT_CALL,), arity=(1, 1),
+          stage=StageRule.TYPED_CONSTANT, tir=("TConstant",), anchor="2.4"),
     _spec("where", arity=(3, 3), tir=("TWhere",), anchor="2.5"),
     _spec("dot", arity=(2, 2), keywords=("acc",), tir=("TDot",),
           target=TargetRequirement.DOT_V0, anchor="2.6"),

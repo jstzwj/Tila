@@ -20,6 +20,10 @@ Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typ
 当前开发版本为 `0.3.0.dev0`：按 [ADR-013](docs/adr/013-const-bool-domain.md)
 新增 `Const[bool]`（仅原生 Python True/False，CLI 使用 `--const FLAG=true/false`）。
 `Const[int]` 的 ExactInt 门禁保持不变；该扩展不回移至 0.2.x，也不代表正式 0.3.0 已发布。
+宿主侧可用 `ti.host_int(np.int64(128))` 显式生成 Python int，详见
+[ADR-014](docs/adr/014-host-integer-normalization.md)；该函数不能在 kernel 内调用。
+kernel 内可用 `ti.constant[ti.f16](0.1)` 显式构造 RNE 舍入常量；支持
+f16/bf16/f32/f64，按位保存结果，详见 [ADR-015](docs/adr/015-rounded-typed-constants.md)。
 
 ---
 

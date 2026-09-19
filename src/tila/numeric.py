@@ -85,6 +85,9 @@ class Validator:
             return (x.value, x.value)
         if isinstance(x, T.TName):
             return self.env.get(x.name)
+        if isinstance(x, T.TConstant):
+            from .constants import float_value
+            return (float_value(x.dtype, x.bits),) * 2
         dt = dtype(getattr(x, "vt", None))
         if isinstance(x, T.TPid):
             return (0, max(0, self.grid[x.axis] - 1)) if self.grid else None

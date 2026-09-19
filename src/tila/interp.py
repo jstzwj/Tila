@@ -30,6 +30,7 @@ INTERPRETER_TIR_HANDLERS = MappingProxyType({
     "TBin": "expr.binary",
     "TUna": "expr.unary",
     "TCast": "expr.cast",
+    "TConstant": "expr.constant",
     "TArange": "expr.arange",
     "TPid": "expr.program-id",
     "TNumPrograms": "expr.num-programs",
@@ -270,6 +271,8 @@ class Interp:
                                isinstance(v, np.ndarray) or
                                v.dtype != np.float64 else v)
             raise RuntimeError(x.op)
+        if isinstance(x, T.TConstant):
+            return np.asarray(x.bits, dtype=f"uint{x.dtype.bits}").view(_np_dtype(x.dtype))[()]
         if isinstance(x, T.TCast):
             v = self.o(x.operand, env, pids)
             if x.dtype.is_int:

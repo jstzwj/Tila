@@ -6,7 +6,7 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 718 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 798 passed、零 skipped
 
 2026-09-19 设计更新：[ADR-011](adr/011-smt-proof-and-trust.md) 接受 Z3 默认
 通用证明引擎、布尔 DAG、整数编码与信任来源分离。M2-01 已实现 ADR-007 的
@@ -20,12 +20,17 @@ CLI/关键错误 golden、反例与重放附件边界。ExactInt 边界不变。
 
 M2-07 已形成四份独立提案：[布尔 tile/Mask](adr/012-boolean-tile-mask.md)、
 [Const bool](adr/013-const-bool-domain.md)、[宿主整数转换](adr/014-host-integer-normalization.md)、
-[显式舍入常量](adr/015-rounded-typed-constants.md)。M2-07a/b / ADR-012/013 已实现；
-ADR-014/015 仍为 Proposed，尚未实现；`host_int`、`constant` 尚非公共 API。
+[显式舍入常量](adr/015-rounded-typed-constants.md)。M2-07a/b/c/d 均已实现。
+`constant[dtype](value)` 是显式 RNE 浮点常量 intrinsic；`host_int` 为宿主端显式整数转换，
+39 项专项覆盖具体类型白名单、无损值、拒绝路径、使用点范围检查及缓存等价。
 Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数事实/缓存域分离。
 47 项 Const bool 专项覆盖 exact 绑定、staging/短路、分支/循环、CLI、缓存与审计快照。
 11 组 Const bool CPU/GPU 对照通过同下述 GPU 环境（含短路跳过除零），命令为
 `PYTHONPATH=src python tests/gpu_const_bool_smoke.py`。
+
+显式浮点常量的 39 项专项与两份 golden 覆盖直接舍入、位模式、类型/表达式门禁及缓存。
+46 组 CPU/GPU 按位对照通过同下述 GPU 环境（f16/bf16/f32/f64），命令为
+`PYTHONPATH=src python tests/gpu_constant_smoke.py`；普通字面量与 Const 参数域不放宽。
 
 布尔 tile 的 39 项专项包含身份/广播、分支/循环、Ptr、debug assume 与 explain golden。
 68 组 CPU/GPU 对照已通过 RTX 3090 + PyTorch 2.10.0+cu128 / Triton 3.6.0 / CUDA 12.8，
@@ -36,8 +41,8 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 [`m1-exit-audit.md`](m1-exit-audit.md)。当其他文档的阶段描述与本文冲突时，
 实现状态以本文为准；语言语义仍以各规范文档为准。
 
-<!-- public-api: jit,assume_launch,cdiv,Dim,bool,i8,i16,i32,i64,u8,u16,u32,u64,f8e4m3fn,f8e5m2,f16,bf16,f32,f64,Buffer,Ptr,ReadPtr,WritePtr,RWPtr,Const,ReadOnly,WriteOnly,ReadWrite,Global,Shared,Local,PowerOfTwo,Positive,NonNegative,Range,MultipleOf,Aligned,program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
-<!-- frontend-intrinsics: program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
+<!-- public-api: jit,assume_launch,cdiv,host_int,Dim,bool,i8,i16,i32,i64,u8,u16,u32,u64,f8e4m3fn,f8e5m2,f16,bf16,f32,f64,Buffer,Ptr,ReadPtr,WritePtr,RWPtr,Const,ReadOnly,WriteOnly,ReadWrite,Global,Shared,Local,PowerOfTwo,Positive,NonNegative,Range,MultipleOf,Aligned,program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
+<!-- frontend-intrinsics: program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
 
 ---
 
@@ -56,6 +61,7 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 后端列使用：
 
 - `Check`：可被 frontend/checker 静态处理；
+- `Host`：仅 Python 宿主端执行，不属于 kernel intrinsic；
 - `Specialize`：Const 代入后、生成/执行前复查；
 - `Launch`：按每次实际参数和 grid 检查；
 - `CPU`：reference interpreter 可执行；
@@ -96,6 +102,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | `kernel[grid](...)` | `Implemented` | CPU / Triton | 支持至多三个 grid 轴 |
 | `kernel.launch_auto(...)` | `Implemented` | CPU / Triton | 从 bounds obligation 的 `pid*STEP+lane`/裸 pid 模式推导 |
 | `tila.cdiv(a, b)` grid 标记 | `Implemented` | Launch | 同时提供数值 ceil-div 与 grid contract 识别 |
+| `tila.host_int(value)` | `Implemented` | Host | exact Python int 与八种 NumPy 整数具体类型；拒绝 bool/数组/用户子类，保留数学值，使用点独立检查范围；不允许在 kernel 内调用 |
 | `@tila.assume_launch(...)` | `Partial` | Launch | 支持受限表达式和运行时检查；装饰器接口当前接收字符串，规范示例仍需统一 |
 | dtype/shape/stride/alignment 绑定 | `Implemented` | Launch | NumPy、torch CPU/CUDA 基本绑定；stride 单位为元素 |
 | 多 tensor device 一致性 | `Designed` | — | 当前只用第一个 tensor 决定后端，尚未统一验证所有设备 |
@@ -156,6 +163,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | 隐式安全 widening | `Implemented` | Check | 有符号、无符号、浮点链分离；int/float 混算拒绝 |
 | 语境化字面量 | `Implemented` | Check | 整数范围、f16/bf16 精确可表示性有测试 |
 | 显式 `cast[U](x)` | `Implemented` | Check / CPU / Triton | 保持 shape；不支持 Mask cast |
+| 显式 `constant[U](value)` | `Implemented` | Frontend / Check / CPU / Triton | 仅 f16/bf16/f32/f64；原生 int/float 字面量或模块常量及其一元负号，直接 RNE，保留零符号/次正规数，拒绝非有限与溢出；按位 payload |
 | `cast(x, U)` 函数形式 | `Designed` | — | 文档曾称为同义语法，frontend 实际不支持 |
 
 ---
@@ -215,6 +223,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `intrinsic:unsafe_load` | `Implemented` | public call |
 | `intrinsic:unsafe_store` | `Implemented` | public call |
 | `intrinsic:cast` | `Implemented` | subscript call |
+| `intrinsic:constant` | `Implemented` | subscript call；exact int/float 源，显式 RNE 舍入 |
 | `intrinsic:where` | `Implemented` | public call |
 | `intrinsic:dot` | `Implemented` | v0 f16 signature |
 | `intrinsic:zeros` | `Implemented` | public call |
@@ -321,7 +330,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 
 | 能力 | 状态 | 覆盖 | 当前边界/证据 |
 |---|---|---|---|
-| 机器可读诊断 registry | `Implemented` | Frontend / Check / Specialize / Launch | 所有当前发射 code 有唯一 family、phase、severity、summary 和默认修复建议；源码/registry 完整性测试双向对齐 |
+| 机器可读诊断 registry | `Implemented` | Host / Frontend / Check / Specialize / Launch | 所有当前发射 code 有唯一 family、phase、severity、summary 和默认修复建议；源码/registry 完整性测试双向对齐 |
 | 统一诊断渲染 | `Implemented` | CLI / Runtime | error/launch error/warning 均输出 code、location、phase、details 和 fix；未知内部异常仅在 `TILA_DEBUG=1` 暴露 traceback |
 | `TILA-SYN/TYPE/SHAPE/CONST/MEM/BOUNDS/EFFECT` | `Implemented` | Check / Launch | 当前错误码目录见 `docs/diagnostics.md`；兼容性变更必须同步 registry 与测试 |
 | `TILA-TARGET` 完整诊断族 | `Partial` | Launch | 缺 triton/CUDA tensor 有诊断；完整硬件 capability 尚无实现 |

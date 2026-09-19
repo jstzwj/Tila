@@ -13,6 +13,7 @@ from typing import Iterable, Mapping
 
 
 class DiagnosticPhase(str, Enum):
+    HOST = "host"
     FRONTEND = "frontend"
     CHECK = "check"
     SPECIALIZE = "specialize"
@@ -68,6 +69,9 @@ _DIAGNOSTICS = {
                       DiagnosticPhase.LAUNCH), {
         "001": "integer arithmetic domain or index overflow could not be validated",
     }, default_fix="检查整数范围、除数、移位和转换；必要时显式扩大索引位宽"),
+    **_specs("NUM", (DiagnosticPhase.CHECK,), {
+        "002": "typed constant is nonfinite or overflows its target dtype",
+    }, default_fix="使用有限源值；缩小常量数值或选择更大范围的浮点 dtype"),
     **_specs("SYN", (DiagnosticPhase.FRONTEND,), {
         "000": "JIT entry or source retrieval failed",
         "001": "invalid Python syntax",
@@ -132,6 +136,12 @@ _DIAGNOSTICS = {
         "035": "memory coordinate is not an integer index",
         "036": "storage-only dtype is used for arithmetic",
     }, default_fix=_TYPE_FIX),
+    **_specs("CONST", (DiagnosticPhase.FRONTEND, DiagnosticPhase.CHECK), {
+        "011": "typed constant source or target is unsupported",
+    }, default_fix="使用 ti.constant[ti.f16/bf16/f32/f64](精确 Python int/float 字面量或模块常量)"),
+    **_specs("TYPE", (DiagnosticPhase.HOST,), {
+        "037": "host integer normalization requires a supported exact type",
+    }, default_fix="使用原生 Python int 或明确支持的 NumPy 整数 scalar"),
     **_specs("TYPE", (DiagnosticPhase.LAUNCH,), {
         "101": "launch argument type or count mismatch",
         "102": "runtime buffer shape/rank contract mismatch",

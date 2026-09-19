@@ -1,19 +1,28 @@
 # ADR-014：宿主整数的显式白名单规范化
 
-- 状态：**Proposed**（低优先级推荐方案，未实现）
+- 状态：**Accepted**（M2-07c 已实现；0.3.0.dev0）
 - 日期：2026-09-19
 - 阶段：M2-07c；不作为 Mask/Const bool 实施前置条件
 - 关联：ADR-005、ADR-007
 
 ## 推荐决策与语法
 
-维持 Const[int] 的 ExactInt 门禁，不让 NumPy scalar 自动通过。建议增加仅限
+维持 Const[int] 的 ExactInt 门禁，不让 NumPy scalar 自动通过。增加仅限
 宿主调用的 `ti.host_int(value)`，显式返回精确 Python int，再交给原有 API。
 
-<!-- tila-example: future; milestone=M2 -->
+<!-- tila-example: current; mode=exec -->
 ```python
+import numpy as np
+import tila as ti
+
+@ti.jit
+def kernel(data: ti.Buffer[ti.i32, (1,), ti.WriteOnly], BLOCK: ti.Const[int, ti.PowerOfTwo]):
+    ti.store(data, 0, BLOCK)
+
 block = ti.host_int(np.int64(128))
+data = np.zeros(1, dtype=np.int32)
 kernel[(1,)](data, BLOCK=block)
+assert data[0] == 128
 ```
 
 允许 exact Python int，以及 NumPy 的 signed/unsigned 8/16/32/64 位整数 scalar
@@ -35,13 +44,19 @@ runtime scalar dtype。数值域检查不能由 helper 成功替代。
 
 ## 诊断、迁移与验收
 
-拒绝时给出稳定 TYPE 族诊断，包含实际宿主类型和接受列表；精确错误码在实现时
-登记到 diagnostic registry，不把现有错误码复用于不同含义。host helper 独立登记
+拒绝时给出 `TILA-TYPE-037`，phase 为 `host`，包含实际宿主类型和接受列表；
+不格式化拒绝值，也不调用其转换协议或类型比较钩子。host helper 独立登记
 公共导出但不是设备 intrinsic；文档将它与 kernel 内整数 cast 明确分开。
 
 验收：8 类 NumPy 整数的两端值、别名、uint64 最大值、零维数组/bool/浮点/子类
 拒绝；恶意转换方法未被执行；转换后仍触发使用点的范围/refinement 检查；不同
 来源同数学值的缓存一致。无需增加运行时 NumPy 协议的泛化接纳。
+
+实现证据：`src/tila/host.py` 与 `tests/test_host_int.py` 的 39 项专项。
+白名单使用类型身份比较；NumPy 别名仅在其与八种指定类型是同一类型时接受，
+其他独立具体类型不因 dtype 位宽相同而自动加入。无需新增 TIR、backend 或
+编译/proof cache revision：转换后就是已有 Python int，同值共享原有缓存键。
+这是宿主功能，未为其增加 GPU 指令或新的 GPU 支持承诺。
 
 ## 未选择的方案
 

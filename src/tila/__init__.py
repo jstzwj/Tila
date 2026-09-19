@@ -22,6 +22,7 @@
 """
 
 from .runtime import JITFunction, assume_launch, cdiv, _jit as jit
+from .host import host_int
 
 # 维与类型构造
 from .dims import Dim
@@ -44,7 +45,7 @@ Local = Local_
 __version__ = "0.3.0.dev0"
 
 __all__ = [
-    "jit", "assume_launch", "cdiv", "Dim",
+    "jit", "assume_launch", "cdiv", "host_int", "Dim",
     "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
     "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64",
     "Buffer", "Ptr", "ReadPtr", "WritePtr", "RWPtr", "Const",
@@ -68,7 +69,7 @@ class _Intrinsic:
             "inside a @ti.jit function (parsed statically, not executed)")
 
     def __getitem__(self, dt):
-        raise TypeError("ti.cast[dt](x) only works inside @ti.jit")
+        raise TypeError(f"ti.{self.name}[dt](x) only works inside @ti.jit")
 
 
 def _make_intrinsics():

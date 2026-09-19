@@ -86,8 +86,8 @@ def test_exp2_is_a_real_public_placeholder():
 
 def test_surface_forms_are_catalog_data_not_frontend_side_lists():
     public_calls = set(intrinsic_names_for_surface(SurfaceForm.PUBLIC_CALL))
-    assert public_calls == set(PUBLIC_INTRINSIC_NAMES) - {"cast", "range"}
-    assert set(intrinsic_names_for_surface(SurfaceForm.SUBSCRIPT_CALL)) == {"cast"}
+    assert public_calls == set(PUBLIC_INTRINSIC_NAMES) - {"cast", "constant", "range"}
+    assert set(intrinsic_names_for_surface(SurfaceForm.SUBSCRIPT_CALL)) == {"cast", "constant"}
     assert set(intrinsic_names_for_surface(SurfaceForm.LOOP_FORM)) == {"range"}
     assert set(intrinsic_names_for_surface(SurfaceForm.METHOD_CALL)) == {"any", "all"}
 

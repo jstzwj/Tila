@@ -263,8 +263,15 @@ i32 范围限制，Buffer 地址线性化与循环内部步进使用 i64。
 验证及 Int/BitVec SMT 编码；加载内容和复杂数据流可达性仍保守近似，
 详见 [证明器实现边界](smt-prover.md)。
 
-易用性提案 [显式舍入常量](adr/015-rounded-typed-constants.md) 与
-[宿主整数转换](adr/014-host-integer-normalization.md) 尚未实现。
+[显式舍入常量](adr/015-rounded-typed-constants.md) 已实现：
+`ti.constant[ti.f16](0.1)` 从原生 int 的精确值或 float 的 binary64 值直接
+round-to-nearest、ties-to-even 到 f16/bf16/f32/f64，不经过 f32 中转。源只接受
+字面量、模块数值常量及其一元负号；不接受 bool、NumPy scalar、Const 参数或
+运行时值。保留带符号零/次正规数，拒绝非有限值和舍入溢出，不放宽普通字面量规则。
+[宿主整数转换](adr/014-host-integer-normalization.md) 已实现：宿主可显式调用
+`ti.host_int(np.int64(128))` 得到 Python int；白名单拒绝 bool、float、数组及
+用户子类，保留整数原值，转换后仍须通过 shape/grid/stride、scalar dtype 与
+refinement 检查。它不是设备 cast，也不能在 kernel 内调用。
 Const bool 已在 0.3.0.dev0 独立实现；ExactInt 和隐式数值转换规则保持不变。
 
 ### 6.1 隐式转换只允许安全 widening

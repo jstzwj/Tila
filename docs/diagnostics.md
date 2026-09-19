@@ -13,7 +13,7 @@
 
 ```text
 code
-phases              # frontend/check/specialize/launch/target/internal
+phases              # host/frontend/check/specialize/launch/target/internal
 severity            # error/warning/error-or-warning
 summary
 default_fix
@@ -38,6 +38,7 @@ error[TILA-<FAMILY>-<NNN>]: <具体原因>
 
 | 阶段 | 负责范围 | 主要入口 |
 |---|---|---|
+| `host` | 显式宿主整数转换的类型白名单 | `ti.host_int(value)` |
 | `frontend` | Python 子集、注解、表面形式 | `@ti.jit`、CLI 模块加载 |
 | `check` | dtype、shape、capability、控制流、静态 proof | `@ti.jit` Stage 1 |
 | `specialize` | Const、deferred shape/assert、生成前契约 | `materialize`、launch Stage 2 |
@@ -55,10 +56,10 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | Family | 活动编号 | 所有者 |
 |---|---|---|
 | `TILA-SYN` | 000–004、010–012、014–015、020–024、026–028、030–041、050、060–063 | frontend/表面语法 |
-| `TILA-TYPE` | 012–036、101–105 | checker；101+ 为 launch 参数契约 |
+| `TILA-TYPE` | 012–037、101–105 | checker；037 为 host_int 宿主转换；101+ 为 launch 参数契约 |
 | `TILA-SHAPE` | 003–006、008–012 | checker/specialization shape |
-| `TILA-CONST` | 001–010 | Const/StagedBool/specialization |
-| `TILA-NUM` | 001 | 数值定义域、索引无溢出与 ABI 范围验证 |
+| `TILA-CONST` | 001–011 | Const/StagedBool/specialization；011 为显式浮点常量源/目标限制 |
+| `TILA-NUM` | 001–002 | 001 为整数定义域/索引/ABI；002 为显式浮点常量非有限/溢出 |
 | `TILA-MEM` | 001–006 | memory capability/offset/alignment |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
 | `TILA-EFFECT` | 007 | effect warning |

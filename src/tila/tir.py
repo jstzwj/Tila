@@ -6,7 +6,7 @@ arange 上界等），lowering 与 interpreter 共同消费。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from . import types as TY
 
@@ -101,6 +101,28 @@ class TUna(TExpr):
 class TCast(TExpr):
     dtype: object
     operand: TOperand
+
+
+@dataclass
+class TConstant(TExpr):
+    dtype: object
+    bits: int
+
+
+def constant_signature(body):
+    """Stable typed bit payloads for semantic cache keys (including signed zero)."""
+    result, todo, seen = [], list(reversed(body)), set()
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (list, tuple)):
+            todo.extend(reversed(node))
+        elif isinstance(node, (TOperand, TStmt)) and id(node) not in seen:
+            seen.add(id(node))
+            if isinstance(node, TConstant):
+                result.append((node.dtype.name, node.bits))
+            else:
+                todo.extend(reversed([getattr(node, f.name) for f in fields(node)]))
+    return tuple(result)
 
 
 @dataclass
@@ -405,6 +427,9 @@ class _Printer:
             return f"({x.op}{self.o(x.operand)})"
         if isinstance(x, TCast):
             return f"cast[{x.dtype.name}]({self.o(x.operand)})"
+        if isinstance(x, TConstant):
+            from .constants import float_value
+            return f"constant[{x.dtype.name}](bits=0x{x.bits:0{x.dtype.bits // 4}x}, value={float_value(x.dtype, x.bits)!r})"
         if isinstance(x, TArange):
             return f"arange({x.start}, {self.o(x.end)})"
         if isinstance(x, TPid):

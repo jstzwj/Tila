@@ -52,6 +52,7 @@ TRITON_TIR_HANDLERS = MappingProxyType({
     "TBin": "expr.binary",
     "TUna": "expr.unary",
     "TCast": "expr.cast",
+    "TConstant": "expr.constant",
     "TArange": "expr.arange",
     "TPid": "expr.program-id",
     "TNumPrograms": "expr.num-programs",
@@ -317,6 +318,8 @@ class Lowering:
             if x.op == "all":
                 return f"(tl.sum(tl.cast(~{self.o(x.operand)}, tl.int32)) == 0)"
             return f"({x.op}{self.o(x.operand)})"
+        if isinstance(x, T.TConstant):
+            return f"tl.cast(tl.full((), {x.bits}, tl.uint{x.dtype.bits}), {x.dtype.tl_name}, bitcast=True)"
         if isinstance(x, T.TCast):
             if x.dtype.is_int and (isinstance(x.operand, T.TLit) and type(x.operand.value) is int
                                   or isinstance(x.operand, T.TName) and x.operand.name in self._const_names

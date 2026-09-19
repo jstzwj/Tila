@@ -339,6 +339,18 @@ class _Builder:
             if spec is not None and SurfaceForm.SUBSCRIPT_CALL in spec.surface_forms:
                 self._validate_call_shape(spec, e)
                 dt = self._dtype_from_annotation(func.slice)
+                if name == "constant":
+                    arg = e.args[0]
+                    atom = arg.operand if isinstance(arg, ast.UnaryOp) and isinstance(arg.op, ast.USub) else arg
+                    if isinstance(atom, ast.Constant):
+                        value = atom.value
+                    elif (isinstance(atom, ast.Name) and atom.id not in self.local_names
+                          and atom.id not in self.param_names and atom.id in self.g):
+                        value = self.g[atom.id]
+                    else:
+                        self._syn("TILA-CONST-011", "constant source must be an exact int/float literal or captured module constant", arg)
+                    if type(value) is not int and type(value) is not float:
+                        self._syn("TILA-CONST-011", "constant source must be exact Python int or float", arg)
                 kw = {k.arg: self.expr(k.value) for k in e.keywords if k.arg}
                 return Call(loc, name, [self.expr(a) for a in e.args], kw,
                             cast_dtype=dt)

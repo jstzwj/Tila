@@ -645,7 +645,8 @@ def _triton_cache_key(jf, consts: dict):
     """Semantic cache key; registry changes invalidate compiled kernels."""
     return (INTRINSIC_REGISTRY_SEMANTIC_REVISION, id(jf),
             tuple((k, "Bool" if type(v) is bool else "Int", v)
-                  for k, v in sorted(consts.items())), _debug())
+                  for k, v in sorted(consts.items())), _debug(),
+            T.constant_signature(jf.tk.body) if hasattr(jf, "tk") else ())
 
 
 class _Launcher:

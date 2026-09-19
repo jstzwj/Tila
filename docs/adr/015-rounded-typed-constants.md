@@ -1,6 +1,6 @@
 # ADR-015：显式目标 dtype 的浮点常量构造
 
-- 状态：**Proposed**（推荐语法与舍入规则，未实现）
+- 状态：**Accepted**（M2-07d 已实现；0.3.0.dev0）
 - 日期：2026-09-19
 - 阶段：M2-07d；独立于 Const[bool]，不开放 Const[float]
 - 关联：ADR-005、ADR-007、ADR-006
@@ -8,18 +8,27 @@
 ## 问题与推荐语法
 
 严格隐式字面量规则拒绝在目标 dtype 中不能精确表示的数值；不能为了方便使用
-0.1 而把隐式转换统一改为静默舍入。建议提供显式构造：
+0.1 而把隐式转换统一改为静默舍入。提供显式构造：
 
-<!-- tila-example: future; milestone=M2 -->
+<!-- tila-example: current; mode=exec -->
 ```python
-scale = ti.constant[ti.f16](0.1)
-value = value * scale
+import numpy as np
+import tila as ti
+
+@ti.jit
+def fill(out: ti.Buffer[ti.f16, (1,), ti.WriteOnly]):
+    scale = ti.constant[ti.f16](0.1)
+    ti.store(out, 0, scale)
+
+out = np.zeros(1, dtype=np.float16)
+fill[(1,)](out)
+assert out.view(np.uint16)[0] == 0x2e66
 ```
 
 初版目标仅 f16/bf16/f32/f64。输入限 exact Python int/float 字面量、捕获的模块
 数值常量及其一元负号；拒绝 bool、字符串、NumPy scalar、运行时值、Const 参数
 以及任意调用/算术表达式。结果是 Stage1Known 的 Scalar[目标 dtype]，不是新的
-Const 参数。该 narrow surface 后续可扩展，但不能默默调用 Python 求值器。
+Const 参数。该受限语法后续可扩展，但不能默默调用 Python 求值器。
 
 ## 舍入与边界
 
@@ -58,3 +67,18 @@ CPU/Triton 支持矩阵及语义 revision；常量解析/舍入失败使用 CONS
 放宽所有字面量破坏可审计的隐式转换契约；把常量先转成 f32 再 cast 可能双重
 舍入；使用十进制字符串需要新增语言常量域；开放 Const[float] 会引入参数序列化
 及 NaN/零值缓存问题，均不作为这次显式构造的前置扩张。
+
+## 实现与验收记录
+
+`constant` 已登记为下标 intrinsic；frontend 在解析源表达式前检查原生类型与
+捕获边界，checker 使用精确整数比值直接计算 RNE 位模式。`TConstant` 保存
+目标 dtype 与 bits，CPU 按位 view，Triton 使用 uint16/32/64 标量 bitcast。
+numeric cast 门禁消费舍入后的精确值；常量不直接进入整数索引证明。
+编译缓存包含 dtype/bits 序列，registry semantic revision 升为 5。
+
+`TILA-CONST-011` 拒绝不支持的源/目标，`TILA-NUM-002` 拒绝非有限值或溢出。
+39 项专项覆盖有理数二分参考、全部有限 f16/bf16 位模式、ties-even、下溢/溢出、
+双重舍入反例、源类型/表达式限制、cache payload 与两份 TIR/Triton golden。
+`PYTHONPATH=src python tests/gpu_constant_smoke.py` 的 46 组 CPU/GPU 按位对照
+通过 RTX 3090 / PyTorch 2.10.0+cu128 / Triton 3.6.0 / CUDA 12.8，包含四种 dtype。
+这些证据只覆盖常量构造与存储，不承诺后续任意浮点运算均保留次正规数。

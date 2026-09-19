@@ -1739,6 +1739,22 @@ class Checker:
             ["reshape 形状只使用字面量与 Const 参数（运行期维 ti.Dim "
              "不能参与可验证的 numel 约束）"])
 
+    def _in_constant(self, e, out):
+        from .constants import rounded_bits
+        arg = e.args[0]
+        if isinstance(arg, UnaOp) and arg.op == "-" and isinstance(arg.operand, Lit):
+            value = arg.operand.value
+            if type(value) is int or type(value) is float:
+                value = -value
+        elif isinstance(arg, Lit):
+            value = arg.value
+        else:
+            raise TilaError("TILA-CONST-011", "constant source must be an exact int/float literal or captured module constant", e.loc)
+        dt = e.cast_dtype
+        bits = rounded_bits(value, dt, e.loc)
+        vt = TY.ScalarT(dt)
+        return VarInfo(vtype=vt, is_const=True, tir=T.TConstant(vt, dt, bits))
+
     def _in_cast(self, e, out):
         if e.cast_dtype is None or len(e.args) != 1:
             raise TilaError("TILA-SYN-036", "cast[dtype](x) takes one arg",
@@ -2387,6 +2403,7 @@ CHECKER_INTRINSIC_HANDLERS = {
     "unsafe_load": Checker._in_unsafe_load,
     "unsafe_store": Checker._in_unsafe_store,
     "cast": Checker._in_cast,
+    "constant": Checker._in_constant,
     "where": Checker._in_where,
     "dot": Checker._in_dot,
     "zeros": Checker._in_zeros,
