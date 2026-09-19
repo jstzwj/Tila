@@ -7,8 +7,8 @@ bounds obligation。
 
 Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typed TIR
 可以生成 Triton 源码，也可以交给 NumPy reference interpreter 执行。Triton
-和 CUDA 路径已有 RTX 3090 / SM86 固定支持组合，GPU CI 随 main 发布，配置为
-push 验收与每日定时验收。已实现 [launch/target 门禁](docs/launch-target.md)、
+和 CUDA 路径已有 RTX 3090 / SM86 固定验证组合。公开仓库不连接开发者本地机器，
+当前通过本地工具进行 GPU 验收，不提供自动 GPU CI。已实现 [launch/target 门禁](docs/launch-target.md)、
 [编译诊断与资源检查](docs/backend-diagnostics.md)、[操作/dtype 审计](docs/gpu-operation-audit.md)
 及 [alignment hint 来源与缓存隔离](docs/alignment-hints.md)。跨架构验证仍未闭环，
 因此后端整体状态仍为 `Partial`。
@@ -131,7 +131,7 @@ M2-08 统一验收入口：`PYTHONPATH=src python tools/gpu_audit.py`，固定�
 归约契约、覆盖范围及失败重放见 [GPU 语义审计](docs/m2-gpu-audit.md)。
 完整本地通过仍不代表已有持续 GPU CI。
 
-M3 的固定依赖重建、专用 GPU CI、官方示例覆盖与 launch 选项见
+M3 的固定依赖重建、本地 GPU 验收、官方示例覆盖与 launch 选项见
 [GPU 支持矩阵](docs/gpu-support.md)；初始组合仅 RTX 3090 / SM86。
 
 ---
@@ -192,7 +192,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 以下能力不是当前完整承诺。精确状态和边界见 [docs/status.md](docs/status.md)：
 
-- Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；CI 的环境锁、重放与运行记录见
+- Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；本地验收的环境锁与重放方式见
   [GPU 支持](docs/gpu-support.md)。
   编译资源门禁和语句级 source map 已实现，其他架构及完整性能分析仍未验证；
 - Ptr 公共语法与 RegionId/Extent/alias 模型已定型；Buffer v0 不公开
@@ -217,7 +217,7 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 |---|---|
 | [docs/status.md](docs/status.md) | **当前能力的唯一状态清单** |
 | [docs/m1-exit-audit.md](docs/m1-exit-audit.md) | M1 冻结项、退出条件与自动化证据 |
-| [docs/gpu-support.md](docs/gpu-support.md) | 固定 GPU 环境、main CI、验收附件与重放 |
+| [docs/gpu-support.md](docs/gpu-support.md) | 固定 GPU 环境、本地验收与重放 |
 | [docs/gpu-operation-audit.md](docs/gpu-operation-audit.md) | 操作/dtype 证据、支持边界与 M3 退出条件核查 |
 | [plan.md](plan.md) | M0–M6 实施计划、ADR、任务台账和退出标准 |
 | [docs/adr/README.md](docs/adr/README.md) | 已接受的公共语法与核心 IR 架构决定 |
@@ -238,13 +238,13 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 `trash/`，不再代表当前 Tila。
 
 M0/M1/M2 已完成；M3-02 至 M3-05 已完成 launch/target 门禁、后端诊断、操作/dtype
-审计及限定范围的 alignment hint 发射。固定环境 GPU workflow 已进入 main，
-首次默认分支定时运行仍需观察，M3 最终退出审计尚未完成。
+审计及限定范围的 alignment hint 发射。固定环境支持本地 GPU 验收；适合公开项目的
+隔离 CI 仍待建立，M3 最终退出审计尚未完成。
 
 近期工作优先级是：
 
 1. 完成 M3-06 退出审计，逐条核对支持矩阵、编译/执行证据、诊断与 hint 来源；
-2. 持续检查 main 的 CPU/GPU CI、附件和重放，明确保留未验证组合的边界；
+2. 保持本地 CPU/GPU 验收与重放，并为公开项目设计隔离 CI，明确未验证组合的边界；
 3. M3 验收完成后，再推进 M4 effect/race，以及后续泛型、target capability 和性能层。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

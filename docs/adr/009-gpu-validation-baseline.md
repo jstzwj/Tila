@@ -39,9 +39,9 @@ PyTorch 不提供负 stride tensor，因此负 stride 仍只有 CPU 证据。
 
 ## 尚未建立的支持
 
-M3-01 已增加全量依赖锁、专用 runner、workflow 与官方示例 differential，详见
-[支持矩阵与操作手册](../gpu-support.md)。workflow 随 main 发布，配置 push 和每日调度；
-具体运行以 Actions 记录为准。初始支持承诺仅覆盖本表 RTX 3090/SM86 的组合及已列举操作。
+M3-01 保留全量依赖锁与官方示例 differential，详见
+[支持矩阵与操作手册](../gpu-support.md)。远端 GPU 自动验收已撤下，公开项目的隔离
+CI 待建立。初始验证范围仅覆盖本表 RTX 3090/SM86 的组合及已列举操作。
 M3-02 的结构与静态 target verifier 见 [launch/target](../launch-target.md)。其他架构/版本、
 完整性能分析仍未验证；M3-03 的编译后硬资源门禁与语句 source map 见
 [后端诊断](../backend-diagnostics.md)。不能因此将整个后端声明为全域稳定。

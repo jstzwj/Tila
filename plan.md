@@ -1,6 +1,6 @@
 # Tila 语言与实现完善计划
 
-状态：执行计划 v2；2026-09-19 完成 M3-05 alignment hint 发射闭环；下一步 M3 退出审计，GPU workflow 随 main 发布
+状态：执行计划 v2；2026-09-19 完成 M3-05 alignment hint 发射闭环；下一步 M3 退出审计，公开项目的隔离 CI 待建立
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -919,7 +919,7 @@ M3-01 的正式支持矩阵/持续 runner 仍待完成，不因本地通过升�
 | M2-06 | DONE | explain 与审计 golden | M2-03/05 | 628 项 CPU 回归，新增 24 项专项/15 份 golden；audit explain v1、信任来源/反例分类、预算修复建议、缓存与模型附件边界、CLI/错误 SMT 重放及两类 hint 依据；见 docs/explain-audit.md |
 | M2-07 | DONE | Mask/Const/常量接口独立设计 | M2 核心模型、ADR-005 版本评审 | a/b/c/d 均完成；a 为 39 项专项/68 组 GPU 对照，b 为 47 项专项/11 组 GPU 对照，c 为 39 项宿主转换专项，d 为 39 项专项/两份 golden/46 组 GPU 按位对照；ADR-012 至 015 与状态表同步 |
 | M2-08 | DONE | 小型 CPU/GPU 语义对照 | M2-01、ADR-009 本地基线 | 统一 runner、214 案例、失败重放；ADR-008 归约契约；不替代持续 CI |
-| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁/专用 runner；历史 CI run 35440453081 及附件重放通过；workflow 随 main 发布，首次默认分支定时运行待观察 |
+| M3-01 | IN_PROGRESS | GPU 支持矩阵 | ADR-009 | 固定依赖锁、本地 GPU 验收及重放保留；远端机器注册、自动 workflow 和含部署细节的 Actions 记录撤下，公开项目的隔离 CI 待建立 |
 | M3-02 | DONE | launch/target 检查与缓存收口 | M3-01 | grid/零启动、集中 capability、结构与静态 target verifier、源码/ABI/布局缓存隔离、hint/alignment 负测试；本地 CPU 877/GPU 112 节点通过，边界见 docs/launch-target.md |
 | M3-03 | DONE | 编译后资源诊断与 source map | M3-02 | 语句映射、稳定编译/加载诊断、附件编译重放、shared-memory/线程硬门禁；寄存器/spill 仅作性能信息；3 份 golden 与真实 GPU 负测试；范围见 docs/backend-diagnostics.md |
 | M3-04 | DONE | 操作/dtype 支持矩阵与编译覆盖审计 | M3-03 | 22 项 intrinsic 证据索引、36 项 GPU 新案例、窄 exp/exp2 修复、FP8 target 门禁；五个示例 15 份 golden；CPU 910/GPU 151 节点通过；见 docs/gpu-operation-audit.md |

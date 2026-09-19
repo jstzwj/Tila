@@ -8,9 +8,9 @@
 
 验证基线：`PYTHONPATH=src python -m pytest -q` = 926 passed、零 skipped
 
-M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；专用 GPU runner 和 workflow 已配置，
+M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
 当前覆盖 160 个 GPU 测试节点/304 个语义案例，初始支持仅 RTX 3090/SM86。
-GPU workflow 随 main 发布，配置 push 与每日定时验收；操作与运行记录见 [GPU 支持](gpu-support.md)。
+公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
@@ -96,7 +96,7 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 - `Triton`：可生成 Triton 源码；
 - `GPU verified`：已在固定 CUDA/Triton 环境持续执行验证。
 
-当前 GPU CI 已从验证分支推进至 main，默认分支配置持续验收。暂不批量升级为
+当前 GPU 自动 CI 已撤下，仅保留固定环境本地验收。暂不批量升级为
 `GPU verified`；已验证的操作、dtype、形状范围以 gpu-support.md 为准。
 
 M2-01 新增可显式运行的 `tests/gpu_integer_smoke.py`，已在 RTX 3090 /
@@ -368,7 +368,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 160 节点/304 案例，五个官方示例多配置；逐 intrinsic 证据见 gpu-capabilities.json，main 配置持续验收、未覆盖组合不作承诺 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 160 节点/304 案例，五个官方示例多配置；逐 intrinsic 证据见 gpu-capabilities.json，公开项目的隔离 CI 待建立，未覆盖组合不作承诺 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---
