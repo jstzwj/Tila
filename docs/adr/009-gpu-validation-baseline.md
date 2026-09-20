@@ -25,12 +25,14 @@
 ## 验收边界
 
 统一命令：`PYTHONPATH=src python tools/gpu_audit.py`。
-环境必须精确匹配上述组合，全部 402 个 pytest 节点成功且无 skipped 才能
+环境必须精确匹配上述组合，全部 417 个 pytest 节点成功且无 skipped 才能
 标记 `accepted: true`。四个既有专项是聚合节点，其内部含 148 个固定案例；
 M2-08 另有 66 个新增节点，共 214 个语义案例；M3 至 alignment 阶段增加 90 个节点，
 退出审计后 dtype 矩阵再增加 140 个节点，达到 444 个案例；M4-03c atomic
 再增加 88 个节点达到 532 个案例；M4-04c 的 7 项 Race 门禁达到 539 个案例；
-C0 的 7 项 ABI/地址/负测试使当前共 546 个案例，见[正确性审计](../correctness-closure.md)。
+C0 的 7 项 ABI/地址/负测试达到 546 个案例；C1 再增加 15 项布尔 tile cast、
+view/负偏移、Const return 与 runtime/loop return 门禁，当前共 561 个案例，
+见[独立边界复核](../c1-correctness-review.md)。门禁负测试通过不表示对应语法可在 GPU 执行。
 Race 固定 warn：明确的 Unknown 告警不算证明通过，但不阻止语义/门禁专项验收；
 已确认冲突必须在执行前拒绝。
 无 CUDA、依赖缺失、环境不匹配、测试失败或被跳过均返回非零，并保留失败记录。

@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 14  # soundness: signed keys, typed ABI, checked pointer domain
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 15  # C1: capability and shape-preserving casts
 
 
 class SurfaceForm(str, Enum):

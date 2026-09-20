@@ -2,6 +2,10 @@
 
 适用版本：0.3.0.dev0。支持环境仍限于 [GPU 支持矩阵](gpu-support.md)。
 
+C1 新增边界：verifier 独立检查普通/unsafe 访问的读写权限和 cast 来源/shape。
+GPU 的 runtime if/循环内 return 提前报 TARGET-009，顶层与 Const 分支 return
+保持支持；CPU 完整提前退出语义不变。实测原因与反例见 [C1 复核](c1-correctness-review.md)。
+
 ## Grid 与空启动
 
 CPU/CUDA 共用 launch 域：grid 为 1–3 轴 tuple，各轴必须是 exact Python int，

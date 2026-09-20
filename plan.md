@@ -4,10 +4,10 @@
 
 后续：2026-09-20 f4add24 的托管 CPU CI 已通过 953 项；M4-01c/d 已从 TIR 派生
 控制流 effect 汇总、固定可选详细输出并验收绑定隔离；M4-02 已实现 where 独立效应检查。
-本地 CPU 1217 项通过；GPU 402 节点（546 案例）通过。最小 atomic_add CPU/GPU 已实现，
+本地 CPU 1264 项通过；GPU 417 节点（561 案例）通过。最小 atomic_add CPU/GPU 已实现，
 uniformity 已有内部分析与可选输出，M3 仍未完成。M4-03a 已冻结最小 atomic_add
 设计（ADR-017）；M4-03b/c 已完成前端/IR/CPU 与固定 RTX 3090 GPU 验收。
-M4-03 已提交为 `eb0867f`（尚未推送）；M4-04b 已冻结 ADR-018 为 Accepted，
+M4-03 已提交为 `eb0867f` 并推送；M4-04b 已冻结 ADR-018 为 Accepted，
 M4-04c 已接入独立 Race 策略、启动门禁、同次 tile store lane 检查、稳定输出与绑定隔离。
 M4-04d 已完成 819 次小域枚举/变形分析及限定覆盖退出审计。
 M4-05b/c 已冻结 ADR-019，实现内部值/控制分析、可选输出及绑定隔离。
@@ -19,7 +19,9 @@ M4-05b/c 已冻结 ADR-019，实现内部值/控制分析、可选输出及绑�
 4. C0-04：全量回归、golden、固定 GPU 严格复验，登记证据与兼容性变化后再评审恢复扩展。
 
 C0-01..04 本地限定验收已完成；证据与剩余边界见上述审计。功能扩展保持暂停，
-恢复前先评审本次语义收紧和新增反例；当前修改尚无对应远端 CPU CI。
+恢复前先评审语义收紧和新增反例。C0 提交 4aa13e9 已取得托管 CPU 1217 项成功记录；
+[C1 独立边界复核](docs/c1-correctness-review.md)本地限定验收完成，修复权限/cast 遗漏并收紧 GPU return 支持。
+后续先核实 C1 托管 CI，再评审兼容性变化与下一轮审计范围；不自动恢复 M4-05d。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -66,7 +68,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前本地测试基线：1217 passed、零 skipped；含 88 项 Race、64 项 uniformity 及 26 项正确性专项，f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 402 节点/546 案例通过，含 7 项真实 CUDA Race 门禁和 7 项正确性对照；不作为 uniformity 同步证据；race=warn 允许明确 Unknown，不表示全部案例无竞争；当前修改需单独取得远端 CI 证据。
+- 当前本地测试基线：1264 passed、零 skipped；含 88 项 Race、64 项 uniformity 及 C0/C1 正确性专项。GPU 严格验收 417 节点/561 案例通过，含 7 项真实 CUDA Race 门禁和 22 项 C0/C1 对照及负测试；不作为 uniformity 同步证据；race=warn 允许明确 Unknown，不表示全部案例无竞争。托管 CI 记录见 docs/cpu-ci.md，各提交单独验收。
 
 ### 2.2 当前主要缺口
 
@@ -998,6 +1000,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | C0-02 | DONE | 静态类型与地址语义 | ADR-020 Accepted | 保守 shape 合并、嵌套 variant 传播、checked i64 指针位移及每步启动门禁 |
 | C0-03 | DONE | Safe 规则与跨层审计 | C0-01/02 | 8 类出口清单；715 表达式/57,915 次求值、450 组直接/区间枚举、独立 SMT 蕴含、缓存隔离 |
 | C0-04 | DONE | 限定收口验收 | C0-03 | CPU1217、GPU402节点/546案例全部通过且零跳过；新增 explain golden；详见 docs/correctness-closure.md，不代表完整编译器形式化证明 |
+| C1 | DONE | 独立边界复核与修复 | C0-01..04 | WriteOnly/Mask cast 双层拒绝、合法 cast 保形、Const return lowering；runtime/loop return GPU 门禁；CPU1264、GPU417节点/561案例通过，见 docs/c1-correctness-review.md |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

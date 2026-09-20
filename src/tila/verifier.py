@@ -3,7 +3,7 @@ import math
 import keyword
 
 from . import dtypes as D, tir as T, types as TY
-from .dims import eval_num, free_syms
+from .dims import eval_num, free_syms, equal
 from .errors import Loc, TilaError
 from .target import SUPPORTED
 
@@ -44,6 +44,7 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
     consts = {} if consts is None else consts
     buffers = {p.name: p.vtype for p in kernel.buffers}
     pointers = {p.name: p.vtype for p in kernel.ptr_params}
+    constants = {p.name: p for p in kernel.consts}
     params = kernel.buffers + kernel.ptr_params + kernel.scalars + kernel.consts
     if len({p.name for p in params}) != len(params):
         fail("duplicate kernel parameter")
@@ -55,6 +56,22 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
     for p in kernel.scalars:
         if p.dtype not in D.ARITH_DTYPES + (D.bool_,):
             fail("unsupported scalar ABI dtype")
+
+    def return_control(body, dynamic=False):
+        for node in body:
+            if isinstance(node, T.TReturn) and dynamic:
+                fail("return under runtime if or loop is not supported by the GPU target; "
+                     "use structured control flow without early return", node.line)
+            if isinstance(node, (T.TIf, T.TStaticIf)):
+                nested = dynamic or isinstance(node, T.TIf)
+                return_control(node.then_body, nested)
+                return_control(node.else_body, nested)
+            elif isinstance(node, T.TFor):
+                return_control(node.body, True)
+    if capability is not None:
+        # Triton 3.6 may merge dead runtime-branch bindings and rejects returns
+        # inside SCF loops. CPU retains the language semantics; fail pre-backend.
+        return_control(kernel.body)
 
     def identifier(name, line=0):
         if type(name) is not str or not name.isidentifier() or keyword.iskeyword(name):
@@ -69,6 +86,11 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         if isinstance(operand, T.TExpr):
             return operand.vt
         if isinstance(operand, T.TName):
+            if (operand.definition is not None and operand.definition.kind == 'parameter'
+                    and operand.name in constants):
+                # Const references intentionally have no runtime ValueRef dtype.
+                # The declared staged domain supplies their cast source type.
+                return TY.ScalarT(D.bool_ if constants[operand.name].value_kind == 'Bool' else D.i32)
             return operand.definition.vtype if operand.definition is not None else None
         return None
 
@@ -137,6 +159,17 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
             vt = node.vt.elem if isinstance(node.vt, TY.BlockT) else node.vt
             if not isinstance(vt, TY.ScalarT) or vt.dtype is not node.dtype:
                 fail("cast result type disagrees with target dtype", line)
+            source = vt_of(node.operand)
+            source_elem = source.elem if isinstance(source, TY.BlockT) else source
+            if isinstance(source_elem, TY.MaskT):
+                fail("cast does not accept Mask", line)
+            if not isinstance(source_elem, (TY.ScalarT, TY.ConstT)):
+                fail("cast requires a numeric or boolean value", line)
+            source_shape = source.dims if isinstance(source, (TY.BlockT, TY.MaskT)) else ()
+            result_shape = node.vt.dims if isinstance(node.vt, TY.BlockT) else ()
+            if len(source_shape) != len(result_shape) or not all(
+                    equal(a, b) for a, b in zip(source_shape, result_shape)):
+                fail("cast must preserve operand shape", line)
         if isinstance(node, T.TDot):
             dt = node.vt.elem.dtype if isinstance(node.vt, TY.BlockT) else None
             if dt is None or dt.name not in (capability or SUPPORTED).dot_outputs:
@@ -158,6 +191,16 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
             if node.buffer is not None:
                 if node.buffer not in buffers or len(node.coords) != len(buffers[node.buffer].dims):
                     fail("invalid buffer or coordinate rank", line)
+            if isinstance(node, (T.TLoad, T.TStore)):
+                memory = buffers[node.buffer] if node.buffer is not None else vt_of(node.ptr)
+                if isinstance(memory, TY.BlockT):
+                    memory = memory.elem
+                if not isinstance(memory, (TY.BufferT, TY.PtrT)):
+                    fail("memory operation requires a Buffer or Ptr type", line)
+                allowed = ((TY.READ_ONLY, TY.READ_WRITE) if isinstance(node, T.TLoad)
+                           else (TY.WRITE_ONLY, TY.READ_WRITE))
+                if memory.access not in allowed:
+                    fail("memory access violates read/write capability (including unsafe)", line)
         if isinstance(node, T.TAtomicStmt) and type(node.value) is not T.TAtomicAdd:
             fail('atomic statement requires atomic_add', line)
         if isinstance(node, T.TAtomicAdd):

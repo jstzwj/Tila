@@ -55,10 +55,17 @@ def test_interp_fallthrough_branch():
 # (b) materialize：生成的 Triton 源码含顶层 return 语句；TIR dump 同。
 
 def test_materialize_emits_return():
-    k = _early_exit_kernel()
+    @ti.jit
+    def k():
+        return
     src, dump = k.materialize()
     assert re.search(r"^\s*return$", src, re.M), src
     assert re.search(r"^\s*return$", dump, re.M), dump
+
+
+def test_materialize_rejects_unvalidated_runtime_return():
+    with pytest.raises(TilaError, match='TILA-TARGET-009.*|return under runtime if'):
+        _early_exit_kernel().materialize()
 
 
 # (c) 带值 return：TILA-SYN-021，提示写入输出 buffer。

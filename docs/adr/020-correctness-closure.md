@@ -64,6 +64,12 @@ CPU 用数学加法检查范围再存入 i64；Triton 对每步元素偏移显�
 
 ## 验收与限制
 
+C1 复核补充：按 ADR-012 拒绝 Mask cast，合法 Block cast 必须保形；WriteOnly
+不能读取，包括 unsafe/false mask，frontend 与 verifier 分别检查。Const 分支
+return 的 lowering 将后续操作保留在活跃分支；runtime if/循环内 return 在固定
+GPU target 尚不支持，提前 TARGET-009 拒绝，CPU 保留原语义。证据见
+[C1 复核](../c1-correctness-review.md)。这不是新增 Mask API 或完整 GPU 退出转换。
+
 固定反例、规范化小域性质、逐条 Safe 蕴含、缓存/来源隔离、CPU 全量与固定 RTX 3090
 严格审计共同验收。旧 golden 的成功不是语义正确性的替代证据；不得仅刷新快照
 消除失败。本次不宣称已形式化验证整个编译器，也不增加 atomic/race/uniformity

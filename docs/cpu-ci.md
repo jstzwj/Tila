@@ -17,9 +17,13 @@ JUnit 附件已下载核实。M4-05c 工作区本地 1191 项通过，另见 [Un
 不将旧提交的 run 视为当前修改的远端验收。
 
 C0 [正确性收口](correctness-closure.md)当前本地通过 1217 项（新增 26 项专项），
-包括异号 mask 诊断 golden；本轮尚未取得对应的托管 CPU run。
+包括异号 mask 诊断 golden。提交 `4aa13e9` 的
+[托管运行](https://github.com/jstzwj/Tila/actions/runs/35519623735)已通过全部 1217 项，
+零失败/错误/跳过，下载的 JUnit、golden 测试记录与 Race 枚举摘要已核对。
+runner 为 GitHub Actions 托管 `ubuntu-24.04`；C1 后续修改仍需对应的新 run。
 
-工作流已增加 Race 枚举记录和失败重放 JSON 的附件路径；本轮配置尚待远端运行验证。
+工作流已增加 Race 枚举记录和失败重放 JSON 的附件路径；上述 C0 run 已验证
+成功路径的 XML 与枚举摘要上传。没有失败重放文件时，不将它视为附件缺失。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
@@ -32,7 +36,8 @@ pull_request，不能通过 pull_request_target 在特权上下文执行提交�
 Triton source、explain、CLI 和后端诊断 golden。生成 Triton 文本不等于实际 GPU 编译。
 
 pytest 失败、空测试集和任何 skipped 均不能通过。工作流只上传托管 runner 生成的
-JUnit XML（保存 14 天），不上传本地 GPU 日志、源码快照或机器环境附件。失败时从
+JUnit XML、Race 枚举摘要及实际产生的失败重放 JSON（保存 14 天），
+不上传本地 GPU 日志、源码快照或机器环境附件。失败时从
 Actions 日志/JUnit 取得测试 node id，在相同依赖环境用 `python -m pytest node-id -q`
 重跑；不要自动覆盖 golden 来消除失败。
 

@@ -64,7 +64,8 @@ RTX 3090 固定环境 **402 节点/546 语义案例通过、218 warnings、零 s
 GPU warnings 仍为限定 Race 域的 Unknown，不代表全部 kernel 无竞争。
 审计产物包含源码、环境、失败材料及 replay.json；保留首次专项的测试夹具错误、
 首次全量中 numpy.float64 标量兼容性回归的失败记录。修复后重新完整复验，未跳过失败项。
-这些是本地工作区证据；本轮尚无对应提交的远端 CPU CI，隔离 GPU CI 仍未建立。
+后续提交 `4aa13e9` 已取得[托管 CPU 成功记录](https://github.com/jstzwj/Tila/actions/runs/35519623735)，
+1217 项及附件已核对；隔离 GPU CI 仍未建立。邻接边界复核见 [C1 审计](c1-correctness-review.md)。
 
 ## 剩余边界
 

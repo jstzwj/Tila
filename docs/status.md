@@ -8,10 +8,11 @@
 
 2026-09-20 优先事项改为 [C0 正确性收口](correctness-closure.md)，暂缓功能扩展。
 已知错误 Safe、实际 ABI 精化、静态分支 shape 合并与 Ptr 位移域按 ADR-020 修复；
-本轮完整验收以该审计的新记录为准；旧里程碑数量仅记录历史覆盖。
+后续 [C1 独立边界复核](c1-correctness-review.md)修复权限/cast 遗漏并收紧 GPU return 支持；
+当前完整验收以 C1 记录为准；旧里程碑数量仅记录历史覆盖。
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 1217 passed、零 skipped
-（C0 新增 26 项正确性专项；Safe 规则审计和实际 CPU/GPU 对照通过）。
+验证基线：`PYTHONPATH=src python -m pytest -q` = 1264 passed、零 skipped
+（C0 新增 26 项，C1 新增 47 项；包含 Safe 规则审计、边界反例和既有 golden）。
 
 M4-04d [Race 退出审计](race-exit-audit.md)已完成：88 项 Race 专项，新增小域枚举、
 变形、故障注入和重放；限定子集验收完成，整体 Race 仍 Partial。
@@ -21,7 +22,7 @@ M4-05b 已冻结 [ADR-019](adr/019-minimal-uniformity.md) 为 Accepted，并实�
 无策略 env、活动 UNIFORM 错误码或同步消费。
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
-当前覆盖 402 个 GPU 测试节点/546 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 417 个 GPU 测试节点/561 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
 M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)已完成：
@@ -36,7 +37,7 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
 上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
-前置提交 f4add24 的托管 CPU CI 已通过 953 项并核实附件；当前修改仍需独立远端验收。
+前置提交 4aa13e9 的托管 CPU CI 已通过 1217 项并核实附件；C1 修改需独立远端验收。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
@@ -248,7 +249,7 @@ PyTorch 2.10.0+cu128 / Triton 3.6.0 上通过 23 组整数相关 CPU/GPU 对照�
 | Const 参数 static-if | `Implemented` | Check / CPU / Triton | TStaticIf 延迟到特化；variant 使用点诊断已覆盖 |
 | `for i in tila.range(...)` | `Implemented` | Check / CPU / Triton | step 为正 Const，start/end 支持整数标量/字面量；归纳变量新名字，简单不变量与零次出口关系 |
 | loop-carried 类型稳定性 | `Implemented` | Check | dtype/shape 漂移拒绝 |
-| 裸 `return` | `Implemented` | Check / CPU / Triton | 支持提前结束当前 program instance |
+| 裸 `return` | `Partial` | Check / CPU；Triton 子集 | CPU 支持提前退出；GPU 仅顶层/Const 分支，runtime if/循环内提前 TARGET-009 拒绝，见 C1 审计 |
 | 值 `return` | `Deferred` | Check | 定向拒绝；kernel 结果写入输出 Buffer |
 | `while`、`break/continue` | `Deferred` | Check | 不属于当前 Python 子集 |
 | `+=` 显式累加器 | `Deferred` | Check | 定向拒绝，提示改写为普通赋值 |
@@ -397,7 +398,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 402 节点/546 案例，含 88 项 atomic、7 项 Race 门禁、7 项正确性对照；race=warn 允许明确 Unknown，未宣称所有案例无竞争；隔离 GPU CI 待建立 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 417 节点/561 案例，含 88 项 atomic、7 项 Race 门禁、22 项 C0/C1 正确性对照及负测试；race=warn 允许明确 Unknown，未宣称所有案例无竞争；隔离 GPU CI 待建立 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

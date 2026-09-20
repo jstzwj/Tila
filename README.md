@@ -196,6 +196,8 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
 
 以下能力不是当前完整承诺。精确状态和边界见 [docs/status.md](docs/status.md)：
 
+- GPU 提前 return 目前只支持顶层及 Const 分支；runtime if/循环内 return
+  在 Tila 层拒绝，CPU 保留完整退出语义，见 [C1 正确性复核](docs/c1-correctness-review.md)。
 - Triton/CUDA 目前只验证 RTX 3090 / SM86 固定组合；本地验收的环境锁与重放方式见
   [GPU 支持](docs/gpu-support.md)。
   编译资源门禁和语句级 source map 已实现，其他架构及完整性能分析仍未验证；

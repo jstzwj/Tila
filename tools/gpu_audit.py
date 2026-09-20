@@ -20,7 +20,7 @@ BASELINE = {
     "cuda": "12.8", "numpy": "1.24.3", "ml_dtypes": "0.5.4",
     "gpu": "NVIDIA GeForce RTX 3090", "capability": [8, 6], "driver": "595.84",
 }
-EXPECTED_TESTS = 402  # correctness closure adds 7 ABI/pointer/negative-gate nodes
+EXPECTED_TESTS = 417  # C1 adds 15 cast/control-flow/view differential nodes
 
 
 def command(args):

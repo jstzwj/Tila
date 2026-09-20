@@ -99,7 +99,7 @@ def test_import_tila_as_ti_alias_resolves():
     """`import tila as ti` 的别名命名空间可以被正确解析。"""
 
     @ti.jit
-    def k(x: ti.Buffer[ti.f32, (N,), ti.WriteOnly], BLOCK: ti.Const[int] = 8):
+    def k(x: ti.Buffer[ti.f32, (N,), ti.ReadWrite], BLOCK: ti.Const[int] = 8):
         offs = ti.arange(0, BLOCK)
         m = offs < N
         v = ti.load(x, offs, mask=m)

@@ -339,6 +339,8 @@ tila.cast(x, tila.f32)
 - FP8 与 Float 之间只能经 cast；
 - bool 与数值之间只能经 cast；
 - cast 不改变 shape（`Block[T, S] → Block[U, S]`）。
+  Mask 本身不能 cast；用 `where(mask, a, b)` 选择值后才进入普通 Block 转换。
+  verifier 独立检查来源类别与 shape，拒绝伪造的 Scalar cast 结果。
 
 ### 6.3 字面量：语境多态
 
@@ -569,6 +571,11 @@ v0 **不支持运行期 union/sum 类型**——GPU kernel 里不需要，类型
 一般起点形式为 `start <= i < end`，start/end 可为整数标量或字面量。
 归纳变量必须使用新名字，不允许遮蔽已有变量，循环结束后不可引用。
 循环体的 `return` 退出整个 program instance；若循环可能零次，后续代码仍需检查。
+
+当前完整退出语义由 CPU 支持；固定 GPU target 仅支持顶层或 Const 分支 return。
+runtime if/循环内 return 在 lowering 前报 TILA-TARGET-009，不以实参恰使该路径
+不执行为例外。Const 返回分支之后的 continuation 只在活跃分支发射，见
+[C1 复核](c1-correctness-review.md)。
 
 ### 10.4 条件的类型
 

@@ -1739,6 +1739,8 @@ class Checker:
             raise TilaError("TILA-SYN-036", "cast[dtype](x) takes one arg",
                             e.loc)
         v = self.synth(e.args[0], out)
+        if isinstance(v.vtype, TY.MaskT):
+            raise TilaError("TILA-TYPE-026", "cast does not accept Mask; use where for value selection", e.loc)
         if v.vtype is None:
             v.vtype = TY.ScalarT(_lit_default_dtype(v.lit))
         dt = e.cast_dtype
@@ -1747,6 +1749,8 @@ class Checker:
         else:
             vt = TY.ScalarT(dt)
         source_dt = self._dtype_of(v)
+        if source_dt is None:
+            raise TilaError("TILA-TYPE-027", "cast requires a numeric or boolean value", e.loc)
         preserves = (source_dt and source_dt.is_int and dt.is_int and
                      D._INT_RANGE[dt][0] <= D._INT_RANGE[source_dt][0] and
                      D._INT_RANGE[source_dt][1] <= D._INT_RANGE[dt][1])
@@ -1756,7 +1760,9 @@ class Checker:
         if not preserves:
             expr = (self._integer_expr("wrap", dt, expr)
                     if source_dt and dt.is_int and source_dt.is_int and expr is not None else None)
-        return VarInfo(vtype=vt, expr=expr,
+        predicate = (v.predicate if source_dt is D.bool_ and dt is D.bool_
+                     else P.unknown(shape=shape_of(v)))
+        return VarInfo(vtype=vt, expr=expr, predicate=predicate,
                        tir=T.TCast(vt, dt, self._operand_of(v, e.args[0], out)))
 
     def _in_where(self, e, out):
@@ -2248,6 +2254,11 @@ class Checker:
                 e.loc,
                 [f"    buffer '{bname}': {bt.describe()}"],
                 ["参数声明改为 ti.ReadWrite / ti.WriteOnly"])
+        if not is_store and bt.access not in (TY.READ_ONLY, TY.READ_WRITE):
+            raise TilaError(
+                "TILA-MEM-001", "cannot load through a WriteOnly buffer", e.loc,
+                [f"    buffer '{bname}': {bt.describe()}"],
+                ["参数声明改为 ti.ReadOnly / ti.ReadWrite；unsafe 只豁免 bounds 证明"])
 
         coords = [self.synth(c, out) for c in coords_e]
         shape = ()

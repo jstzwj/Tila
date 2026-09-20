@@ -215,12 +215,30 @@ class Lowering:
     # -- 语句 --------------------------------------------------------------
 
     def stmts(self, stmts, depth) -> list[str]:
+        from dataclasses import replace
+
+        def returns(body):
+            return any(isinstance(s, T.TReturn) or
+                       isinstance(s, (T.TIf, T.TStaticIf)) and
+                       (returns(s.then_body) or returns(s.else_body))
+                       for s in body)
+
         out = []
         pad = "    " * depth
-        for s in stmts:
+        for index, s in enumerate(stmts):
+            # Triton can still type-check statements following a conditional
+            # return. Keep the continuation on live branches, so dead branch
+            # bindings (including different shapes) never reach that code.
+            split = (isinstance(s, (T.TIf, T.TStaticIf)) and index + 1 < len(stmts)
+                     and (returns(s.then_body) or returns(s.else_body)))
+            if split:
+                tail = stmts[index + 1:]
+                s = replace(s, then_body=s.then_body + tail, else_body=s.else_body + tail)
             out.extend(line if isinstance(line, _SourceLine) else
                        _SourceLine(line, getattr(s, "line", 0))
                        for line in self.stmt(s, depth, pad))
+            if split or isinstance(s, T.TReturn):
+                break
         return out
 
     def stmt(self, s: T.TStmt, depth, pad) -> list[str]:

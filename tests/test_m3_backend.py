@@ -33,11 +33,12 @@ def test_fragment_relative_line_mapping():
 
 
 def test_nested_source_map_keeps_inner_statement_locations():
-    branch = T.TIf(T.TLit(True, None), [T.TReturn(line=21)], [T.TReturn(line=23)], line=20)
+    branch = T.TIf(T.TLit(True, None), [T.TAssume(T.TLit(True, None), line=21)],
+                   [T.TAssume(T.TLit(True, None), line=23)], line=20)
     loop = T.TFor("j", T.TLit(2, None), T.TLit(1, None), [branch], line=19)
-    emitter = Lowering(replace(copy.tk, body=[loop]))
+    emitter = Lowering(replace(copy.tk, body=[loop]), debug_asserts=True)
     source = emitter.kernel_source().splitlines()
-    assert [emitter.source_map[i] for i, text in enumerate(source, 1) if text.strip() == "return"] == [21, 23]
+    assert [emitter.source_map[i] for i, text in enumerate(source, 1) if "tl.device_assert(" in text] == [21, 23]
     assert [emitter.source_map[i] for i, text in enumerate(source, 1) if text.strip() == "else:"] == [20]
 
 
