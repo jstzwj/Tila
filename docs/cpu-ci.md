@@ -20,7 +20,13 @@ C0 [正确性收口](correctness-closure.md)当前本地通过 1217 项（新增
 包括异号 mask 诊断 golden。提交 `4aa13e9` 的
 [托管运行](https://github.com/jstzwj/Tila/actions/runs/35519623735)已通过全部 1217 项，
 零失败/错误/跳过，下载的 JUnit、golden 测试记录与 Race 枚举摘要已核对。
-runner 为 GitHub Actions 托管 `ubuntu-24.04`；C1 后续修改仍需对应的新 run。
+runner 为 GitHub Actions 托管 `ubuntu-24.04`。
+
+C1 [独立边界复核](c1-correctness-review.md)提交 `785df52` 的
+[托管运行](https://github.com/jstzwj/Tila/actions/runs/35521016183)通过 **1264 项，
+零失败/错误/跳过**。已下载 `cpu-test-report`，核对全部 JUnit、59 项名称/类名含
+golden 的测试记录和 Race 枚举摘要；本地副本为 `artifacts/cpu/hosted-785df52/`。
+job 的 labels 为 `ubuntu-24.04`、runner group 为 GitHub Actions，确认为托管执行。
 
 工作流已增加 Race 枚举记录和失败重放 JSON 的附件路径；上述 C0 run 已验证
 成功路径的 XML 与枚举摘要上传。没有失败重放文件时，不将它视为附件缺失。

@@ -37,7 +37,7 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
 上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
-前置提交 4aa13e9 的托管 CPU CI 已通过 1217 项并核实附件；C1 修改需独立远端验收。
+C1 提交 785df52 的托管 CPU CI 已通过 1264 项并核实附件，见 [CPU CI 记录](cpu-ci.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。

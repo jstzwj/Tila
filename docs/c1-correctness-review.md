@@ -10,6 +10,11 @@
 已下载 `cpu-test-report` 并核对 XML、59 项名称/类名包含 golden 的测试记录及
 Race 枚举摘要；本地副本在 `artifacts/cpu/hosted-4aa13e9/`。不连接开发者机器。
 
+本轮 C1 修复提交 `785df52` 已推送 main，其
+[独立托管运行](https://github.com/jstzwj/Tila/actions/runs/35521016183)也已通过：
+1264 项、零失败/错误/跳过，JUnit、59 项 golden 测试记录与 Race 枚举摘要已下载核对。
+本地副本在 `artifacts/cpu/hosted-785df52/`；托管 runner 身份已核实。
+
 ## 复核结果及修复
 
 | 边界 | 发现与处置 | 证据 |
