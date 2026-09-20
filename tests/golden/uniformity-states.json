@@ -1,0 +1,651 @@
+{
+  "symbolic": {
+    "stage": "symbolic",
+    "consts": [],
+    "cache": "recomputed",
+    "complete": true,
+    "incomplete_reason": null,
+    "consumer_status": "not-installed",
+    "definitions": [
+      {
+        "site": "@definition:body/0:c",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/1:p",
+        "value_level": "ProgramUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/2:lane",
+        "value_level": "Varying",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/3:read",
+        "value_level": "Unknown",
+        "reason": "unknown-dependency",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/5:after",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [
+            "body/4/end",
+            "body/4/step"
+          ],
+          "loops": [],
+          "returned": [
+            "body/4/body/0/then/0"
+          ],
+          "iteration_sources": [],
+          "reason": "loop-exit-not-modeled"
+        }
+      }
+    ],
+    "exit_control": {
+      "selection_level": "Unknown",
+      "participation": {
+        "Launch": "Unknown",
+        "Program": "Unknown"
+      },
+      "reachability": "Unknown",
+      "path": "p0",
+      "selectors": [
+        "body/4/end",
+        "body/4/step"
+      ],
+      "loops": [],
+      "returned": [
+        "body/4/body/0/then/0"
+      ],
+      "iteration_sources": [],
+      "reason": "loop-exit-not-modeled"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p1",
+        "op": "unknown",
+        "args": [],
+        "shape": [],
+        "source": {
+          "site": "body/4/entry",
+          "definition": null,
+          "loops": []
+        }
+      },
+      {
+        "id": "p2",
+        "op": "and",
+        "args": [
+          "p1",
+          "p3"
+        ],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p3",
+        "op": "unknown",
+        "args": [],
+        "shape": [],
+        "source": {
+          "site": "body/4/body/0/cond",
+          "definition": null,
+          "loops": [
+            "body/4"
+          ]
+        }
+      }
+    ]
+  },
+  "zero-loop": {
+    "stage": "specialized",
+    "consts": [
+      {
+        "name": "N",
+        "kind": "Int",
+        "value": 0
+      }
+    ],
+    "cache": "recomputed",
+    "complete": true,
+    "incomplete_reason": null,
+    "consumer_status": "not-installed",
+    "definitions": [
+      {
+        "site": "@definition:body/0:c",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/1:p",
+        "value_level": "ProgramUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/2:lane",
+        "value_level": "Varying",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/3:read",
+        "value_level": "Unknown",
+        "reason": "unknown-dependency",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/5:after",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      }
+    ],
+    "exit_control": {
+      "selection_level": "LaunchUniform",
+      "participation": {
+        "Launch": "Full",
+        "Program": "Full"
+      },
+      "reachability": "Reachable",
+      "path": "p0",
+      "selectors": [],
+      "loops": [],
+      "returned": [],
+      "iteration_sources": [],
+      "reason": "structured-control"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p1",
+        "op": "false",
+        "args": [],
+        "shape": [],
+        "source": null
+      }
+    ]
+  },
+  "loop-return": {
+    "stage": "specialized",
+    "consts": [
+      {
+        "name": "N",
+        "kind": "Int",
+        "value": 2
+      }
+    ],
+    "cache": "recomputed",
+    "complete": true,
+    "incomplete_reason": null,
+    "consumer_status": "not-installed",
+    "definitions": [
+      {
+        "site": "@definition:body/0:c",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/1:p",
+        "value_level": "ProgramUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/2:lane",
+        "value_level": "Varying",
+        "reason": "definition",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/3:read",
+        "value_level": "Unknown",
+        "reason": "unknown-dependency",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@definition:body/5:after",
+        "value_level": "LaunchUniform",
+        "reason": "definition",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [
+            "body/4/end",
+            "body/4/step"
+          ],
+          "loops": [],
+          "returned": [
+            "body/4/body/0/then/0"
+          ],
+          "iteration_sources": [],
+          "reason": "loop-exit-not-modeled"
+        }
+      }
+    ],
+    "exit_control": {
+      "selection_level": "Unknown",
+      "participation": {
+        "Launch": "Unknown",
+        "Program": "Unknown"
+      },
+      "reachability": "Unknown",
+      "path": "p0",
+      "selectors": [
+        "body/4/end",
+        "body/4/step"
+      ],
+      "loops": [],
+      "returned": [
+        "body/4/body/0/then/0"
+      ],
+      "iteration_sources": [],
+      "reason": "loop-exit-not-modeled"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p1",
+        "op": "unknown",
+        "args": [],
+        "shape": [],
+        "source": {
+          "site": "body/4/body/0/cond",
+          "definition": null,
+          "loops": [
+            "body/4"
+          ]
+        }
+      }
+    ]
+  },
+  "budget": {
+    "stage": "specialized",
+    "consts": [
+      {
+        "name": "N",
+        "kind": "Int",
+        "value": 0
+      }
+    ],
+    "cache": "recomputed",
+    "complete": false,
+    "incomplete_reason": "fixed-point-budget",
+    "consumer_status": "not-installed",
+    "definitions": [
+      {
+        "site": "@definition:body/0:c",
+        "value_level": "Unknown",
+        "reason": "fixed-point-budget",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "fixed-point-budget"
+        }
+      },
+      {
+        "site": "@definition:body/1:p",
+        "value_level": "Unknown",
+        "reason": "fixed-point-budget",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "fixed-point-budget"
+        }
+      },
+      {
+        "site": "@definition:body/2:lane",
+        "value_level": "Unknown",
+        "reason": "fixed-point-budget",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "fixed-point-budget"
+        }
+      },
+      {
+        "site": "@definition:body/3:read",
+        "value_level": "Unknown",
+        "reason": "fixed-point-budget",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "fixed-point-budget"
+        }
+      },
+      {
+        "site": "@definition:body/5:after",
+        "value_level": "Unknown",
+        "reason": "fixed-point-budget",
+        "control": {
+          "selection_level": "Unknown",
+          "participation": {
+            "Launch": "Unknown",
+            "Program": "Unknown"
+          },
+          "reachability": "Unknown",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "fixed-point-budget"
+        }
+      }
+    ],
+    "exit_control": {
+      "selection_level": "Unknown",
+      "participation": {
+        "Launch": "Unknown",
+        "Program": "Unknown"
+      },
+      "reachability": "Unknown",
+      "path": "p0",
+      "selectors": [],
+      "loops": [],
+      "returned": [],
+      "iteration_sources": [],
+      "reason": "fixed-point-budget"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p1",
+        "op": "false",
+        "args": [],
+        "shape": [],
+        "source": null
+      }
+    ]
+  },
+  "truncated": {
+    "stage": "specialized",
+    "consts": [
+      {
+        "name": "N",
+        "kind": "Int",
+        "value": 0
+      }
+    ],
+    "cache": "recomputed",
+    "complete": false,
+    "incomplete_reason": "construction-budget",
+    "consumer_status": "not-installed",
+    "definitions": [],
+    "exit_control": {
+      "selection_level": "Unknown",
+      "participation": {
+        "Launch": "Unknown",
+        "Program": "Unknown"
+      },
+      "reachability": "Unknown",
+      "path": "p0",
+      "selectors": [],
+      "loops": [],
+      "returned": [],
+      "iteration_sources": [],
+      "reason": "construction-budget"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      }
+    ]
+  }
+}

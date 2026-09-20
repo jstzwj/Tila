@@ -1,0 +1,18 @@
+error[TILA-RACE-001]: confirmed unordered memory conflict
+    at: line 4
+    phase: launch
+    race policy: warn
+    analysis stage: bound
+    domain: IntraProgram
+    result: ProvenUnsafe; reason: confirmed-overlap
+    counterexample: confirmed
+    Write site=body/1 region=BufferRegion[0:x] dtype=i32 line=4
+      path=p0 mask=p0 loops=
+    Write site=body/1 region=BufferRegion[0:x] dtype=i32 line=4
+      path=p0 mask=p0 loops=
+    dependency: StaticFact: verified Effect IR
+    dependency: CheckedLaunchContract: validated analysis binding metadata
+    fix:
+      Partition addresses by program/lane or remove duplicate writes.
+      Use atomic_add only for additive updates with its supported dtype/order/scope.
+      Inspect --show-races; model-specific witnesses and queries are opt-in.

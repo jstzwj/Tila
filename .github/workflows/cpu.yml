@@ -58,6 +58,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cpu-test-report
-          path: artifacts/cpu/results.xml
+          path: |
+            artifacts/cpu/results.xml
+            artifacts/cpu/m4-04d-race-summary.json
+            artifacts/race-audit/
           if-no-files-found: warn
           retention-days: 14

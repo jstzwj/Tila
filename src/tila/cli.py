@@ -99,6 +99,10 @@ def main(argv=None):
     ap.add_argument("--show-witness", action="store_true", help="explain: show solver-selected witness bindings")
     ap.add_argument("--show-cache", action="store_true", help="explain: show per-call cache telemetry")
     ap.add_argument("--show-effects", action="store_true", help="explain: show versioned per-access effect details")
+    ap.add_argument("--show-races", action="store_true", help="explain: show versioned race analysis (launch bindings pending)")
+    ap.add_argument("--show-uniformity", action="store_true", help="explain: show logical value/control uniformity; excludes launch bindings")
+    ap.add_argument("--race", choices=["off", "warn", "error"], default=None,
+                    help="independent race policy (default: TILA_RACE or warn)")
     ap.add_argument("--effects", choices=["off", "warn", "error"], default=None,
                     help="independent eager-effect policy (default: TILA_EFFECTS or warn)")
     ap.add_argument("--safety", choices=["strict", "warn"], default="strict",
@@ -110,6 +114,10 @@ def main(argv=None):
     os.environ["TILA_SAFETY"] = args.safety   # runtime 义务求值共享同一开关
 
     try:
+        if args.race is not None:
+            os.environ['TILA_RACE'] = args.race
+        from .race_policy import mode as race_mode
+        race_mode()
         if args.effects is not None:
             os.environ["TILA_EFFECTS"] = args.effects
         from .effect_policy import mode
@@ -138,7 +146,8 @@ def main(argv=None):
                 # 直接给出 §8 审计输出
                 print(k.explain(consts, show_query=args.show_query,
                                 show_witness=args.show_witness, show_cache=args.show_cache,
-                                show_effects=args.show_effects))
+                                show_effects=args.show_effects, show_races=args.show_races,
+                                show_uniformity=args.show_uniformity))
                 continue
             src, tir = k.materialize(consts)
             if args.command == "check":
@@ -148,7 +157,8 @@ def main(argv=None):
                 if args.explain:
                     print(k.explain(consts, show_query=args.show_query,
                                     show_witness=args.show_witness, show_cache=args.show_cache,
-                                    show_effects=args.show_effects))
+                                    show_effects=args.show_effects, show_races=args.show_races,
+                                    show_uniformity=args.show_uniformity))
                 continue
             if args.command == "build":
                 os.makedirs(args.out, exist_ok=True)
@@ -164,6 +174,17 @@ def main(argv=None):
         return 0 if ok else 1
     except TilaError as e:
         print(e.render(), file=sys.stderr)
+        if hasattr(e, 'race_details') and (args.show_query or args.show_witness or args.show_races or args.show_cache):
+            import json
+            audit = e.race_details
+            for pair in audit['pairs']:
+                if not args.show_query:
+                    pair.pop('query', None)
+                if not args.show_witness:
+                    pair.pop('witness', None)
+            if args.show_cache:
+                audit['cache'] = e.race_report.cache_status
+            print(json.dumps(audit, ensure_ascii=False, indent=2), file=sys.stderr)
         if args.show_witness and e.proof_result is not None and e.proof_result.candidate_counterexample:
             print("witness bindings (model-specific):", file=sys.stderr)
             for name, value in sorted(e.proof_result.candidate_counterexample):

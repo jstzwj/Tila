@@ -1,0 +1,165 @@
+{
+  "safe": {
+    "verdict": "ProvenSafe",
+    "stage": "bound",
+    "policy": "warn",
+    "cache": "miss",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": [
+      {
+        "domain": "InterProgram",
+        "verdict": "ProvenSafe",
+        "reason": "disjoint-or-unreachable",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "disjoint-or-unreachable",
+        "counterexample": "none"
+      }
+    ]
+  },
+  "hit": {
+    "verdict": "ProvenSafe",
+    "stage": "bound",
+    "policy": "warn",
+    "cache": "hit",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": [
+      {
+        "domain": "InterProgram",
+        "verdict": "ProvenSafe",
+        "reason": "disjoint-or-unreachable",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "disjoint-or-unreachable",
+        "counterexample": "none"
+      }
+    ]
+  },
+  "confirmed": {
+    "verdict": "ProvenUnsafe",
+    "stage": "bound",
+    "policy": "warn",
+    "cache": "miss",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": [
+      {
+        "domain": "InterProgram",
+        "verdict": "ProvenSafe",
+        "reason": "no-distinct-programs",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenUnsafe",
+        "reason": "confirmed-overlap",
+        "counterexample": "confirmed"
+      }
+    ]
+  },
+  "pending": {
+    "verdict": "Unknown",
+    "stage": "pending",
+    "policy": "warn",
+    "cache": "disabled",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": [
+      {
+        "domain": "InterProgram",
+        "verdict": "Unknown",
+        "reason": "pending-grid",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "ordered-scalar-accesses",
+        "counterexample": "none"
+      }
+    ]
+  },
+  "empty": {
+    "verdict": "ProvenSafe",
+    "stage": "empty-launch",
+    "policy": "warn",
+    "cache": "disabled",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": []
+  },
+  "budget": {
+    "verdict": "Unknown",
+    "stage": "bound",
+    "policy": "warn",
+    "cache": "miss",
+    "suppressions": [],
+    "incomplete": "pair-budget",
+    "pairs": []
+  },
+  "disabled": {
+    "verdict": "Unknown",
+    "stage": "disabled",
+    "policy": "off",
+    "cache": "disabled",
+    "suppressions": [
+      "race=off: analysis disabled"
+    ],
+    "incomplete": null,
+    "pairs": []
+  },
+  "candidate": {
+    "verdict": "Unknown",
+    "stage": "bound",
+    "policy": "warn",
+    "cache": "miss",
+    "suppressions": [],
+    "incomplete": null,
+    "pairs": [
+      {
+        "domain": "InterProgram",
+        "verdict": "ProvenSafe",
+        "reason": "read-only-pair",
+        "counterexample": "none"
+      },
+      {
+        "domain": "InterProgram",
+        "verdict": "Unknown",
+        "reason": "candidate-path-not-confirmed",
+        "counterexample": "candidate"
+      },
+      {
+        "domain": "InterProgram",
+        "verdict": "Unknown",
+        "reason": "candidate-path-not-confirmed",
+        "counterexample": "candidate"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "read-only-pair",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "ordered-scalar-accesses",
+        "counterexample": "none"
+      },
+      {
+        "domain": "IntraProgram",
+        "verdict": "ProvenSafe",
+        "reason": "ordered-scalar-accesses",
+        "counterexample": "none"
+      }
+    ]
+  }
+}

@@ -1,0 +1,292 @@
+kernel @audit — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: FLAG=False
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  FLAG : Const[bool]
+types:
+  FLAG : bool
+  p : i32
+facts:
+  pid0 ∈ [0, __grid0)
+  FLAG = False (Const)
+  nonneg symbols: pid0
+obligations:
+  (none)
+hints:
+  (none)
+effects:
+  (none)
+aliases:
+  (none)
+warnings:
+  (none)
+notes:
+  line 3: static-if on Const parameters (resolved at specialization)
+uniformity-details:
+  {
+    "schema": "tila.uniformity-details.v1",
+    "kernel": "audit",
+    "stage": "specialized",
+    "parameters": [
+      {
+        "name": "FLAG",
+        "kind": "Const",
+        "dtype": "Bool",
+        "definition": "@parameter:parameter/FLAG:FLAG"
+      }
+    ],
+    "consts": [
+      {
+        "name": "FLAG",
+        "kind": "Bool",
+        "value": false
+      }
+    ],
+    "scope": "logical Launch/Program; no CTA/Warp mapping",
+    "requires_defined_execution": true,
+    "provenance": "verified TIR and Const only",
+    "assumptions": "not used to strengthen uniformity",
+    "launch_bindings": "excluded",
+    "cache": "recomputed",
+    "budget": {
+      "max_nodes": 10000,
+      "max_depth": 128,
+      "max_iterations": 128
+    },
+    "complete": true,
+    "incomplete_reason": null,
+    "consumers": [],
+    "consumer_status": "not-installed",
+    "facts": [
+      {
+        "site": "@definition:body/1:p",
+        "definition": {
+          "kind": "definition",
+          "site": "body/1",
+          "name": "p"
+        },
+        "line": 5,
+        "value_level": "ProgramUniform",
+        "inputs": [
+          "body/1/value"
+        ],
+        "rule": "definition",
+        "reason": "definition",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [
+            "body/0/cond"
+          ],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "@parameter:parameter/FLAG:FLAG",
+        "definition": {
+          "kind": "parameter",
+          "site": "parameter/FLAG",
+          "name": "FLAG"
+        },
+        "line": 0,
+        "value_level": "LaunchUniform",
+        "inputs": [],
+        "rule": "parameter",
+        "reason": "parameter",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "body/0",
+        "definition": null,
+        "line": 3,
+        "value_level": null,
+        "inputs": [
+          "body/0/cond"
+        ],
+        "rule": "const-branch",
+        "reason": "const-branch",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "body/0/cond",
+        "definition": {
+          "kind": "parameter",
+          "site": "parameter/FLAG",
+          "name": "FLAG"
+        },
+        "line": 3,
+        "value_level": "LaunchUniform",
+        "inputs": [
+          "@parameter:parameter/FLAG:FLAG"
+        ],
+        "rule": "reference",
+        "reason": "reference",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "body/0/then/0",
+        "definition": null,
+        "line": 4,
+        "value_level": null,
+        "inputs": [],
+        "rule": "return",
+        "reason": "return",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "None",
+            "Program": "None"
+          },
+          "reachability": "Unreachable",
+          "path": "p1",
+          "selectors": [
+            "body/0/cond"
+          ],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "body/1",
+        "definition": null,
+        "line": 5,
+        "value_level": null,
+        "inputs": [
+          "body/1/value"
+        ],
+        "rule": "definition",
+        "reason": "definition",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [
+            "body/0/cond"
+          ],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      },
+      {
+        "site": "body/1/value",
+        "definition": null,
+        "line": 5,
+        "value_level": "ProgramUniform",
+        "inputs": [],
+        "rule": "program-id",
+        "reason": "program-id",
+        "source": "StaticFact",
+        "control": {
+          "selection_level": "LaunchUniform",
+          "participation": {
+            "Launch": "Full",
+            "Program": "Full"
+          },
+          "reachability": "Reachable",
+          "path": "p0",
+          "selectors": [
+            "body/0/cond"
+          ],
+          "loops": [],
+          "returned": [],
+          "iteration_sources": [],
+          "reason": "structured-control"
+        }
+      }
+    ],
+    "accesses": [],
+    "exit_control": {
+      "selection_level": "LaunchUniform",
+      "participation": {
+        "Launch": "Full",
+        "Program": "Full"
+      },
+      "reachability": "Reachable",
+      "path": "p0",
+      "selectors": [
+        "body/0/cond"
+      ],
+      "loops": [],
+      "returned": [],
+      "iteration_sources": [],
+      "reason": "structured-control"
+    },
+    "predicates": [
+      {
+        "id": "p0",
+        "op": "true",
+        "args": [],
+        "shape": [],
+        "source": null
+      },
+      {
+        "id": "p1",
+        "op": "false",
+        "args": [],
+        "shape": [],
+        "source": null
+      }
+    ]
+  }

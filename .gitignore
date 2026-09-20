@@ -7,6 +7,8 @@ dist/
 .venv/
 trash/
 artifacts/m2-proof-audit/
+artifacts/race-audit/
 artifacts/m2-gpu-audit/
 artifacts/ci-gpu/
+artifacts/correctness-gpu/
 artifacts/cpu/

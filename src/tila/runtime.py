@@ -149,6 +149,8 @@ class JITFunction:
         self.last_proof_results: tuple = ()
         self.last_backend_resources = None
         self.last_alignment_facts = ()
+        self.last_race_report = None
+        self.last_race_details = None
 
     # ------------------------------------------------------------------
 
@@ -179,6 +181,8 @@ class JITFunction:
     def materialize(self, consts: dict | None = None):
         """无 launch 的特化（check/build）：解 Const、复查延迟约束与义务。"""
         from .effect_policy import diagnostics
+        from .race_policy import mode as race_mode
+        race_mode()  # No concrete launch: race obligations remain pending.
         diagnostics(self.tk, enforce=True)
         cenv = self._resolve_consts(consts)
         self._check_consts(cenv)
@@ -229,7 +233,8 @@ class JITFunction:
         return "\n".join(out)
 
     def explain(self, consts: dict | None = None, *, show_query=False,
-                show_witness=False, show_cache=False, show_effects=False) -> str:
+                show_witness=False, show_cache=False, show_effects=False, show_races=False,
+                show_uniformity=False) -> str:
         """--explain 审计输出（surface-language.md §8）：类型环境、事实集、
         义务证明链、发射的 hint、效应汇总 + warnings/notes——全部可审计。
 
@@ -247,6 +252,8 @@ class JITFunction:
         tk = self.tk
         cenv = self._resolve_consts(consts)
         self._check_consts(cenv)     # 只读的精化校验（与 materialize 同源）
+        from .race_policy import mode as race_mode
+        race_mode()
 
         facts = Facts()              # 与 _evaluate_obligations 特化期同构
         facts.num = {k: v for k, v in cenv.items() if type(v) is int}
@@ -406,6 +413,15 @@ class JITFunction:
                     L.extend("    " + line for line in query.rstrip().splitlines())
             else:
                 L.append("  (none)")
+        if show_races:
+            from .race_policy import symbolic, render
+            L.append("race-details:")
+            L.extend("  " + line for line in render(tk, symbolic(tk, cenv), cenv,
+                     show_query=show_query, show_witness=show_witness, show_cache=show_cache).splitlines())
+        if show_uniformity:
+            from .uniformity_audit import render_uniformity_details
+            L.append('uniformity-details:')
+            L.extend('  ' + line for line in render_uniformity_details(tk, cenv).splitlines())
         return "\n".join(L)
 
     # -- Stage 2 内部 -------------------------------------------------------
@@ -695,6 +711,8 @@ class _Launcher:
         # Runtime evidence is a snapshot of a successful, nonempty launch only.
         # Clear both old evidence and partially validated new bindings on failure.
         self._completed = False
+        self.jf.last_race_report = None
+        self.jf.last_race_details = None
         self.jf.tk.runtime_aliases = []
         try:
             return self._call(*args, **kwargs)
@@ -707,6 +725,8 @@ class _Launcher:
 
     def _call(self, *args, **kwargs):
         jf = self.jf
+        from .race_policy import mode as race_mode
+        race_mode()
         from .effect_policy import diagnostics
         diagnostics(jf.tk, enforce=True)
         jf.last_backend_resources = None
@@ -989,6 +1009,9 @@ class _Launcher:
         self.target = self._resolve_target(tensors)
         verify(tk, consts, capability=self.target.capability if self.target is not None else None)
         if 0 in grid:
+            from .race_policy import analyze_launch, render
+            jf.last_race_report = analyze_launch(tk, tensors, scalar_vals, consts, grid)
+            jf.last_race_details = render(tk, jf.last_race_report, consts)
             jf.last_report = "launch: no-op (zero grid axis); host contracts checked; no program executed"
             jf.last_proof_results = ()
             return
@@ -997,11 +1020,20 @@ class _Launcher:
             launch_bindings=tuple(sorted(meta.items())) +
                 (("grid", tuple(grid)),))
 
+        from .race_policy import analyze_launch, enforce, render
+        from dataclasses import asdict
+        race_report = analyze_launch(tk, tensors, scalar_vals, consts, grid,
+            context=(jf.source_fingerprint, ast.dump(jf.assume_launch[1]) if jf.assume_launch else None,
+                     asdict(self.target) if self.target is not None else 'cpu', self.num_warps, _debug()))
+        enforce(tk, race_report, consts)
+
         # ---- 执行：torch+cuda+triton → GPU；否则 interp
         from .alignment import collect
         self.alignment_facts = collect(tk, tensors, _tensor_info)
         self._execute(tensors, scalar_vals, stride_vals, consts, grid)
         jf.last_alignment_facts = self.alignment_facts
+        jf.last_race_report = race_report
+        jf.last_race_details = render(tk, race_report, consts)
         self._completed = True
 
     def _resolve_target(self, tensors):

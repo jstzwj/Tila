@@ -61,6 +61,16 @@ _BOUNDS_FIX = "补充逐轴 mask/契约，或显式使用 unsafe 访问并接受
 
 
 _DIAGNOSTICS = {
+    **_specs("RACE", (DiagnosticPhase.LAUNCH,), {
+        "001": "confirmed unordered memory conflict",
+    }, default_fix="按 program/lane 分区地址；仅对累加算法使用受支持的 atomic_add"),
+    **_specs("RACE", (DiagnosticPhase.SPECIALIZE, DiagnosticPhase.LAUNCH), {
+        "002": "memory conflict analysis is incomplete",
+    }, severity=DiagnosticSeverity.ERROR_OR_WARNING,
+       default_fix="检查 Race 详细报告中的路径、mask、alias 和未覆盖域"),
+    **_specs("RACE", (DiagnosticPhase.HOST,), {
+        "003": "invalid race policy or budget",
+    }, default_fix="Use TILA_RACE=off|warn|error and nonnegative analysis budgets"),
     **_specs("PROOF", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE,
                         DiagnosticPhase.LAUNCH), {
         "001": "proof solver dependency or configuration is invalid",

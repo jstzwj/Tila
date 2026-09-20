@@ -1,0 +1,123 @@
+{
+  "schema": "tila.race-details.v1",
+  "kernel": "duplicate",
+  "stage": "bound",
+  "policy": "warn",
+  "verdict": "ProvenUnsafe",
+  "unchecked_domains": [],
+  "incomplete_reason": null,
+  "unchecked_pairs": 0,
+  "suppressions": [],
+  "assumptions": "not used to remove accesses",
+  "predicates": [
+    {
+      "id": "p0",
+      "op": "true",
+      "args": [],
+      "shape": [],
+      "source": null
+    }
+  ],
+  "pairs": [
+    {
+      "sites": [
+        "body/1",
+        "body/1"
+      ],
+      "domain": "InterProgram",
+      "verdict": "ProvenSafe",
+      "reason": "no-distinct-programs",
+      "accesses": [
+        {
+          "site": "body/1",
+          "kind": "Write",
+          "atomic": null,
+          "region": "BufferRegion[0:x]",
+          "dtype": "i32",
+          "address_space": "Global",
+          "line": 4,
+          "status": "may-access",
+          "path": "p0",
+          "mask": "p0",
+          "loops": []
+        },
+        {
+          "site": "body/1",
+          "kind": "Write",
+          "atomic": null,
+          "region": "BufferRegion[0:x]",
+          "dtype": "i32",
+          "address_space": "Global",
+          "line": 4,
+          "status": "may-access",
+          "path": "p0",
+          "mask": "p0",
+          "loops": []
+        }
+      ],
+      "dependencies": [
+        {
+          "kind": "StaticFact",
+          "line": 0,
+          "detail": "verified Effect IR"
+        },
+        {
+          "kind": "CheckedLaunchContract",
+          "line": 0,
+          "detail": "validated analysis binding metadata"
+        }
+      ],
+      "counterexample": "none"
+    },
+    {
+      "sites": [
+        "body/1",
+        "body/1"
+      ],
+      "domain": "IntraProgram",
+      "verdict": "ProvenUnsafe",
+      "reason": "confirmed-overlap",
+      "accesses": [
+        {
+          "site": "body/1",
+          "kind": "Write",
+          "atomic": null,
+          "region": "BufferRegion[0:x]",
+          "dtype": "i32",
+          "address_space": "Global",
+          "line": 4,
+          "status": "may-access",
+          "path": "p0",
+          "mask": "p0",
+          "loops": []
+        },
+        {
+          "site": "body/1",
+          "kind": "Write",
+          "atomic": null,
+          "region": "BufferRegion[0:x]",
+          "dtype": "i32",
+          "address_space": "Global",
+          "line": 4,
+          "status": "may-access",
+          "path": "p0",
+          "mask": "p0",
+          "loops": []
+        }
+      ],
+      "dependencies": [
+        {
+          "kind": "StaticFact",
+          "line": 0,
+          "detail": "verified Effect IR"
+        },
+        {
+          "kind": "CheckedLaunchContract",
+          "line": 0,
+          "detail": "validated analysis binding metadata"
+        }
+      ],
+      "counterexample": "confirmed"
+    }
+  ]
+}

@@ -23,7 +23,8 @@ def main():
     (run / "kernels").mkdir()
     (run / "tmp").mkdir()
     env = dict(os.environ, PYTHONPATH=str(source / "src"), PYTHONHASHSEED="0",
-               TILA_INTERP="0", TRITON_INTERPRET="0", TILA_SAFETY="strict", TILA_DEBUG="0", TILA_EFFECTS="warn",
+               TILA_INTERP="0", TRITON_INTERPRET="0", TILA_SAFETY="strict", TILA_DEBUG="0", TILA_EFFECTS="warn", TILA_RACE="warn",
+               TILA_RACE_MAX_PAIRS="4096",
                PYTEST_ADDOPTS="", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
                TILA_GPU_KERNELS=str(run / "kernels"), TMPDIR=str(run / "tmp"),
                TILA_BACKEND_ARTIFACTS=str(run / "backend"))
@@ -35,6 +36,8 @@ def main():
         argv.append("tests/gpu_matrix_gaps.py")
     if (source / "tests/gpu_atomic.py").is_file():
         argv.append("tests/gpu_atomic.py")
+    if (source / "tests/gpu_race.py").is_file():
+        argv.append("tests/gpu_race.py")
     if args.case:
         argv += ["-k", args.case]
     # Replay is diagnostic. Only gpu_audit.py can mark baseline acceptance.
