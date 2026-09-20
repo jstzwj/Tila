@@ -1,5 +1,5 @@
 """M2-05 bounded exhaustive/differential audit; fixed seed, no new dependency."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 import random
@@ -18,8 +18,10 @@ from tila.solver import Encoder, ProofConfig, ProofSession, _CACHE
 from tila.interp import Interp, run_kernel
 from m2_audit_support import SEED, OPS, reference, cpu_operation, compare, fail
 
-# Tests use a declared larger audit budget. Production defaults are unchanged.
-AUDIT = ProofConfig(timeout_ms=2000, total_ms=10_000, rlimit=2_000_000, cache_entries=0)
+# Semantic audit requires a definite verdict, not a latency bound on a shared
+# CI runner. The former 2s wall timeout canceled an i8 addition query on CI.
+# Keep bounded work and explicit budget-exhaustion tests; production is unchanged.
+AUDIT = ProofConfig(timeout_ms=10_000, total_ms=30_000, rlimit=2_000_000, cache_entries=0)
 
 
 def domain(dtype):
@@ -125,7 +127,8 @@ def test_safety_verdict_matches_exhaustive_execution(op, dtype, right, guarded):
     result = ProofSession(AUDIT).prove(ob, Facts(), set())
     expected = PROVEN_UNSAFE if unsafe else PROVEN_SAFE
     if result.verdict != expected:
-        fail({"op": op, "dtype": dtype, "guarded": guarded, "right": right},
+        fail({"op": op, "dtype": dtype, "guarded": guarded, "right": right,
+              "proof_config": asdict(AUDIT)},
              f"expected {expected}, got {result.render()}", result.query)
     cpu = Interp.__new__(Interp)
     cpu.debug = True

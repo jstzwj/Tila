@@ -30,6 +30,9 @@ job 的 labels 为 `ubuntu-24.04`、runner group 为 GitHub Actions，确认为�
 
 工作流已增加 Race 枚举记录和失败重放 JSON 的附件路径；上述 C0 run 已验证
 成功路径的 XML 与枚举摘要上传。没有失败重放文件时，不将它视为附件缺失。
+文档提交 `26d0f45` 的[后续 run](https://github.com/jstzwj/Tila/actions/runs/35521201375)
+曾因 M2 性质查询超时失败，记录与测试预算修正见 [C1 审计](c1-correctness-review.md)。
+现已将 `artifacts/m2-proof-audit/` 也纳入附件，保存实际产生的失败 JSON/SMT 查询。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
@@ -42,7 +45,7 @@ pull_request，不能通过 pull_request_target 在特权上下文执行提交�
 Triton source、explain、CLI 和后端诊断 golden。生成 Triton 文本不等于实际 GPU 编译。
 
 pytest 失败、空测试集和任何 skipped 均不能通过。工作流只上传托管 runner 生成的
-JUnit XML、Race 枚举摘要及实际产生的失败重放 JSON（保存 14 天），
+JUnit XML、Race 枚举摘要及实际产生的 M2/Race 失败重放 JSON/SMT（保存 14 天），
 不上传本地 GPU 日志、源码快照或机器环境附件。失败时从
 Actions 日志/JUnit 取得测试 node id，在相同依赖环境用 `python -m pytest node-id -q`
 重跑；不要自动覆盖 golden 来消除失败。

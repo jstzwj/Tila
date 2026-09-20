@@ -59,6 +59,14 @@ CPU 全量：**1264 passed、99 warnings、零 skipped**，包含全部既有 go
 较 C0 新增 47 项。记录：`artifacts/cpu/c1-results.xml`。
 本轮代码提交后的托管 CPU 验收独立于前述 C0 run，另在 [CPU CI](cpu-ci.md) 登记。
 
+后续文档提交 `26d0f45` 的[托管复验](https://github.com/jstzwj/Tila/actions/runs/35521201375)
+出现 1 项失败、1263 项通过：M2 小位宽性质用例 `False-+-i8-1` 的 2 秒查询预算
+耗尽，得到 `Unknown: canceled`，没有错误 Safe。失败 JUnit 保存在
+`artifacts/cpu/hosted-26d0f45-failed/`。仅将该性质测试模块的审计时间预算调为
+10 秒/查询、30 秒/session，rlimit 仍 2,000,000；确定结论断言、零预算反例和
+生产默认预算均保留。另补 M2 失败 JSON/SMT 的 CI 上传路径，结论差异记录带预算。
+这不是将 Unknown 视为通过或隐藏失败；补丁对应的 Actions run 必须重新验收。
+
 ## 结论边界
 
 本轮覆盖上述具体权限、cast、控制流与地址组合，并收紧未兑现的 GPU return 声明。

@@ -61,6 +61,7 @@ jobs:
           path: |
             artifacts/cpu/results.xml
             artifacts/cpu/m4-04d-race-summary.json
+            artifacts/m2-proof-audit/
             artifacts/race-audit/
           if-no-files-found: warn
           retention-days: 14
