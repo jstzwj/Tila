@@ -139,7 +139,7 @@ def test_declared_tir_ops_resolve_and_have_required_backend_handlers():
 
 
 def test_effect_and_bounds_are_independent_and_explicit():
-    memory = {EffectRule.READ_MEMORY, EffectRule.WRITE_MEMORY}
+    memory = {EffectRule.READ_MEMORY, EffectRule.WRITE_MEMORY, EffectRule.ATOMIC_MEMORY}
     for spec in INTRINSICS:
         if spec.effect_rule in memory:
             assert spec.bounds_rule is BoundsRule.BUFFER_OR_PTR_ACCESS

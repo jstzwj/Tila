@@ -9,7 +9,9 @@ uniformity，也不改变 M3 尚缺隔离 GPU 持续验收的状态。
 `tila check file.py --explain --show-effects` 在 effects 与 aliases 之间增加
 `effect-details` 节。默认 explain 格式不变。
 
-节内为 JSON，schema 固定为 `tila.effect-details.v1`。字段顺序稳定：阶段、
+M4-01d 初版为 `tila.effect-details.v1`；M4-03b 按 ADR-017 显式迁移为
+`tila.effect-details.v2`，访问记录增加 atomic 字段（Read/Write 为 null，Atomic
+含 op/order/scope），golden 同步迁移。字段顺序稳定：阶段、
 带类型的 Const 绑定、来源与排除边界、谓词表、按 TIR 遍历顺序的访问表。
 `symbolic` / `partial` / `specialized` 描述特化阶段；公开 explain 使用解析后的
 完整 Const 绑定。内部 `effect_details(tk, consts)` 也允许符号或部分特化。

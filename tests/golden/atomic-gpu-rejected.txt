@@ -1,0 +1,5 @@
+error[TILA-TARGET-012]: atomic_add configuration is not supported by target
+    at: line 3
+    phase: target
+    fix:
+      检查 target、设备和 Triton/CUDA 支持矩阵

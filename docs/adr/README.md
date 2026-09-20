@@ -33,6 +33,7 @@ M4-01 分阶段实施：
 | ADR | 状态 | 主题 |
 |---|---|---|
 | [ADR-016](016-instruction-effect-ir.md) | Accepted | M4-01b/c/d 已实现局部 effect、定义引用/verifier、path/mask/loop、派生汇总及可选详细输出与隔离验收 |
+| [ADR-017](017-minimal-atomic-add.md) | Accepted | M4-03b/c 已实现前端/IR/CPU 与固定 RTX 3090 GPU，i32/u32/f32、Global ReadWrite、Relaxed/GPU；其他组合拒绝 |
 
 ADR-016 不替代 ADR-010 的诊断严格度决策，不引入 atomic/race/uniformity 功能。
 

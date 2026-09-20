@@ -4,10 +4,13 @@
 的 RTX 3090/SM86 固定组合；本阶段没有新增架构、dtype 或 dot 输入域。
 
 逐 intrinsic 的机器可读清单为 [gpu-capabilities.json](gpu-capabilities.json)。它覆盖
-registry 中全部 22 个 Implemented/Partial intrinsic，包括非公开方法 any/all；
+M3-04 时 registry 中全部 22 个 Implemented/Partial intrinsic，包括非公开方法 any/all；
 byte_offset 仍 Deferred。每行记录已测 dtype、shape、测试函数与限制。CPU 测试
 检查清单没有遗漏/过期名字，并检查引用的测试函数存在。这是证据索引，不替代真实
 GPU 验收，也不是所有 dtype × shape × stride × 控制流组合的完整认证。
+
+M4-03c 已将 atomic_add 加入同一机器可读矩阵；新增 88 项专项及限定支持见
+[atomic GPU 审计](atomic-gpu.md)，不扩大其他操作或架构的支持范围。
 
 ## 当前证据范围
 

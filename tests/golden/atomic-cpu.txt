@@ -1,0 +1,46 @@
+kernel @simple
+  buffer x : Buffer[i32, (1,), ReadWrite, UnknownAlignment]  region=BufferRegion[0:x]
+  scalar x_stride0 : i32
+  {
+  atomic_add(x[0], 1, order=relaxed, scope=gpu)
+  }
+  obligation atomic_add[x] axis 0: 0 <= 0 < 1
+  effect Atomic[BufferRegion[0:x]]
+
+{
+  "schema": "tila.effect-details.v2",
+  "stage": "specialized",
+  "consts": [],
+  "provenance": "verified TIR and Const only",
+  "assumptions": "not used to remove accesses",
+  "launch_bindings": "excluded",
+  "cache": "recomputed",
+  "predicates": [
+    {
+      "id": "p0",
+      "op": "true",
+      "args": [],
+      "shape": [],
+      "source": null
+    }
+  ],
+  "accesses": [
+    {
+      "site": "body/0/value",
+      "kind": "Atomic",
+      "atomic": {
+        "op": "Add",
+        "order": "relaxed",
+        "scope": "gpu"
+      },
+      "region": "BufferRegion[0:x]",
+      "dtype": "i32",
+      "address_space": "Global",
+      "line": 3,
+      "status": "may-access",
+      "path": "p0",
+      "mask": "p0",
+      "loops": []
+    }
+  ]
+}

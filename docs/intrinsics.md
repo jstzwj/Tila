@@ -182,6 +182,13 @@ cat(a: Block[T, S], b: Block[T, S])          → Block[T, (2·S0, S1..)]  [未�
 
 ### 2.9 原子 [M4]
 
+**M4-03b/c 最小 atomic_add Implemented**。以下为长期方向；已实现子集仅 atomic_add，最小契约以
+[ADR-017](adr/017-minimal-atomic-add.md)为准：Global ReadWrite、i32/u32/f32、
+标量或一维 tile，Buffer/Ptr 寻址，类型化 Relaxed/GPU，inactive 返回零。
+其他操作、dtype、scope/order 不因下列设计签名而成为可用 API。
+实际签名及 Buffer 坐标形式见 [CPU 实现记录](atomic-cpu.md)；固定 RTX 3090 的
+支持边界与并发证据见 [GPU 实现记录](atomic-gpu.md)。
+
 ```text
 atomic_add/max/min/and/or/xor(p: Ptr[T,…], v: T | Block[T,S], …) → T | Block[T,S]
 atomic_cas(p: Ptr[T,…], expected: T, new: T)  → T

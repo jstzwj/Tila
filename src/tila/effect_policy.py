@@ -35,7 +35,7 @@ def where_warnings(kernel):
                 if child is not None:
                     suffix = field if index is None else f'{field}/{index}'
                     visit(child, site + '/' + suffix, line, owner)
-        if type(node) is T.TLoad and owner is not None:
+        if type(node) in (T.TLoad, T.TAtomicAdd) and owner is not None:
             groups.setdefault(owner, []).append(node.effect)
         if type(node) in (T.TIf, T.TStaticIf):
             block(node.then_body, site + '/then')
@@ -50,13 +50,17 @@ def where_warnings(kernel):
     block(kernel.body, 'body')
     return [Warning_(
         'TILA-EFFECT-007',
-        f"eager read in where '{side}' operand", Loc(line),
+        f"eager {'atomic effect' if any(e.kind == 'Atomic' for e in effects) else 'read'} in where '{side}' operand", Loc(line),
         [f'where site: {site}',
-         'Both value operands are evaluated; each load retains its own mask.',
-         *[f'Read site={e.site_id} region={e.region_id} line={e.location.line}' for e in effects]],
-        ['Use load(a, mask=cond, other=pure_value) and load(b, mask=~cond, other=pure_value);',
+         ('Both value operands are evaluated; each memory operation retains its own mask.'
+          if any(e.kind == 'Atomic' for e in effects) else 'Both value operands are evaluated; each load retains its own mask.'),
+         *[f'{e.kind + "(Add)" if e.atomic else e.kind} site={e.site_id} region={e.region_id} line={e.location.line}' for e in effects]],
+        (['Use complementary masks on atomic_add calls; masked-off returns zero; no other= argument.',
+          'Preserve existing bounds masks; already computed old values can be reused.']
+         if any(e.kind == 'Atomic' for e in effects) else
+         ['Use load(a, mask=cond, other=pure_value) and load(b, mask=~cond, other=pure_value);',
          'for scalar bool use not cond; combine with existing bounds masks when shapes permit.',
-         'A load nested in other= is still evaluated.'])
+         'A load nested in other= is still evaluated.']))
         for (site, side, line), effects in groups.items()]
 
 

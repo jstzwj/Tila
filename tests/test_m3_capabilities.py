@@ -77,7 +77,14 @@ def test_narrow_exponential_rounds_before_widening(dtype, operation, tmp_path):
 def test_gpu_evidence_inventory_tracks_registry_and_real_tests():
     root = Path(__file__).resolve().parents[1]
     matrix = json.loads((root / "docs/gpu-capabilities.json").read_text())
-    assert set(matrix["operations"]) == {s.name for s in INTRINSICS if s.availability != Availability.DEFERRED}
+    from tila.intrinsics import Backend
+    expected = {s.name for s in INTRINSICS if s.availability != Availability.DEFERRED}
+    excluded = expected & matrix['excluded'].keys()
+    assert set(matrix["operations"]) == expected - excluded
+    for spec in INTRINSICS:
+        if spec.name in excluded:
+            assert Backend.TRITON not in spec.backend_expectation
+            assert matrix['excluded'][spec.name]
     for name, row in matrix["operations"].items():
         assert row["verified_dtypes"] and row["shape"] and row["limits"] and row["evidence"], name
         for evidence in row["evidence"]:

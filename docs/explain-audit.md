@@ -35,7 +35,8 @@ warning，error 对已有 kernel 的 report/explain 展示 error；装饰、特�
 独立策略不改变 bounds 结论，见 [ADR-010](adr/010-effect-diagnostic-policy.md)。
 
 M4-01d 增加 `--show-effects` / `show_effects=True`，在 effects 后附加
-`tila.effect-details.v1` JSON；默认输出不变。字段、谓词 DAG 引用、Const 特化
+`tila.effect-details.v1` JSON；M4-03b 显式迁移为 v2 以增加 AtomicInfo，默认
+load/store 输出不变。字段、谓词 DAG 引用、Const 特化
 和运行时绑定隔离契约见 [Effect 明细审计](effect-audit.md)。
 
 默认输出不显示缓存命中/未命中，也不显示求解器任意选择的模型数值。

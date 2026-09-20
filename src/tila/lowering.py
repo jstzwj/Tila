@@ -42,10 +42,30 @@ def _tila_maximum(a, b):
     return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
 '''
 
+_ATOMIC_ADD = '''@triton.jit
+def _tila_atomic_add(ptr, value, mask):
+    mask = tl.cast(mask, tl.int1)
+    value = tl.cast(value, ptr.dtype.element_ty)
+    if value.dtype == tl.float32:
+        # Preserve f32 RMW semantics even for zero and unused old values.
+        bits = tl.inline_asm_elementwise("mov.b32 $0, $1;", constraints="=r,r",
+            args=[value.to(tl.uint32, bitcast=True)], dtype=tl.uint32, is_pure=False, pack=1)
+        value = bits.to(tl.float32, bitcast=True)
+    old = tl.atomic_add(ptr, value, mask=mask, sem="relaxed", scope="gpu")
+    result = tl.where(mask, old, tl.full((), 0, ptr.dtype.element_ty))
+    if value.dtype == tl.float32:
+        bits = tl.inline_asm_elementwise("mov.b32 $0, $1;", constraints="=r,r",
+            args=[result.to(tl.uint32, bitcast=True)], dtype=tl.uint32, is_pure=False, pack=1)
+        result = bits.to(tl.float32, bitcast=True)
+    return result
+'''
+
 
 # Typed TIR is the backend boundary (ADR-006). Values are stable symbolic
 # handler IDs; the implementation remains grouped in stmt()/e() for now.
 TRITON_TIR_HANDLERS = MappingProxyType({
+    "TAtomicAdd": "expr.atomic-add",
+    "TAtomicStmt": "stmt.atomic-add",
     "TName": "operand.name",
     "TLit": "operand.literal",
     "TAssign": "stmt.assign",
@@ -73,6 +93,7 @@ TRITON_TIR_HANDLERS = MappingProxyType({
     "TPAdd": "expr.pointer-add",
 })
 TRITON_TIR_OPS = frozenset(TRITON_TIR_HANDLERS)
+TRITON_REJECTED_TIR_OPS = frozenset()
 
 
 class _SourceLine(str):
@@ -103,6 +124,12 @@ class Lowering:
         self._pow2_const_names = {c.name for c in tk.consts
                                   if any(isinstance(r, TY.PowerOfTwo) for r in c.refinements)}
         self.hint_audit = []
+        occupied = set(tk.types) | {tk.name}
+        occupied.update(p.name for p in tk.buffers + tk.ptr_params + tk.scalars + tk.consts)
+        self.atomic_helper = '_tila_atomic_add'
+        while self.atomic_helper in occupied:
+            self.atomic_helper += '_'
+        self._occupied = occupied | {self.atomic_helper} | {f'{p.name}_ptr' for p in tk.buffers + tk.ptr_params}
 
     # ------------------------------------------------------------------
 
@@ -124,7 +151,12 @@ class Lowering:
         # The helper is emitted only when an integer division actually needs it.
         self.needs_integer_division = False
         self.needs_float_maximum = False
+        self.needs_atomic_add = False
+        self._effect_counter = 0
         body = self.stmts(k.body, 1)
+        if self.needs_atomic_add:
+            out.extend(_ATOMIC_ADD.replace('def _tila_atomic_add(', f'def {self.atomic_helper}(').rstrip().splitlines())
+            out.extend(['', ''])
         if self.needs_integer_division:
             out.extend(_INTEGER_DIVISION.rstrip().splitlines())
             out.append("")
@@ -192,6 +224,65 @@ class Lowering:
         return out
 
     def stmt(self, s: T.TStmt, depth, pad) -> list[str]:
+        # Triton only short-circuits constexpr booleans. For statements with
+        # atomic effects, explicitly sequence operands and lower runtime and/or
+        # to control flow, preserving CPU evaluation and one execution per site.
+        from .effect_ir import OPERANDS
+        from dataclasses import replace
+        def contains(node):
+            if isinstance(node, T.TAtomicAdd):
+                return True
+            for field in OPERANDS[type(node)]:
+                value = getattr(node, field)
+                for child in value if isinstance(value, list) else [value]:
+                    if child is not None and contains(child):
+                        return True
+            return False
+        if not contains(s):
+            return self._stmt(s, depth, pad)
+        prefix = []
+        def fresh():
+            while True:
+                name = f'_tila_effect_{self._effect_counter}'
+                self._effect_counter += 1
+                if name not in self._occupied:
+                    return name
+        def emit(text, node):
+            prefix.append(_SourceLine(text, getattr(node, 'line', 0) or getattr(s, 'line', 0)))
+        def operand(node, indent):
+            if isinstance(node, (T.TName, T.TLit)):
+                return node
+            if isinstance(node, T.TBin) and node.op in ('and', 'or'):
+                left = operand(node.left, indent)
+                name = fresh()
+                emit(f'{indent}{name} = tl.cast({self.o(left)}, tl.int1)', node)
+                cond = name if node.op == 'and' else f'not {name}'
+                emit(f'{indent}if {cond}:', node)
+                right = operand(node.right, indent + '    ')
+                emit(f'{indent}    {name} = tl.cast({self.o(right)}, tl.int1)', node)
+                return T.TName(name)
+            changes = {}
+            for field in OPERANDS[type(node)]:
+                value = getattr(node, field)
+                changes[field] = ([operand(v, indent) for v in value] if isinstance(value, list)
+                                  else operand(value, indent) if value is not None else None)
+            lowered = replace(node, **changes)
+            name = fresh()
+            emit(f'{indent}{name} = {self.e(lowered)}', node)
+            return T.TName(name)
+        fields = OPERANDS[type(s)]
+        changes = {}
+        for field in fields:
+            value = getattr(s, field)
+            changes[field] = ([operand(v, pad) for v in value] if isinstance(value, list)
+                              else operand(value, pad) if value is not None else None)
+        if isinstance(s, T.TAtomicStmt):
+            return prefix
+        return prefix + self._stmt(replace(s, **changes), depth, pad)
+
+    def _stmt(self, s: T.TStmt, depth, pad) -> list[str]:
+        if isinstance(s, T.TAtomicStmt):
+            return [f'{pad}{self.e(s.value)}']
         if isinstance(s, T.TAssign):
             # pid 名字追踪：name = program_id(...) ⇒ 此后 name 可安全地
             # 视作 pid 参与 multiple_of 模式；改绑非 pid 值则失效。
@@ -344,6 +435,12 @@ class Lowering:
         return self.e(x)
 
     def e(self, x: T.TExpr) -> str:
+        if isinstance(x, T.TAtomicAdd):
+            self.needs_atomic_add = True
+            ptr = self.addr_expr(x.buffer, x.coords) if x.buffer is not None else self.o(x.ptr)
+            value = self.o(x.value)
+            mask = self.o(x.mask) if x.mask is not None else 'True'
+            return f'{self.atomic_helper}({ptr}, {value}, {mask})'
         # 赋值值可为纯操作数形态（名字拷贝 x = y）——TName/TLit 走 o()。
         if isinstance(x, (T.TName, T.TLit)):
             return self.o(x)

@@ -33,6 +33,8 @@ def effect_details(kernel, consts=None):
         effect = access.effect
         accesses.append(dict(
             site=effect.site_id, kind=effect.kind,
+            atomic=None if effect.atomic is None else dict(
+                op=effect.atomic.op, order=effect.atomic.order.value, scope=effect.atomic.scope.value),
             region=str(effect.region_id), dtype=effect.element_dtype.name,
             address_space=effect.address_space.value, line=effect.location.line,
             status="may-access" if access.may_access else "excluded",
@@ -54,7 +56,7 @@ def effect_details(kernel, consts=None):
                           source=None if source is None else dict(
                               site=source.site, definition=reference(source.definition),
                               loops=list(source.loops))))
-    return dict(schema="tila.effect-details.v1", stage=summary.stage,
+    return dict(schema="tila.effect-details.v2", stage=summary.stage,
                 consts=[dict(name=name, kind="Bool" if type(value) is bool else "Int", value=value)
                         for name, value in sorted((consts or {}).items())],
                 provenance="verified TIR and Const only",

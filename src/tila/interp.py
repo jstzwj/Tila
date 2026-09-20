@@ -41,6 +41,8 @@ INTERPRETER_TIR_HANDLERS = MappingProxyType({
     "TDot": "expr.dot",
     "TReduce": "expr.reduce",
     "TLoad": "expr.load",
+    "TAtomicAdd": "expr.atomic_add",
+    "TAtomicStmt": "stmt.atomic_add",
     "TBufPtr": "expr.buffer-pointer",
     "TPAdd": "expr.pointer-add",
 })
@@ -115,26 +117,24 @@ class Interp:
             self.stmt(s, env, pids)
 
     def stmt(self, s: T.TStmt, env, pids):
-        if isinstance(s, T.TAssign):
+        if isinstance(s, T.TAtomicStmt):
+            self.e(s.value, env, pids)
+        elif isinstance(s, T.TAssign):
             env[s.name] = self.e(s.value, env, pids)
         elif isinstance(s, T.TStore):
-            value = self.o(s.value, env, pids)
-            mask = self.o(s.mask, env, pids) if s.mask is not None else None
             if s.buffer is not None:
                 arr, st = self.buffers[s.buffer]
                 coords = [self.o(c, env, pids) for c in s.coords]
-                self._store(arr, st, coords, value, mask)
             else:
                 name, off = self._ptr_value(s.ptr, env, pids)
                 arr, st = self.buffers[name]
                 if len(st) != 1 or st[0] != 1:
                     raise RuntimeError("interp 的 Ptr 形式仅支持连续 1D buffer"
                                        "（Buffer 形式无此限制）")
-                shape = np.broadcast_shapes(np.shape(off), np.shape(value))
-                coord = (np.broadcast_to(np.asarray(off), shape)
-                         if shape else int(off))
-                self._store(arr, st, [coord],
-                            np.broadcast_to(np.asarray(value), shape), mask)
+                coords = [off]
+            value = self.o(s.value, env, pids)
+            mask = self.o(s.mask, env, pids) if s.mask is not None else None
+            self._store(arr, st, coords, value, mask)
         elif isinstance(s, T.TAssume):
             if self.debug:
                 v = self.o(s.pred, env, pids)
@@ -331,6 +331,31 @@ class Interp:
                 return np.asarray(r).astype(_np_dtype(dt))
             r = np.max(v, axis=x.axis)
             return np.asarray(r).astype(_np_dtype(dt))
+        if isinstance(x, T.TAtomicAdd):
+            if x.buffer is not None:
+                arr, _ = self.buffers[x.buffer]
+                coords = [self.o(c, env, pids) for c in x.coords]
+            else:
+                name, offset = self._ptr_value(x.ptr, env, pids)
+                arr, strides = self.buffers[name]
+                if len(strides) != 1 or strides[0] != 1:
+                    raise RuntimeError('atomic Ptr requires contiguous 1D storage')
+                coords = [offset]
+            value = self.o(x.value, env, pids)
+            mask = self.o(x.mask, env, pids) if x.mask is not None else None
+            shape, sel, indices = self._active_index(arr, coords, mask)
+            result = np.zeros(shape, dtype=arr.dtype)
+            values = np.broadcast_to(np.asarray(value), shape)[sel]
+            from .atomic import add
+            dtype = x.vt.elem.dtype if isinstance(x.vt, TY.BlockT) else x.vt.dtype
+            old_values = []
+            for lane in range(len(values)):
+                index = tuple(axis[lane] for axis in indices)
+                old = arr[index].copy()
+                arr[index] = add(old, values[lane], dtype)
+                old_values.append(old)
+            result[sel] = np.asarray(old_values, dtype=arr.dtype)
+            return result[()] if not shape else result
         if isinstance(x, T.TLoad):
             if x.buffer is not None:
                 arr, st = self.buffers[x.buffer]

@@ -278,7 +278,9 @@ class Checker:
                 raise TilaError(
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
                     Loc(ob.loc_line), [ob.describe(), *audit_result_lines(ob, result, include_fix=False)],
-                    ["修正坐标、补 mask（mask = offs < N），或 tila.unsafe_load"],
+                    ["修正 atomic 坐标或补 mask；atomic 没有 unsafe 逃逸"
+                     if ob.kind == 'atomic_add' else
+                     "修正坐标、补 mask（mask = offs < N），或 tila.unsafe_load"],
                     proof_result=result)
         self.tk.types = {n: v.vtype for n, v in self.vars.items()
                          if v.vtype is not None}
@@ -361,6 +363,9 @@ class Checker:
             if s.value is None:
                 return
             v = self.synth(s.value, out)
+            if isinstance(v.tir, T.TAtomicAdd):
+                out.append(T.TAtomicStmt(v.tir, line=s.loc.line))
+                return
             if not isinstance(v.vtype, TY.UnitT):
                 raise TilaError(
                     "TILA-SYN-026",
@@ -2064,6 +2069,78 @@ class Checker:
 
     # -- 内存访问 ----------------------------------------------------------
 
+    def _in_atomic_add(self, e, out):
+        from .atomic import Relaxed, GPU
+        head = self.synth(e.args[0], out)
+        bt = head.vtype if isinstance(head.vtype, TY.BufferT) else None
+        if bt is None and not self._is_ptrish(head.vtype):
+            raise TilaError('TILA-MEM-005', 'atomic target must be Buffer or Ptr', e.loc)
+        memory = bt or (head.vtype.elem if isinstance(head.vtype, TY.BlockT) else head.vtype)
+        if memory.access is not TY.READ_WRITE:
+            raise TilaError('TILA-MEM-001', 'atomic requires ReadWrite access', e.loc)
+        if memory.elem not in (D.i32, D.u32, D.f32) or memory.space is not TY.GLOBAL:
+            raise TilaError('TILA-TARGET-012', 'atomic supports Global i32/u32/f32 only', e.loc)
+        order = e.kwargs['order'].value if 'order' in e.kwargs else Relaxed
+        scope = e.kwargs['scope'].value if 'scope' in e.kwargs else GPU
+        if order is not Relaxed or scope is not GPU:
+            raise TilaError('TILA-TARGET-012', 'atomic requires Relaxed/GPU', e.loc)
+        coords, coord_exprs, shape = [], [], shape_of(head) if bt is None else ()
+        if bt is not None:
+            if not isinstance(e.args[0], Name):
+                raise TilaError('TILA-MEM-006', 'atomic Buffer target must be named', e.loc)
+            coord_exprs = (list(e.args[1].items) if len(e.args) == 3 and isinstance(e.args[1], HTuple)
+                          else e.args[1:-1])
+            if len(coord_exprs) != len(bt.dims) or not bt.dims:
+                raise TilaError('TILA-SHAPE-011', 'atomic coordinate rank mismatch', e.loc)
+            for ce in coord_exprs:
+                cv = self.synth(ce, out)
+                if type(cv.lit) is int:
+                    self._instantiate(cv.lit, D.i32, e.loc)
+                    cv.vtype, cv.expr = TY.ScalarT(D.i32), Cst(cv.lit)
+                dt = self._dtype_of(cv)
+                if dt is None or not dt.is_int:
+                    raise TilaError('TILA-TYPE-035', 'atomic coordinate must be integer', e.loc)
+                cshape = shape_of(cv)
+                if cshape:
+                    if shape and (len(shape) != len(cshape) or not all(
+                            self._dim_eq_defer(a, b, e.loc, 'atomic coordinates') for a, b in zip(shape, cshape))):
+                        raise TilaError('TILA-SHAPE-012', 'atomic coordinate shapes must match', e.loc)
+                    shape = cshape
+                coords.append(cv)
+        elif len(e.args) != 2:
+            raise TilaError('TILA-SYN-036', 'atomic_add(ptr, value)', e.loc)
+        if len(shape) > 1:
+            raise TilaError('TILA-TARGET-012', 'atomic supports scalar or 1D tile only', e.loc)
+        val = self.synth(e.args[-1], out)
+        vdt = self._dtype_of(val)
+        if val.lit is not None and vdt is None:
+            vdt = self._instantiate(val.lit, memory.elem, e.loc)
+            val.vtype = TY.ScalarT(vdt)
+        if vdt is not memory.elem:
+            raise TilaError('TILA-TYPE-030', 'atomic value dtype must exactly match memory', e.loc)
+        vshape = shape_of(val)
+        if vshape and (len(vshape) != len(shape) or not all(
+                self._dim_eq_defer(a, b, e.loc, 'atomic value shape') for a, b in zip(vshape, shape))):
+            raise TilaError('TILA-SHAPE-012', 'atomic value must be scalar or exact access shape', e.loc)
+        mv, predicate = self._check_mask(e, e.kwargs, shape, out)
+        if mv is not None and shape_of(mv) and (len(shape_of(mv)) != len(shape) or not all(
+                self._dim_eq_defer(a, b, e.loc, 'atomic mask shape') for a, b in zip(shape_of(mv), shape))):
+            raise TilaError('TILA-SHAPE-010', 'atomic mask must be scalar or exact access shape', e.loc)
+        if bt is not None:
+            for axis, cv in enumerate(coords):
+                self._add_obligation('atomic_add', e.args[0].id, axis, cv.expr, bt.dims[axis], predicate, e.loc.line)
+        else:
+            self._add_obligation('atomic_add', 'ptr:' + memory.region_id.name, None,
+                                 head.expr, TY.extent_expr(memory.extent), predicate, e.loc.line)
+        vt = TY.BlockT(TY.ScalarT(memory.elem), shape) if shape else TY.ScalarT(memory.elem)
+        return VarInfo(vtype=vt, tir=T.TAtomicAdd(vt,
+            e.args[0].id if bt is not None else None,
+            [self._operand_of(cv, ce, out) for cv, ce in zip(coords, coord_exprs)],
+            None if bt is not None else self._operand_of(head, e.args[0], out),
+            self._operand_of(val, e.args[-1], out),
+            None if mv is None else self._operand_of(mv, e.kwargs['mask'], out),
+            order, scope, line=e.loc.line))
+
     def _in_load(self, e, out):
         return self._access(e, out, is_store=False, unsafe=False)
 
@@ -2386,6 +2463,7 @@ CHECKER_INTRINSIC_HANDLERS = {
     "arange": Checker._in_arange,
     "range": Checker._in_range,
     "load": Checker._in_load,
+    "atomic_add": Checker._in_atomic_add,
     "store": Checker._in_store,
     "unsafe_load": Checker._in_unsafe_load,
     "unsafe_store": Checker._in_unsafe_store,

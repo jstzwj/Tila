@@ -582,7 +582,8 @@ class JITFunction:
                 raise TilaError(     # 无条件 error（任何模式，bounds-safety §6）
                     "TILA-BOUNDS-003", "out-of-bounds access is provable",
                     Loc(ob.loc_line), [ob.describe(), *audit_result_lines(ob, result, include_fix=False)],
-                    ["修正坐标、补 mask，或 unsafe_load/unsafe_store"], proof_result=result)
+                    ["修正 atomic 坐标或补 mask；atomic 没有 unsafe 逃逸" if ob.kind == 'atomic_add'
+                     else "修正坐标、补 mask，或 unsafe_load/unsafe_store"], proof_result=result)
             if state == UNKNOWN and not (not launch_checked and result.pending_contracts):
                 warn = self._raise_unknown(ob, result)
                 if warn is not None:
@@ -648,6 +649,8 @@ class JITFunction:
         if ob.coord is None:
             fixes = ["数据依赖坐标无法静态证明：ti.assume(...) 注入事实，或 "
                      "ti.unsafe_load/unsafe_store 显式豁免"]
+        if ob.kind == 'atomic_add':
+            fixes = ["为 atomic 补齐 mask/边界事实或可验证的 launch 契约；没有 unsafe_atomic_add"]
         if ob.extent is None:
             fixes = ["裸指针为 UnknownExtent：改用 Buffer 形式访问，或 "
                      "ti.Ptr[dt, access, extent, alignment] 声明元素数量"]
@@ -875,6 +878,8 @@ class _Launcher:
 
         # alias 是独立分析维度：不改写 RegionId，也不参与 bounds 数值式。
         tk.runtime_aliases = _runtime_alias_facts(tk, tensors)
+        from .atomic import validate_bindings
+        validate_bindings(tk, tensors, _tensor_info)
 
         # ---- 标量精化（launch 契约）+ 显式标量与维符号绑定的一致性
         for s in tk.scalars:

@@ -391,6 +391,19 @@ class _Builder:
                 args.append(self.expr(a))
         kw = {}
         for k in e.keywords:
+            if name == 'atomic_add' and k.arg in ('order', 'scope'):
+                from .atomic import MemoryOrder, MemoryScope
+                expected = MemoryOrder if k.arg == 'order' else MemoryScope
+                value = None
+                if isinstance(k.value, ast.Name) and k.value.id not in self.local_names | self.param_names:
+                    value = self.g.get(k.value.id)
+                elif (isinstance(k.value, ast.Attribute) and isinstance(k.value.value, ast.Name)
+                      and k.value.value.id in self.aliases):
+                    value = vars(self.g[k.value.value.id]).get(k.value.attr)
+                if type(value) is not expected:
+                    self._syn('TILA-TYPE-030', f'atomic {k.arg} requires a typed {expected.__name__} value', k.value)
+                kw[k.arg] = Lit(self._loc(k.value), value)
+                continue
             kw[k.arg] = self.expr(k.value)
         return Call(loc, name, args, kw)
 

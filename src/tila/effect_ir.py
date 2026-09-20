@@ -7,6 +7,7 @@ from . import tir as T, types as TY, dtypes as D
 
 # Exhaustive semantic operands; metadata is not an executable child.
 OPERANDS = {
+    T.TAtomicAdd: ('ptr', 'coords', 'value', 'mask'), T.TAtomicStmt: ('value',),
     T.TName: (), T.TLit: (), T.TAssign: ('value',),
     T.TStore: ('ptr', 'coords', 'value', 'mask'), T.TAssume: ('pred',),
     T.TIf: ('cond',), T.TStaticIf: ('cond',),
@@ -101,7 +102,7 @@ def _analyze(kernel, *, bind):
                 if child is not None:
                     suffix = field if index is None else f'{field}/{index}'
                     visit(child, scope, path + '/' + suffix, line)
-        if type(node) in (T.TLoad, T.TStore):
+        if type(node) in (T.TLoad, T.TStore, T.TAtomicAdd):
             if id(node) in owners:
                 fail('shared memory node has multiple evaluation sites', line)
             owners[id(node)] = path
@@ -117,14 +118,20 @@ def _analyze(kernel, *, bind):
                 region, elem, space = pointer.region_id, pointer.elem, pointer.space
             if type(region) not in (TY.BufferRegion, TY.ParamRegion, TY.InternalRegion, TY.UnknownRegion):
                 fail('invalid memory RegionId', line)
-            value_type = node.vt if type(node) is T.TLoad else vt(node.value, scope)
+            atomic = None
+            if type(node) is T.TAtomicAdd:
+                from .atomic import validate_node
+                validate_node(node, param.vtype if node.buffer is not None else pointer,
+                              lambda operand: vt(operand, scope))
+                atomic = T.AtomicInfo('Add', node.order, node.scope)
+            value_type = node.vt if type(node) in (T.TLoad, T.TAtomicAdd) else vt(node.value, scope)
             if isinstance(value_type, TY.BlockT):
                 value_type = value_type.elem
             value_dtype = D.bool_ if isinstance(value_type, TY.MaskT) else getattr(value_type, 'dtype', None)
             if value_dtype is not None and value_dtype is not elem:
                 fail('memory value dtype disagrees with access dtype', line)
-            effect = T.MemoryEffect(path, 'Read' if type(node) is T.TLoad else 'Write',
-                                    region, space, elem, T.EffectLocation(line))
+            effect = T.MemoryEffect(path, 'Atomic' if atomic else 'Read' if type(node) is T.TLoad else 'Write',
+                                    region, space, elem, T.EffectLocation(line), atomic)
             put(node, 'effect', effect, line)
             accesses.append(node)
         active.remove(id(node))

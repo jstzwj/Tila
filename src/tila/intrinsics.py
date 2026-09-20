@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 11  # ADR-010 where source locations and effect diagnostics
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 13  # ADR-017 GPU atomic lowering
 
 
 class SurfaceForm(str, Enum):
@@ -53,6 +53,7 @@ class StageRule(str, Enum):
 
 
 class EffectRule(str, Enum):
+    ATOMIC_MEMORY = "atomic-memory"
     PURE = "pure"
     READ_MEMORY = "read-memory"
     WRITE_MEMORY = "write-memory"
@@ -162,6 +163,11 @@ def _spec(
 
 # Catalog 顺序是公共文档/导出稳定顺序；不是分派优先级。
 INTRINSICS: tuple[IntrinsicSpec, ...] = (
+    _spec("atomic_add", arity=(2, 32), keywords=("mask", "order", "scope"),
+          availability=Availability.IMPLEMENTED, effect=EffectRule.ATOMIC_MEMORY,
+          bounds=BoundsRule.BUFFER_OR_PTR_ACCESS, tir=("TAtomicAdd", "TAtomicStmt"),
+          backends=_ALL_BACKENDS,
+          target=TargetRequirement.GLOBAL_MEMORY_V0, anchor="2.9"),
     _spec("program_id", arity=(1, 1), stage=StageRule.CONST_INT_INPUT,
           tir=("TPid",), anchor="2.1"),
     _spec("num_programs", arity=(1, 1), stage=StageRule.CONST_INT_INPUT,
@@ -255,7 +261,7 @@ def validate_registry(specs: Iterable[IntrinsicSpec]) -> tuple[IntrinsicSpec, ..
         if needs_tir and not spec.tir_ops:
             raise ValueError(f"{spec.name}: backend coverage requires declared TIR ops")
         memory_effect = spec.effect_rule in {
-            EffectRule.READ_MEMORY, EffectRule.WRITE_MEMORY
+            EffectRule.READ_MEMORY, EffectRule.WRITE_MEMORY, EffectRule.ATOMIC_MEMORY
         }
         if memory_effect != (spec.bounds_rule is not None):
             raise ValueError(

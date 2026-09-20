@@ -6,7 +6,7 @@ Read/Write 汇总及 where 急切读取检查，并发检查尚未完成。
 [M4-01b](effect-ir.md)实现局部访问身份、Read/Write/RegionId、定义引用与 verifier。
 [M4-01c](effect-summary.md)已实现 mask/path/loop 与 kernel summary 派生。
 [M4-02 / ADR-010](adr/010-effect-diagnostic-policy.md)已实现独立 effects 策略。
-atomic、race、uniformity 尚未实现。
+M4-03b/c 已实现 atomic_add 的 CPU 参考、AtomicInfo 与限定 GPU lowering；race、uniformity 尚未实现。
 前置阅读：`design-principles.md` §2（第四支柱）、`type-system.md` §8–§9
 （Region 概念）。
 
@@ -157,13 +157,20 @@ consider: atomic_store / index by pid
 
 判定 = 地址表达式对 pid 的仿射依赖 + 区间推理（同一套 IndexExpr
 设施，bounds-safety.md §2）。证不出 → warning，**不**拒绝——
-race 检测永远是保守提示，不是硬关卡；`Atomic` 效应豁免检查
-（原子操作语义上允许竞争）。mask 依赖 pid 的 store（如
+未知 race 保留保守提示，确认冲突的策略待独立 ADR；兼容的原子操作之间允许
+同址更新，但 Atomic 与普通访存混用不能自动豁免。mask 依赖 pid 的 store（如
 `pid == 0` 的单写者模式）按"条件含 pid 谓词"规约处理。
 
 ---
 
 ## 5. Atomic 的严格类型化
+
+M4-03a 已冻结 [ADR-017](adr/017-minimal-atomic-add.md)，M4-03b 的
+[前端/IR/CPU](atomic-cpu.md)已实现，M4-03c 已完成[限定 GPU 验收](atomic-gpu.md)。它限定首版
+为 atomic_add、Global ReadWrite、i32/u32/f32、Relaxed/GPU；以下其他枚举和操作
+仍是长期设计。AtomicInfo 保留 op/order/scope，不能只当普通 Write；接入现有
+verifier/summary/where 与 explain v2 的具体迁移、CPU 顺序和 GPU 验收见 ADR。
+原子标签不意味着与普通访存混用自动无竞争，后续 race 分析必须单独处理。
 
 <!-- tila-example: future; milestone=M4 -->
 ```python
@@ -182,8 +189,8 @@ MemoryScope := CTA | GPU | Sys
 
 - `atomic_cas: Ptr[T] × T(expected) × T(new) → T`；
 - `atomic_*` 的 mask 形态：mask 也必须是精确同形 Mask；
-- 每个原子操作在效应层记为 `Atomic[R]`，天然豁免 race 检查并进入
-  报告汇总。
+- 每个原子操作在效应层记为 `Atomic[R]` 并进入报告汇总；仅兼容的原子更新
+  之间允许同址竞争，不能因此忽略与普通访存的冲突。
 
 ---
 

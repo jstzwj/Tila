@@ -20,7 +20,7 @@ BASELINE = {
     "cuda": "12.8", "numpy": "1.24.3", "ml_dtypes": "0.5.4",
     "gpu": "NVIDIA GeForce RTX 3090", "capability": [8, 6], "driver": "595.84",
 }
-EXPECTED_TESTS = 300  # M3 exit follow-up adds 140 dtype-matrix nodes
+EXPECTED_TESTS = 388  # M4-03c adds 88 atomic compile/execution/negative nodes
 
 
 def command(args):
@@ -96,16 +96,16 @@ def main():
         env = os.environ.copy()
         env.update(PYTHONPATH=str(ROOT / "src"), PYTHONHASHSEED="0",
                    PYTEST_ADDOPTS="", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
-                   TILA_INTERP="0", TRITON_INTERPRET="0", TILA_SAFETY="strict", TILA_DEBUG="0",
+                   TILA_INTERP="0", TRITON_INTERPRET="0", TILA_SAFETY="strict", TILA_DEBUG="0", TILA_EFFECTS="warn",
                    TILA_GPU_KERNELS=str(run / "kernels"), TMPDIR=str(run / "tmp"),
                    TILA_BACKEND_ARTIFACTS=str(run / "backend"))
         replay_env = {key: env[key] for key in (
             "PYTHONPATH", "PYTHONHASHSEED", "PYTEST_ADDOPTS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
-            "TILA_INTERP", "TRITON_INTERPRET", "TILA_SAFETY", "TILA_DEBUG", "TILA_GPU_KERNELS", "TMPDIR", "TILA_BACKEND_ARTIFACTS")}
+            "TILA_INTERP", "TRITON_INTERPRET", "TILA_SAFETY", "TILA_DEBUG", "TILA_EFFECTS", "TILA_GPU_KERNELS", "TMPDIR", "TILA_BACKEND_ARTIFACTS")}
         report["execution_env"] = replay_env
         from importlib.metadata import distributions
         report["packages"] = {dist.metadata["Name"]: dist.version for dist in distributions() if dist.metadata["Name"]}
-        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "tests/gpu_alignment.py", "tests/gpu_matrix_gaps.py", "-v", "-s",
+        argv = [sys.executable, "-m", "pytest", "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "tests/gpu_alignment.py", "tests/gpu_matrix_gaps.py", "tests/gpu_atomic.py", "-v", "-s",
                 "--tb=long", "--showlocals", f"--junitxml={run / 'results.xml'}"]
         if args.case:
             argv += ["-k", args.case]

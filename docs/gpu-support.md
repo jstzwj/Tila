@@ -54,8 +54,9 @@ python tools/replay_gpu_audit.py /path/to/extracted/run --case test_matmul
 hint 开关对照；M3-02 再增加 8 项 launch/cache 负测试，当前共
 112 节点/256 案例；M3-03 增加 3 项，M3-04 再增加 36 项，当前为
 151 节点/295 案例；M3-05 增加 9 项达到 160 节点/304 案例；退出审计后补测
-增加 140 项，当前为 **300 个 pytest 节点全部通过，覆盖 444 个语义案例**。
-CPU 全量基线为 937 passed，零 skipped。M3-02/03/04/05 及矩阵补测已在本地固定环境通过；
+增加 140 项达到 300/444；M4-03c 增加 88 项 atomic，当前为
+**388 个 pytest 节点全部通过，覆盖 532 个语义案例**。
+CPU 全量基线为 1040 passed，零 skipped。M3-02/03/04/05 及矩阵补测已在本地固定环境通过；
 [launch/target 规则与边界](launch-target.md)详述前置门禁范围。
 逐 intrinsic 的 dtype/shape 与证据见 [操作审计](gpu-operation-audit.md)，不是全组合认证。
 对齐契约的单位、hint 来源与缓存规则见 [alignment hints](alignment-hints.md)。
@@ -75,6 +76,7 @@ CPU 全量基线为 937 passed，零 skipped。M3-02/03/04/05 及矩阵补测已
 | exp/exp2、浮点 cast、bf16 广播 | 四种浮点指数函数与窄中间舍入、16 个 cast 组合、bf16 外积广播；具体误差标准见操作审计 |
 | FP8 storage/cast | Stage 1 类型设计保留；固定 target build/launch 拒绝，包含中间 FP8 值 |
 | zeros / reshape | bool + 12 arithmetic dtype，16 元素、一维/二维变形，按位检查 |
+| atomic_add | Global i32/u32/f32，Relaxed/GPU，标量/一维 Buffer/Ptr，4/8 warps；[并发契约及受控验收](atomic-gpu.md) |
 | dot f16/f32 acc 与输出 | f16 输入，16×32×16、连续/转置 stride、4/8 warps、RNE 中点和固定随机；f16 输出在 dot 处立即舍入 |
 
 launch 选项为 `kernel[grid].with_options(num_warps=4或8)(...)`；不抢占 kernel 的

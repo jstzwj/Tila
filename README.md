@@ -253,6 +253,8 @@ zeros/reshape 与 add 多 dtype；自动 GPU CI 已撤下，隔离 GPU 持续验
    [M4-01d](docs/effect-audit.md)已固定可选详细输出与缓存／绑定隔离验收。
    [M4-02](docs/adr/010-effect-diagnostic-policy.md)已实现 where 急切读取检查与独立
    `TILA_EFFECTS=off|warn|error`／`--effects` 策略（默认 warn）。
-   atomic/race/uniformity 暂缓，M3 仍未完成。
+   [M4-03b](docs/atomic-cpu.md)已实现最小 atomic_add 前端、Effect IR 和 CPU 参考；
+   [M4-03c](docs/atomic-gpu.md)已完成固定 RTX 3090 GPU lowering 与本地严格验收。
+   race/uniformity 暂缓，隔离 GPU CI 缺失，M3 仍未完成。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

@@ -7,6 +7,19 @@
     "byte_offset": "Deferred; no backend coverage claim"
   },
   "operations": {
+    "atomic_add": {
+      "verified_dtypes": ["i32", "u32", "f32"],
+      "shape": "Scalar and 1D tiles; Global ReadWrite Buffer/Ptr; scalar values or exact tile shape; num_warps 4/8",
+      "evidence": [
+        "tests/gpu_atomic.py::test_atomic_tickets_and_tail",
+        "tests/gpu_atomic.py::test_atomic_noncolliding_views",
+        "tests/gpu_atomic.py::test_atomic_float_legal_histories",
+        "tests/gpu_atomic.py::test_atomic_float_special_values",
+        "tests/gpu_atomic.py::test_atomic_literal_zero_preserves_rmw",
+        "tests/gpu_atomic.py::test_atomic_nested_scalar_alias_and_unused"
+      ],
+      "limits": "ADR-017 only: Relaxed/GPU, natural 4-byte alignment, positive Buffer strides, contiguous 1D Ptr. No other atomic operations/dtypes/scopes/orders or race-freedom claim; FP updates are not bitwise deterministic across schedules."
+    },
     "program_id": {
       "verified_dtypes": [
         "i32"

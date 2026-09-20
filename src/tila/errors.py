@@ -181,6 +181,7 @@ _DIAGNOSTICS = {
         "006": "Buffer access does not name a direct parameter",
     }, default_fix=_MEM_FIX),
     **_specs("MEM", (DiagnosticPhase.LAUNCH,), {
+        "008": "atomic natural alignment or layout contract failed",
         "003": "runtime alignment or contiguous-storage contract failed",
     }, default_fix=_MEM_FIX),
     **_specs("BOUNDS", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE,
@@ -201,6 +202,7 @@ _DIAGNOSTICS = {
         "008": "invalid effects policy",
     }, default_fix="Use effects=off|warn|error"),
     **_specs("TARGET", (DiagnosticPhase.TARGET,), {
+        "012": "unsupported atomic target or configuration",
         "004": "required backend package is unavailable",
         "005": "backend compilation or execution failed",
         "006": "unsupported launch option",

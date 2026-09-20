@@ -60,10 +60,10 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | `TILA-SHAPE` | 003–006、008–012 | checker/specialization shape |
 | `TILA-CONST` | 001–011 | Const/StagedBool/specialization；011 为显式浮点常量源/目标限制 |
 | `TILA-NUM` | 001–002 | 001 为整数定义域/索引/ABI；002 为显式浮点常量非有限/溢出 |
-| `TILA-MEM` | 001–006 | memory capability/offset/alignment |
+| `TILA-MEM` | 001–006、008 | memory capability/offset/alignment；008 为 atomic 自然对齐/布局 |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
 | `TILA-EFFECT` | 007、008 | where 急切读取（独立 off/warn/error）；非法 effects 策略 |
-| `TILA-TARGET` | 004–011 | backend/target、launch options、device/TIR 门禁、编译/加载失败与硬资源超限 |
+| `TILA-TARGET` | 004–012 | backend/target、launch options、device/TIR 门禁、编译/加载失败与硬资源超限；012 为不支持的 atomic 配置拒绝 |
 | `TILA-INTERNAL` | 001 | CLI 内部故障封装 |
 
 尚未实现的 `TILA-RACE`、`TILA-UNIFORM` 只存在于未来设计，不进入活动 registry；实际实现前

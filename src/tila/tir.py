@@ -29,6 +29,13 @@ class EffectLocation:
 
 
 @dataclass(frozen=True)
+class AtomicInfo:
+    op: str
+    order: object
+    scope: object
+
+
+@dataclass(frozen=True)
 class MemoryEffect:
     site_id: str
     kind: str
@@ -36,6 +43,7 @@ class MemoryEffect:
     address_space: object
     element_dtype: object
     location: EffectLocation
+    atomic: AtomicInfo | None = None
 
 @dataclass
 class TBufferParam:
@@ -236,6 +244,19 @@ class TLoad(TExpr):
 
 
 @dataclass
+class TAtomicAdd(TExpr):
+    buffer: str | None
+    coords: list
+    ptr: TOperand | None
+    value: TOperand
+    mask: TOperand | None
+    order: object
+    scope: object
+    line: int = 0
+    effect: MemoryEffect | None = None
+
+
+@dataclass
 class TBufPtr(TExpr):
     buffer: str
 
@@ -258,6 +279,12 @@ class TAssumeExpr(TExpr):
 
 class TStmt:
     pass
+
+
+@dataclass
+class TAtomicStmt(TStmt):
+    value: TAtomicAdd
+    line: int = 0
 
 
 @dataclass
@@ -411,6 +438,8 @@ class _Printer:
         return "\n".join(out) + "\n"
 
     def stmt(self, s: TStmt, ind: int) -> list[str]:
+        if isinstance(s, TAtomicStmt):
+            return [' ' * ind + self.o(s.value)]
         pad = " " * ind
         if isinstance(s, TAssign):
             return [f"{pad}{s.name} = {self.e(s.value)}"]
@@ -467,6 +496,11 @@ class _Printer:
         return self.e(x)
 
     def e(self, x: TExpr) -> str:
+        if isinstance(x, TAtomicAdd):
+            dst = (x.buffer + '[' + ', '.join(self.o(c) for c in x.coords) + ']'
+                   if x.buffer is not None else self.o(x.ptr))
+            mask = '' if x.mask is None else ', mask=' + self.o(x.mask)
+            return f'atomic_add({dst}, {self.o(x.value)}{mask}, order={x.order.value}, scope={x.scope.value})'
         # 赋值值可为纯操作数形态（名字拷贝 x = y）——TName/TLit 走 o()。
         if isinstance(x, (TName, TLit)):
             return self.o(x)

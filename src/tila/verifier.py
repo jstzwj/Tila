@@ -9,6 +9,7 @@ from .target import SUPPORTED
 
 
 NODE_NAMES = frozenset((
+    "TAtomicAdd", "TAtomicStmt",
     "TName", "TLit", "TAssign", "TStore", "TAssume", "TIf", "TStaticIf", "TFor", "TReturn",
     "TBin", "TUna", "TCast", "TConstant", "TArange", "TPid", "TNumPrograms", "TZeros",
     "TReshape", "TExpand", "TWhere", "TDot", "TReduce", "TLoad", "TBufPtr", "TPAdd"))
@@ -63,6 +64,8 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         identifier(p.name)
 
     def vt_of(operand):
+        if isinstance(operand, T.TLit) and operand.dtype is not None:
+            return TY.ScalarT(operand.dtype)
         if isinstance(operand, T.TExpr):
             return operand.vt
         if isinstance(operand, T.TName):
@@ -149,15 +152,29 @@ def _verify(kernel, consts=None, capability=SUPPORTED):
         if isinstance(node, T.TConstant):
             if node.dtype not in D.FLOAT_DTYPES or type(node.bits) is not int or not 0 <= node.bits < 1 << node.dtype.bits:
                 fail("invalid typed constant payload", line)
-        if isinstance(node, (T.TLoad, T.TStore)):
+        if isinstance(node, (T.TLoad, T.TStore, T.TAtomicAdd)):
             if (node.buffer is None) == (node.ptr is None):
                 fail("memory node must use exactly one Buffer or Ptr", line)
             if node.buffer is not None:
                 if node.buffer not in buffers or len(node.coords) != len(buffers[node.buffer].dims):
                     fail("invalid buffer or coordinate rank", line)
+        if isinstance(node, T.TAtomicStmt) and type(node.value) is not T.TAtomicAdd:
+            fail('atomic statement requires atomic_add', line)
+        if isinstance(node, T.TAtomicAdd):
+            from .atomic import validate_node
+            memory = buffers[node.buffer] if node.buffer is not None else vt_of(node.ptr)
+            if isinstance(memory, TY.BlockT):
+                memory = memory.elem
+            validate_node(node, memory, vt_of, consts if specialized else None)
+            if capability is not None and (
+                    memory.elem.name not in capability.atomic_add_dtypes or
+                    node.order.value not in capability.atomic_orders or
+                    node.scope.value not in capability.atomic_scopes):
+                raise TilaError('TILA-TARGET-012', 'atomic_add configuration is not supported by target', Loc(line))
         # Walk only semantic child fields; metadata types/dimensions are handled
         # separately. Require children even when raw objects replaced operands.
         required = {
+            T.TAtomicAdd: ('value',), T.TAtomicStmt: ('value',),
             T.TAssign: ("value",), T.TBin: ("left", "right"), T.TUna: ("operand",),
             T.TCast: ("operand",), T.TArange: ("end",), T.TReshape: ("operand",),
             T.TExpand: ("operand",), T.TWhere: ("cond", "a", "b"), T.TDot: ("a", "b"),

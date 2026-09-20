@@ -170,7 +170,7 @@ def summarize_effects(kernel, consts=None):
                 if child is not None:
                     suffix = field if index is None else f'{field}/{index}'
                     expr(child, values, site + '/' + suffix, path, loops)
-        if isinstance(node, (T.TLoad, T.TStore)):
+        if isinstance(node, (T.TLoad, T.TStore, T.TAtomicAdd)):
             accesses.append(AccessContext(node.effect, node, path,
                                           guard(node.mask, values, site + '/mask', loops), loops))
 

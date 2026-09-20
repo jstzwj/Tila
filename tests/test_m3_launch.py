@@ -100,7 +100,9 @@ def test_target_policy_versions_and_arch():
 
 
 def test_verifier_coverage_matches_backend():
-    assert NODE_NAMES == TRITON_TIR_OPS
+    from tila.lowering import TRITON_REJECTED_TIR_OPS
+    assert not TRITON_TIR_OPS & TRITON_REJECTED_TIR_OPS
+    assert NODE_NAMES == TRITON_TIR_OPS | TRITON_REJECTED_TIR_OPS
 
 
 @pytest.mark.parametrize("nested", [False, True])

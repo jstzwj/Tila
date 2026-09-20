@@ -16,6 +16,9 @@ class Capability:
     dot_outputs: tuple = ("f16", "f32")
     min_dot_k: int = 16
     fp8_storage: bool = False
+    atomic_add_dtypes: tuple = ('i32', 'u32', 'f32')
+    atomic_orders: tuple = ('relaxed',)
+    atomic_scopes: tuple = ('gpu',)
 
 
 SUPPORTED = Capability()

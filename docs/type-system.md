@@ -59,7 +59,7 @@ dtype 与 Triton 对齐，但**运算语义收紧**。能力分类是 intrinsic 
 | `Float` | f16 bf16 f32 f64 | 可算术浮点 |
 | `FloatStorage` | 四种 FP8 | 只能 load/store/cast，不参与算术 |
 | `DotInput` | f16 bf16（及 f8 双集，target 允许时） | `dot` 操作数 |
-| `AtomicTarget` | i32 i64 u32 u64 f32 f64（target 相关） | atomic 操作数 |
+| `AtomicTarget` | 长期候选 i32 i64 u32 u64 f32 f64（target 相关）；ADR-017 首版仅 i32/u32/f32，CPU 与固定 RTX 3090 GPU 已实现 | atomic 操作数 |
 
 FP8 是**存储 dtype**：`load` 得到 `Block[f8e4m3fn, S]` 后必须显式
 `tila.cast` 到 Float 才能算术——这本身是一条类型规则，不是风格建议。

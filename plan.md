@@ -4,8 +4,9 @@
 
 后续：2026-09-20 f4add24 的托管 CPU CI 已通过 953 项；M4-01c/d 已从 TIR 派生
 控制流 effect 汇总、固定可选详细输出并验收绑定隔离；M4-02 已实现 where 独立效应检查。
-本地 CPU 1002/GPU 300 节点通过。不推进
-atomic/race/uniformity 实现，也不将 M3 标记完成。
+本地 CPU 1040/GPU 388 节点（532 案例）通过。最小 atomic_add CPU/GPU 已实现，不推进
+race/uniformity 实现，也不将 M3 标记完成。M4-03a 已冻结最小 atomic_add
+设计（ADR-017）；M4-03b/c 已完成前端/IR/CPU 与固定 RTX 3090 GPU 验收。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -52,7 +53,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前本地测试基线：1002 passed、零 skipped；f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 300 节点/444 案例通过，当前修改需单独取得远端 CI 证据。
+- 当前本地测试基线：1040 passed、零 skipped；f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 388 节点/532 案例通过，含 88 项 atomic；当前修改需单独取得远端 CI 证据。
 
 ### 2.2 当前主要缺口
 
@@ -526,6 +527,12 @@ M4-02 已实现：[ADR-010](docs/adr/010-effect-diagnostic-policy.md) Accepted�
 
 ### M4.3 Atomic
 
+[ADR-017](docs/adr/017-minimal-atomic-add.md) 已 Accepted（M4-03a 设计，M4-03b/c 前端/IR/CPU 与限定 GPU 已实现）。
+首版限定 Global ReadWrite、i32/u32/f32、标量或一维 tile、Relaxed/GPU；支持
+Buffer/Ptr 两种寻址，返回旧值，masked-off 返回同 dtype 零。重复地址逐元素
+更新，CPU 固定参考顺序不约束 GPU 调度。浮点采用目标 f32 原子数值规则，
+并发验证合法结果/误差包络，不要求逐位等于 CPU。
+
 - 最小集合从 `atomic_add` 开始；
 - value dtype 与 pointer element dtype 精确匹配；
 - order/scope 使用类型化枚举；
@@ -540,7 +547,9 @@ M4-02 已实现：[ADR-010](docs/adr/010-effect-diagnostic-policy.md) Accepted�
 2. 可证明冲突：error；
 3. 无法判定：warning，可显式抑制并进入审计报告。
 
-第一版只分析 affine program-id 地址；不要为了覆盖复杂 pattern 而牺牲 soundness。Atomic effect 从普通 write-race 规则中豁免，但仍检查 atomic 自身合法性。
+第一版只分析 affine program-id 地址；不要为了覆盖复杂 pattern 而牺牲 soundness。
+兼容 atomic 之间允许同址更新，但 Atomic 与普通访存的冲突不能自动豁免；
+atomic 自身合法性始终检查，具体 race 算法另行设计。
 
 ### M4.5 Uniformity
 
@@ -890,6 +899,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | [ADR-014](docs/adr/014-host-integer-normalization.md) | Accepted | 宿主整数转换 | M2-07c 已完成 | 显式 host_int 白名单；ExactInt 入口不变 |
 | [ADR-015](docs/adr/015-rounded-typed-constants.md) | Accepted | 显式舍入常量 | M2-07d 已完成 | 目标 dtype、直接 RNE、规范位模式；拒绝非有限值及溢出 |
 | [ADR-016](docs/adr/016-instruction-effect-ir.md) | Accepted | 逐指令 Effect IR 与派生汇总 | M4-01b/c/d 已实现 | 局部元数据、派生 path/mask/loop、可选详细输出与隔离验收已落地；不涉及 atomic/race/uniformity 实现 |
+| [ADR-017](docs/adr/017-minimal-atomic-add.md) | Accepted | 最小 atomic_add | M4-03b/c 完成 | CPU 参考与固定 RTX 3090 GPU 并发验收分别取证，见 docs/atomic-gpu.md |
 
 每份 ADR 至少回答：
 
@@ -949,6 +959,9 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-01c | DONE | 控制流上下文与 TIR 派生汇总 | M4-01b | mask/path/loop 分栏，早退/Const/零次循环保守；移除 checker 平行列表；19 项专项，CPU 972/GPU 300 节点通过；fused-attention explain 删除默认特化中不可达的两条 Read |
 | M4-01d | DONE | effect 输出与缓存迁移验收 | M4-01c | `--show-effects` / `tila.effect-details.v1`，12 项专项；修复失败/空启动残留 alias/alignment；CPU 984、GPU 300 节点/444 案例通过；不含 atomic/race/uniformity |
 | M4-02 | DONE | where 急切求值 effect 检查 | M4-01、ADR-010 | 独立 off/warn/error、已验证 TIR 的嵌套读取与定义复用区分、最近值分支归属、互补 mask 修复建议；18 项专项与诊断 golden；CPU 1002、GPU 300 节点/444 案例通过 |
+| M4-03a | DONE | 最小 Atomic 设计 ADR | M4-01/02 | ADR-017 Accepted；固定签名、旧值/mask/重复地址、dtype/order/scope、AtomicInfo、explain v2 迁移及 CPU/GPU 验收契约；无运行时实现 |
+| M4-03b | DONE | Atomic 前端、Effect IR 与 CPU 参考 | ADR-017 | enum/签名、TAtomicAdd/AtomicInfo、verifier/bounds/summary/where、explain v2、36 项 CPU 专项及 golden；GPU 路径以 TARGET-012 明确拒绝；见 docs/atomic-cpu.md |
+| M4-03c | DONE | Atomic GPU lowering 与严格验收 | M4-03b | 固定 RTX 3090、88 项 atomic 专项；重复地址/旧值、f32 合法历史/FTZ/误差界、短路/嵌套求值、门禁与缓存、source golden 和重放；CPU 1040、GPU 388 节点/532 案例通过；不等于完成 M3 持续 GPU CI |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

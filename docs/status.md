@@ -6,10 +6,10 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 1002 passed、零 skipped
+验证基线：`PYTHONPATH=src python -m pytest -q` = 1040 passed、零 skipped
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
-当前覆盖 300 个 GPU 测试节点/444 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 388 个 GPU 测试节点/532 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
 M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)已完成：
@@ -83,8 +83,8 @@ Const[bool] 自 0.3.0.dev0 生效；ExactInt 不放宽，布尔绑定与整数�
 [`m1-exit-audit.md`](m1-exit-audit.md)。当其他文档的阶段描述与本文冲突时，
 实现状态以本文为准；语言语义仍以各规范文档为准。
 
-<!-- public-api: jit,assume_launch,cdiv,host_int,Dim,bool,i8,i16,i32,i64,u8,u16,u32,u64,f8e4m3fn,f8e5m2,f16,bf16,f32,f64,Buffer,Ptr,ReadPtr,WritePtr,RWPtr,Const,ReadOnly,WriteOnly,ReadWrite,Global,Shared,Local,PowerOfTwo,Positive,NonNegative,Range,MultipleOf,Aligned,program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
-<!-- frontend-intrinsics: program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape -->
+<!-- public-api: jit,assume_launch,cdiv,host_int,Dim,bool,i8,i16,i32,i64,u8,u16,u32,u64,f8e4m3fn,f8e5m2,f16,bf16,f32,f64,Buffer,Ptr,ReadPtr,WritePtr,RWPtr,Const,ReadOnly,WriteOnly,ReadWrite,Global,Shared,Local,PowerOfTwo,Positive,NonNegative,Range,MultipleOf,Aligned,program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape,atomic_add,MemoryOrder,MemoryScope,Relaxed,GPU -->
+<!-- frontend-intrinsics: program_id,num_programs,arange,range,load,store,unsafe_load,unsafe_store,cast,constant,where,dot,zeros,sum,max,exp,exp2,assume,static_assert,byte_offset,reshape,atomic_add -->
 
 ---
 
@@ -261,6 +261,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `intrinsic:arange` | `Implemented` | public call |
 | `intrinsic:range` | `Implemented` | loop form；普通 call 定向拒绝 |
 | `intrinsic:load` | `Partial` | Buffer 闭环；Ptr 能力仍有边界 |
+| `intrinsic:atomic_add` | `Implemented` | M4-03b/c：Global i32/u32/f32、Relaxed/GPU，标量/一维 tile 的 CPU 参考与固定 RTX 3090 GPU 实现；其他组合拒绝 |
 | `intrinsic:store` | `Partial` | Buffer 闭环；Ptr 能力仍有边界 |
 | `intrinsic:unsafe_load` | `Implemented` | public call |
 | `intrinsic:unsafe_store` | `Implemented` | public call |
@@ -361,7 +362,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | per-instruction effect IR | `Implemented` | Check / Specialize / Launch | M4-01b/c/d 已有局部 effect、定义引用/verifier、path/mask/loop、可选详细审计及隔离验收；不包含并发安全检查 |
 | `where` eager memory diagnostics | `Implemented` | Check / Specialize / Launch | M4-02：Effect IR/定义引用驱动、独立 off/warn/error、site/源位置及修复建议；静态提示不声称必然访存 |
 | alias 声明/运行时 alias 检查 | `Designed` | — | `tila.alias`、`--check-alias` 尚不存在 |
-| atomic | `Designed` | — | 无公共名字、checker、TIR 或后端实现 |
+| atomic_add | `Implemented` | Check / CPU / Triton / Launch | M4-03b/c：Global i32/u32/f32、Relaxed/GPU、标量/一维 tile；Effect IR/verifier/summary/where/explain v2；GPU 仅固定 RTX 3090，见 atomic-gpu.md |
 | inter-program race analysis | `Designed` | — | 尚未实现 |
 | uniformity/barrier | `Designed` | — | 尚未实现 |
 | shared-memory typestate | `Deferred` | — | 长期研究项 |
@@ -382,7 +383,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 300 节点/444 案例，五个官方示例多配置和 dtype 补测；逐 intrinsic 证据见 gpu-capabilities.json，隔离 GPU CI 待建立，未覆盖组合不作承诺 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 388 节点/532 案例，含 88 项 atomic；逐 intrinsic 证据见 gpu-capabilities.json，隔离 GPU CI 待建立，未覆盖组合不作承诺 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

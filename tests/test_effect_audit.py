@@ -109,7 +109,7 @@ def test_cli_effect_details(command, capsys):
     assert main([*command, str(fixture), '--show-effects']) == 0
     output = capsys.readouterr().out
     block = output.split('effect-details:\n', 1)[1].split('\naliases:', 1)[0]
-    assert json.loads(block)['schema'] == 'tila.effect-details.v1'
+    assert json.loads(block)['schema'] == 'tila.effect-details.v2'
 
 
 def test_hash_seed_independence():

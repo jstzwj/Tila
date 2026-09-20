@@ -23,6 +23,7 @@
 
 from .runtime import JITFunction, assume_launch, cdiv, _jit as jit
 from .host import host_int
+from .atomic import MemoryOrder, MemoryScope, Relaxed, GPU
 
 # 维与类型构造
 from .dims import Dim
@@ -45,6 +46,7 @@ Local = Local_
 __version__ = "0.3.0.dev0"
 
 __all__ = [
+    "MemoryOrder", "MemoryScope", "Relaxed", "GPU",
     "jit", "assume_launch", "cdiv", "host_int", "Dim",
     "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
     "f8e4m3fn", "f8e5m2", "f16", "bf16", "f32", "f64",

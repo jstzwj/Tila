@@ -1,5 +1,5 @@
 {
-  "schema": "tila.effect-details.v1",
+  "schema": "tila.effect-details.v2",
   "stage": "specialized",
   "consts": [
     {
@@ -32,6 +32,7 @@
     {
       "site": "body/0/then/0",
       "kind": "Write",
+      "atomic": null,
       "region": "BufferRegion[0:out]",
       "dtype": "i32",
       "address_space": "Global",
@@ -44,6 +45,7 @@
     {
       "site": "body/0/else/0",
       "kind": "Write",
+      "atomic": null,
       "region": "BufferRegion[0:out]",
       "dtype": "i32",
       "address_space": "Global",
