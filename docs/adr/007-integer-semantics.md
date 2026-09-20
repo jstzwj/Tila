@@ -75,6 +75,9 @@ runtime 商转回目标位宽。唯一 signed 商溢出 `MIN // -1` 明确定义
 
 ## 保守 proof 迁移
 
+2026-09-20 补充：[ADR-020](020-correctness-closure.md)固定 Ptr 每步/累计字节
+位移的 checked i64 地址域，以及实际浮点 ABI 转换后再检查入口精化的规则。
+
 `TBin/TUna` 标记 staged 与 checked_index。对元数据、pid、lane、循环索引、Const
 派生的符号索引，保留原始运算节点并逐个验证无溢出；不允许规范化消掉危险中间值。
 launch 门禁覆盖所有执行 lane，而不是仅检查最终地址或最终 mask 为真的 lane。

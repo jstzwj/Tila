@@ -2,7 +2,8 @@
 
 2026-09-19，[ADR-016](adr/016-instruction-effect-ir.md) 已评审冻结为 Accepted。
 本文记录 M4-01b 的指令元数据与完整性检查；后续 [M4-01c](effect-summary.md)已实现
-path/mask/loop 上下文与汇总迁移，并发分析仍未实现。
+path/mask/loop 上下文与汇总迁移。本文为历史阶段记录；当前已有限定 Race 分析，
+见 [Race 退出审计](race-exit-audit.md)，不能由 Effect 标签直接推导一般并发安全。
 
 `TLoad.effect` / `TStore.effect` 保存不可变 MemoryEffect：结构路径 site_id、
 Read/Write、RegionId、address_space、element_dtype、EffectLocation(line)。
@@ -42,5 +43,6 @@ overlay、solver 查询或公共 API，没有改变 CPU 计算或 Triton 源码�
 这些是当前工作区的本地证据，旧提交的托管 CPU run 不替代本次远端验收。
 
 M4-01c 已派生 path/mask/loop 上下文与 kernel summary，移除 checker 平行列表。
-[M4-01d](effect-audit.md)已实现可选详细输出与缓存/绑定隔离；atomic/race/uniformity 暂缓。
+[M4-01d](effect-audit.md)已实现可选详细输出与缓存/绑定隔离；后续 atomic、受限 Race
+及内部 uniformity 进展以[状态表](status.md)为准，尚无同步消费。
 M3 仍因缺少隔离 GPU CI 保持未完成。

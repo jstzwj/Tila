@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 13  # ADR-017 GPU atomic lowering
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 14  # soundness: signed keys, typed ABI, checked pointer domain
 
 
 class SurfaceForm(str, Enum):

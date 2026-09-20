@@ -23,6 +23,36 @@ def limits(dt):
     return D._INT_RANGE[dt]
 
 
+def scalar_float(value, dt):
+    """Round once to the declared ABI dtype before checking refinements.
+
+    Existing non-finite inputs remain IEEE values; finite sources must not
+    overflow. Exact integer sources avoid an intermediate binary64 rounding.
+    """
+    from .constants import rounded_bits, float_value
+    # The launch API already accepts int/float instances (including NumPy's
+    # binary64 float subclass). Do not import constant syntax's exact-type gate.
+    if isinstance(value, float):
+        value = float(value)
+        if not math.isfinite(value):
+            return value
+    elif isinstance(value, int):
+        value = int(value)
+    return float_value(dt, rounded_bits(value, dt))
+
+
+def pointer_add(offset, add, itemsize):
+    """Element offsets accumulate in checked signed i64, never tile dtype."""
+    a, b = np.asarray(offset).astype(object), np.asarray(add).astype(object)
+    result = a + b
+    lo, hi = limits(D.i64)
+    if (np.any(b * itemsize < lo) or np.any(b * itemsize > hi) or
+            np.any(result * itemsize < lo) or np.any(result * itemsize > hi)):
+        raise TilaError("TILA-NUM-001", "pointer displacement exceeds signed i64 address domain")
+    result = np.asarray(result, dtype=np.int64)
+    return result[()] if result.ndim == 0 else result
+
+
 def wrap(value, dt):
     """Integer cast/add/sub/mul use low bits, independent of NumPy promotion."""
     modulus = 1 << dt.bits
@@ -62,6 +92,7 @@ class Validator:
                                         if param.dtype.is_float else (v, v))
             else:
                 self.env[param.name] = None
+        self.env.update({p.name: (0, 0) for p in tk.ptr_params})
 
     def require(self, valid, message, *, definite=False):
         if valid:
@@ -88,6 +119,21 @@ class Validator:
         if isinstance(x, T.TConstant):
             from .constants import float_value
             return (float_value(x.dtype, x.bits),) * 2
+        if isinstance(x, T.TBufPtr):
+            return (0, 0)
+        if isinstance(x, T.TPAdd):
+            base, add = self.expr(x.ptr), self.expr(x.offset)
+            iv = (base[0] + add[0], base[1] + add[1]) if base and add else None
+            vt = x.vt.elem if isinstance(x.vt, TY.BlockT) else x.vt
+            size = max(1, vt.elem.bits // 8)
+            add_bytes = (add[0] * size, add[1] * size) if add else None
+            self.require(self.fits(add_bytes, D.i64),
+                         "pointer byte displacement must fit signed i64", definite=add is not None)
+            byte_iv = (iv[0] * size, iv[1] * size) if iv else None
+            self.require(self.fits(byte_iv, D.i64),
+                         "cannot prove accumulated pointer byte displacement fits signed i64",
+                         definite=byte_iv is not None)
+            return iv
         dt = dtype(getattr(x, "vt", None))
         if isinstance(x, T.TPid):
             return (0, max(0, self.grid[x.axis] - 1)) if self.grid else None

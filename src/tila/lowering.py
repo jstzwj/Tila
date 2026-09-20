@@ -539,7 +539,7 @@ class Lowering:
         if isinstance(x, T.TBufPtr):
             return f"{x.buffer}_ptr"
         if isinstance(x, T.TPAdd):
-            return f"({self.o(x.ptr)} + {self.o(x.offset)})"
+            return f"({self.o(x.ptr)} + tl.cast({self.o(x.offset)}, tl.int64))"
         fail(f"unsupported TIR expression {type(x).__name__}")
 
     def _reduce(self, x: T.TReduce) -> str:

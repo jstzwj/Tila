@@ -3,8 +3,7 @@
 条件纯由 Const 参数构成（模块常量已在 stage 1 折叠）⇒ StaticIf：
 - 两分支独立检查并保留在 IR（TStaticIf），特化期由 Const 数值定值
   （Triton 路径条件引用 tl.constexpr 实参；interp 由 consts 求值）；
-- 合并放宽：dtype/rank 相同且逐维 equal 或两侧均为纯 Const 符号式 →
-  正常合并（代表类型取 then 侧）；不相容 → static-variant，使用点报
+- 合并要求 dtype/rank/shape 均相同；不同 Const 形状不选代表类型，使用点报
   TILA-TYPE-020；
 - 条件混入任何运行期值（标量/维/pid）⇒ 绝不走该路径（soundness）。
 """
@@ -30,7 +29,7 @@ def test_const_cond_if_is_static_if_stage1():
         if BLOCK >= 128:
             offs = ti.arange(0, BLOCK)
         else:
-            offs = ti.arange(0, 32)
+            offs = ti.arange(0, BLOCK)
         ti.store(x, offs, ti.zeros((BLOCK,), ti.f32), mask=offs < N)
 
     sifs = [s for s in k.tk.body if isinstance(s, T.TStaticIf)]
@@ -50,10 +49,11 @@ def test_const_cond_if_launch_both_specializations():
         if BLOCK >= 128:
             offs = ti.arange(0, BLOCK)
             val = ti.zeros((BLOCK,), ti.f32) + 1.0
+            ti.store(x, offs, val, mask=offs < N)
         else:
             offs = ti.arange(0, 32)
             val = ti.zeros((32,), ti.f32) + 2.0
-        ti.store(x, offs, val, mask=offs < N)
+            ti.store(x, offs, val, mask=offs < N)
 
     x = np.full(100, -1.0, dtype=np.float32)    # BLOCK=256：then，尾部 28 lane 屏蔽
     k[(1,)](x, BLOCK=256)
@@ -75,9 +75,10 @@ def test_materialize_keeps_python_if_over_constexpr():
     def k(x: ti.Buffer[ti.f32, (N,), ti.WriteOnly], BLOCK: ti.Const[int] = 64):
         if BLOCK >= 128:
             offs = ti.arange(0, BLOCK)
+            ti.store(x, offs, ti.zeros((BLOCK,), ti.f32), mask=offs < N)
         else:
             offs = ti.arange(0, 32)
-        ti.store(x, offs, ti.zeros((BLOCK,), ti.f32), mask=offs < N)
+            ti.store(x, offs, ti.zeros((32,), ti.f32), mask=offs < N)
 
     src, dump = k.materialize()
     assert "if (BLOCK >= 128):" in src         # Triton trace 期解析该分支
@@ -191,7 +192,8 @@ def test_const_expr_and_boolop_cond_is_static_if():
     def k(x: ti.Buffer[ti.f32, (N,), ti.WriteOnly], BLOCK: ti.Const[int] = 64):
         if BLOCK % 4 == 0 and BLOCK >= 128:
             offs = ti.arange(0, BLOCK)
+            ti.store(x, offs, ti.zeros((BLOCK,), ti.f32), mask=offs < N)
         else:
             offs = ti.arange(0, 32)
-        ti.store(x, offs, ti.zeros((BLOCK,), ti.f32), mask=offs < N)
+            ti.store(x, offs, ti.zeros((32,), ti.f32), mask=offs < N)
     assert len([s for s in k.tk.body if isinstance(s, T.TStaticIf)]) == 1

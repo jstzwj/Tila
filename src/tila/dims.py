@@ -210,14 +210,14 @@ def _collect(e: DimExpr) -> tuple[dict[str, int], int]:
 
 
 def canon(e: DimExpr) -> str:
-    """规范形式字符串：常量折叠 + 线性项排序。等价 ⇔ canon 相等。"""
+    """保真的保守规范形式；相同键蕴含等价，不保证识别所有等价式。"""
     terms, const = _collect(e)
     parts = []
     for k in sorted(terms):
         c = terms[k]
         if c == 0:
             continue
-        parts.append(k if c == 1 else (f"{c}*{k}" if c > 0 else f"{-c}*{k}"))
+        parts.append(k if c == 1 else f"{c}*{k}")
     if const != 0 or not parts:
         parts.append(str(const))
     return " + ".join(parts)

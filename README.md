@@ -5,13 +5,17 @@ Tila 是一门以 Python 语法承载、面向 GPU kernel、生成 Triton 源码
 自己的 HIR/TIR，并在运行前检查 dtype、shape、控制流、内存访问能力和
 bounds obligation。
 
-Tila 当前最完整的能力是 **CPU/checker 正确性闭环**：同一份 typed TIR
+Tila 的 checker、CPU reference interpreter 与 GPU 后端仍持续接受正确性审计。同一份 typed TIR
 可以生成 Triton 源码，也可以交给 NumPy reference interpreter 执行。Triton
 和 CUDA 路径已有 RTX 3090 / SM86 固定验证组合。公开仓库不连接开发者本地机器，
 当前通过本地工具进行 GPU 验收，不提供自动 GPU CI。已实现 [launch/target 门禁](docs/launch-target.md)、
 [编译诊断与资源检查](docs/backend-diagnostics.md)、[操作/dtype 审计](docs/gpu-operation-audit.md)
 及 [alignment hint 来源与缓存隔离](docs/alignment-hints.md)。跨架构验证仍未闭环，
 因此后端整体状态仍为 `Partial`。
+
+当前暂缓功能扩展，优先[正确性收口](docs/correctness-closure.md)：修复已确认的
+错误 Safe 与跨层语义差异。边界结论依赖记录的前提及启动门禁，不代表一般无竞争、
+同步正确或结果确定性；静态分支不同 shape 的分支外使用已保守拒绝。
 
 > 类型不只描述“值是什么”，还描述 tile shape、编译期常量、读写能力和
 > 内存访问成立的条件。
@@ -200,8 +204,9 @@ CLI 在 Windows 窄编码终端下会主动配置 UTF-8，相关 cp1252 场景�
   和更丰富 pointer arithmetic 尚未设计；
 - FP8 仅保留前端 storage/cast 类型规则，固定 GPU target 的 build/launch 明确拒绝；
 - alignment 声明逐次校验；一维连续 Buffer/Ptr 已反馈为基地址 hint，其他布局仍保守；
-- effect 目前有聚合记录和 `where` eager-memory warning；atomic、race、
-  uniformity 尚未实现；
+- effect 已有逐访问记录、控制流汇总和独立 `where` 策略；最小 atomic_add 与
+  限定 Race 子集已实现，未知顺序/数据流保持 Unknown；uniformity 已有内部分析和
+  可选 `--show-uniformity` 输出，尚无同步消费；
 - TypeVar、公开 capability 集合、target database 和性能诊断尚未实现；
 - 默认 SMT 证明器为 Z3，尚无公开可插拔 solver 接口；已发射 hint 记录来源，五个官方
   示例已有 TIR、Triton source 和 explain golden，M3 退出审计已完成但仍有阻塞项；
@@ -255,6 +260,11 @@ zeros/reshape 与 add 多 dtype；自动 GPU CI 已撤下，隔离 GPU 持续验
    `TILA_EFFECTS=off|warn|error`／`--effects` 策略（默认 warn）。
    [M4-03b](docs/atomic-cpu.md)已实现最小 atomic_add 前端、Effect IR 和 CPU 参考；
    [M4-03c](docs/atomic-gpu.md)已完成固定 RTX 3090 GPU lowering 与本地严格验收。
-   race/uniformity 暂缓，隔离 GPU CI 缺失，M3 仍未完成。
+   [M4-04b/c](docs/race-launch-audit.md)已接入 Race 精确子集与启动门禁：
+   `TILA_RACE=off|warn|error`，默认 warn；确认冲突拒绝，Unknown 告警；
+   [M4-04d](docs/race-exit-audit.md)已完成小域枚举、变形与限定覆盖退出审计；
+   [M4-05b](docs/uniformity-analysis.md)已冻结 ADR-019，实现内部值/控制分析与 verifier；
+   [M4-05c](docs/uniformity-audit.md)已接入可选详细输出、golden 与绑定隔离验收；
+   barrier/shared memory 不在本轮范围，隔离 GPU CI 缺失，M3 仍未完成。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

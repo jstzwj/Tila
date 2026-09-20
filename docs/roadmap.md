@@ -6,6 +6,9 @@
 
 详细任务、ADR 和退出标准：[../plan.md](../plan.md)
 
+2026-09-20：暂缓 M4-05d 及功能扩展，优先完成 [C0 正确性收口](correctness-closure.md)
+和 [ADR-020](adr/020-correctness-closure.md) 的已知反例修复、Safe 规则审计与跨层验收。
+
 本文只说明里程碑顺序、能力归属和阶段边界。具体能力是否已经可用，以
 `status.md` 为准；详细实施内容以 `plan.md` 为准。旧文档使用的
 “Phase 0–3”编号不再作为当前计划术语。
@@ -34,7 +37,7 @@
 | M1 | 已完成 | 核心语言与内存模型定型 | Ptr/Buffer/RegionId/Extent、refinement 和 intrinsic registry 定型；[退出审计通过](m1-exit-audit.md) |
 | M2 | 已完成 | CPU 正确性与静态证明闭环 | M2-01 至 M2-08 完成；证明、数据流、性质审计、explain/常量接口与固定 GPU 对照已落地，未验证范围见 status.md |
 | M3 | 进行中 | Triton/CUDA 后端闭环 | M3-06 审计后已取得 CPU 托管首次成功并补测 dtype 矩阵；自动 GPU CI 缺失，结论仍 NOT READY；未测形状/架构不作承诺 |
-| M4 | 基础 IR、where 检查与最小 atomic 已实现 | Effect、Atomic、Race、Uniformity | M4-01/02 与 M4-03b/c CPU/GPU 已实现；race/uniformity 暂缓，整个 M4 未完成 |
+| M4 | 基础 IR、where/atomic 与 Race 子集已实现 | Effect、Atomic、Race、Uniformity | Race 子集与门禁、M4-05b/c uniformity 分析与可选审计已实现；同步消费未实现，整个 M4 未完成 |
 | M5 | 计划中 | 泛型、特化与 Target Capability | TypeVar、capability、target database、完整 FP8 支持 |
 | M6 | 计划中 | 优化事实、性能诊断与 Layout | hint provenance、结构性性能 warning、layout 评审 |
 
@@ -65,7 +68,9 @@ M5 的 target capability 和真实 GPU 验证完成后开放。
 | `where` eager memory diagnostics（`TILA-EFFECT-007`） | `Implemented` | M4-02：TIR/定义引用驱动，独立严格度及诊断 golden |
 | per-instruction effect IR、独立 effects 策略 | `Implemented` | M4-01/02；不包含 race/atomic/uniformity |
 | 最小 atomic_add | `Implemented` | M4-03b/c 前端/IR/CPU 与固定 RTX 3090 GPU；Global i32/u32/f32、Relaxed/GPU |
-| inter-program race、uniformity/barrier | `Designed` | **M4** |
+| race analysis | `Partial` | **M4**；M4-04b/c 子集、同次 store lane、启动策略与绑定隔离已实现；M4-04d 限定覆盖退出审计通过，见 [审计记录](race-exit-audit.md) |
+| uniformity analysis | `Partial` | **M4**；[ADR-019](adr/019-minimal-uniformity.md) Accepted，M4-05b/c 内部分析/verifier、可选输出/golden/隔离 |
+| barrier/shared memory | `Designed` | **M4**；无同步 API，物理 scope/消费者另立契约 |
 
 当前实现不是“完全不检查 effect”，也不是“完整 effect system”：它具有汇总和
 一项 eager-where 检查；完整 effect/并发语义统一归 M4。
@@ -208,7 +213,8 @@ Implemented intrinsic 的 Triton lowering 可真实编译；任何 hint 都能�
 - `where` eager-effect 使用独立策略开关；
 - 从 `atomic_add` 开始加入类型化 order/scope 和 target 检查；
 - 对 affine program-id 地址实现安全/冲突/Unknown race 分级；
-- 定义 Program/CTA/Warp/Varying uniformity lattice，并服务 barrier。
+- 按 ADR-019 定义 LaunchUniform/ProgramUniform/Varying/Unknown，分离值与控制；
+  CTA/Warp 参与映射与 barrier 消费另立契约，不能将逻辑 program 保证直接当作物理同步保证。
 
 退出标准：effect 使用 RegionId；atomic、race、uniformity 有独立错误码、策略和
 CPU/GPU 测试；复杂无法判定情形保持保守 warning。

@@ -18,7 +18,7 @@ from .errors import TilaError
 from .facts import (ProofResult, fast_obligation, PROVEN_SAFE, PROVEN_UNSAFE,
                     UNKNOWN, EXEMPTED)
 
-ENCODING_VERSION = 3
+ENCODING_VERSION = 4  # signed canonical keys and soundness audit
 _CACHE = OrderedDict()
 _LOCK = RLock()  # Z3's default context and the process cache are shared.
 

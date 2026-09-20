@@ -13,8 +13,13 @@ f16 dot 舍入回归与全部 15 个官方示例 golden。本轮 ADR 文档不�
 
 后续 M4-01b 提交 `f4add240605366a6da2e8ae3bb9253a9a438cc67` 的
 [托管运行](https://github.com/jstzwj/Tila/actions/runs/35454545217)通过 **953 项、零跳过**，
-JUnit 附件已下载核实。M4-03c 工作区本地 1040 项通过，另见 [atomic GPU](atomic-gpu.md)，
+JUnit 附件已下载核实。M4-05c 工作区本地 1191 项通过，另见 [Uniformity 审计](uniformity-audit.md)，
 不将旧提交的 run 视为当前修改的远端验收。
+
+C0 [正确性收口](correctness-closure.md)当前本地通过 1217 项（新增 26 项专项），
+包括异号 mask 诊断 golden；本轮尚未取得对应的托管 CPU run。
+
+工作流已增加 Race 枚举记录和失败重放 JSON 的附件路径；本轮配置尚待远端运行验证。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为

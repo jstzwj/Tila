@@ -245,6 +245,9 @@ if pid == 0:            # pid : i32 → runtime if
 - **static-if 的合并规则**：两分支同名变量类型相同 → 正常合并；
   类型不同 → 变量成为 static-variant，**使用点**报 TILA-TYPE-020
   （类型依赖 Const 特化值）；仅单分支定义 → 使用点报 TILA-TYPE-023。
+  shape 相同也是必要条件：即使两侧维度都只依赖 Const，也不能选一侧作为代表类型。
+  不同形状的消费须移入对应分支；原有 Const deferred 等式仍在特化期检查。
+  嵌套分支沿任一活跃前驱保留 variant，见 [ADR-020](adr/020-correctness-closure.md)。
 - 两者在 Tila HIR 中是**不同节点**（StaticIf / If），lowering 路径
   不同，不存在"碰巧都行"的灰色地带。
 
@@ -257,6 +260,8 @@ M2-01 已按 [ADR-007](adr/007-integer-semantics.md) 固定整数语义：runtim
 余数为 0。移位量须在位宽范围内；float→int 必须有限且向零截断后可表示。
 非法或无法验证的运算定义域报 `TILA-NUM-001`。shape/grid/stride 当前仍有
 i32 范围限制，Buffer 地址线性化与循环内部步进使用 i64。
+Ptr 每步偏移与累计偏移的字节值也须可表示为 signed i64，每次启动验证；
+CPU 不继承偏移 tile 的窄整数回绕，Triton 对每步偏移显式转换为 i64。
 
 索引的数学推理必须逐个通过中间运算无溢出门禁；普通数据算术保留回绕语义，
 不能继承未经证明的数学等价/contiguous 事实。当前使用保守区间、每次 launch

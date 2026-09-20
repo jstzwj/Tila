@@ -1,0 +1,46 @@
+kernel @signed_mask — audit explain v1
+audit format: stable sections; raw SMT-LIB is opt-in
+  consts: (none)
+  note: grid facts are launch-time contracts and are not registered here; obligations relying on the cdiv tactic may prove (SafeUnderContract) at launch
+parameters:
+  x : Buffer[i32, (4,), WriteOnly, UnknownAlignment]
+  x_stride0 : i32
+types:
+  i : Block[i32, (4)]
+  x : Buffer[i32, (4,), WriteOnly, UnknownAlignment]
+  x_stride0 : i32
+facts:
+  __lane1 ∈ [0, 4)
+  nonneg symbols: __lane1
+obligations:
+  - store[x] axis 0: 0 <= 2*__lane1 < 4
+      path: true
+      mask: mapped(-2*__lane1 < 4)
+      conclusion: Unknown (Unknown)
+      state: Unknown
+      source locations: line 4
+      trust sources:
+        - StaticFact: integer encoding and access-point intervals
+        - StaticFact line 4: comparison
+      proof route:
+        - no upper-bound predicate `2*__lane1 < 4` in scope (fact set: 0 pred(s); access-point snapshot: 0; entailed DAG atoms: 1); numeric interval not decisive (coord ∈ [0, 6], bound ∈ [4, 4]); no matching grid fact (grid facts are launch-time contracts — not available here)
+      counterexample:
+        classification: candidate only; reachability unverified
+        bindings: omitted (use --show-witness; model choice is not stable)
+      unknown/pending:
+        reason: candidate counterexample; concrete reachability unverified
+      proof cache: transparent (use --show-cache for per-call telemetry)
+      SMT-LIB replay: available with --show-query (omitted from stable audit)
+      fix:
+        provide valid lower/upper bounds; inspect the candidate or replay query
+hints:
+  max_contiguous(i, 4)
+    dependency: StaticFact at line 3: structural contiguous span; integer launch guards required
+effects:
+  Write[BufferRegion[0:x]]
+aliases:
+  (none)
+warnings:
+  (none)
+notes:
+  (none)

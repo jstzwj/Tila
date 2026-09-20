@@ -63,10 +63,12 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | `TILA-MEM` | 001–006、008 | memory capability/offset/alignment；008 为 atomic 自然对齐/布局 |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
 | `TILA-EFFECT` | 007、008 | where 急切读取（独立 off/warn/error）；非法 effects 策略 |
+| `TILA-RACE` | 001–003 | 确认冲突、Unknown（按策略 warning/error）、非法策略/访问对预算 |
 | `TILA-TARGET` | 004–012 | backend/target、launch options、device/TIR 门禁、编译/加载失败与硬资源超限；012 为不支持的 atomic 配置拒绝 |
 | `TILA-INTERNAL` | 001 | CLI 内部故障封装 |
 
-尚未实现的 `TILA-RACE`、`TILA-UNIFORM` 只存在于未来设计，不进入活动 registry；实际实现前
+尚未实现的 `TILA-UNIFORM` 仅见 [ADR-019](adr/019-minimal-uniformity.md) 提案，
+不进入活动 registry；实际实现前
 不得以占位代码伪装成当前能力。
 
 ## Const 诊断约定

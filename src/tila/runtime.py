@@ -930,8 +930,10 @@ class _Launcher:
                     [f"    passed: {scalar_vals[s.name]}",
                      f"    shape:   {dim_vals[s.name]}"])
             v = scalar_vals[s.name]
-            # 维/步长等 int 标量维持 int 语境；float 标量不得截断
-            # （ti.f32 | ti.Positive 的 0.125 不应被 int() 成 0）。
+            # Refinements constrain the typed ABI value, not its host source.
+            # Store that same value for grid binding, analysis and both backends.
+            if s.dtype.is_float:
+                scalar_vals[s.name] = v = numeric.scalar_float(v, s.dtype)
             cv = int(v) if getattr(s.dtype, "is_int", True) else v
             for r in s.refined:
                 if not r.check(cv):

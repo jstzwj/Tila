@@ -274,6 +274,17 @@ M2-06 的稳定文本契约见 [audit explain v1](explain-audit.md)：默认固�
 信任/反例分类；`--show-witness`、`--show-cache`、`--show-query` 分别开启具体
 见证、缓存遥测和原始 SMT-LIB。关键 bounds 错误同样支持这些附件。
 
+M4-04c 增加独立 `--race off|warn|error`（优先于 `TILA_RACE`，默认 warn）。
+确认冲突在执行前拒绝，Unknown 默认告警，error 模式也拒绝 Unknown；off 明确记录
+未检查，不关闭 bounds/target/atomic 合法性门禁。`--show-races` / Python
+`explain(show_races=True)` 显示 `tila.race-details.v1`，可组合上述三个附件选项。
+无实际 launch 绑定时保持 pending；详细范围见 [Race 启动验收](race-launch-audit.md)。
+
+M4-05c 增加 `--show-uniformity` / Python `explain(show_uniformity=True)`，
+用于 explain 或 check --explain 的可选 `tila.uniformity-details.v1` 输出。
+从当前 TIR/Const 重算，不使用 launch 绑定，无缓存、无同步消费；默认输出不变。
+值层级、控制参与、Unknown 与预算边界见 [Uniformity 审计](uniformity-audit.md)。
+
 完整活动错误码、phase/severity 元数据和维护门禁见
 [`diagnostics.md`](diagnostics.md)。机器事实来源是 `DIAGNOSTIC_REGISTRY`。
 

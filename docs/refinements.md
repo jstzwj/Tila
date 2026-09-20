@@ -42,6 +42,10 @@ x % 16 == 0                整除事实
 运行期值的区间精化只能以 launch 契约或 `tila.assume` 引入，
 不能凭空声明后未经校验就使用（§5）。
 
+浮点标量入口先按声明 dtype 舍入，再检查精化；例如 `f32 | Positive` 不能接受
+转换为零的 `1e-50`。有限源的转换溢出拒绝，下溢零是否允许取决于精化。
+CPU、GPU 和 launch 分析使用同一舍入值，见 [ADR-020](adr/020-correctness-closure.md)。
+
 ### 2.3 作用于 Ptr / Buffer
 
 ```text

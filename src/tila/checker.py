@@ -467,6 +467,8 @@ class Checker:
     @staticmethod
     def _join_value_flags(m, a, b):
         m.maybe_undefined = a.maybe_undefined or b.maybe_undefined
+        # A nested variant on either predecessor must survive outer merges.
+        m.static_variant = a.static_variant or b.static_variant
         if not (type(a.lit) is type(b.lit) and a.lit == b.lit):
             m.lit = None
         m.is_const = (a.is_const and b.is_const and
@@ -501,10 +503,9 @@ class Checker:
                         # arithmetic. Int equality is exact here and avoids an
                         # unnecessary additional BV2Int boundary in SMT.
                         self.value_types.pop(m.expr.name, None)
-                m.contiguous_span = (va.contiguous_span
-                                     if canon(va.contiguous_span) ==
-                                     canon(vb.contiguous_span)
-                                     else None) if va.contiguous_span else None
+                m.contiguous_span = va.contiguous_span if (
+                    va.contiguous_span is not None and vb.contiguous_span is not None
+                    and equal(va.contiguous_span, vb.contiguous_span)) else None
                 out[name] = m
             elif va is not None or vb is not None:
                 v = va or vb
@@ -531,9 +532,8 @@ class Checker:
     def _static_if(self, s: If, cv: VarInfo, out):
         """static-deferred if：条件纯由 Const 参数构成，装饰期不可定值。
 
-        两分支在克隆作用域内独立检查（同 runtime-if），但合并放宽：
-        Const 相关的形状差异允许（实际执行分支特化期唯一），dtype/rank/
-        运行期形状差异 → static-variant（名字可存在，使用点报错）。
+        两分支在克隆作用域内独立检查（同 runtime-if）。所有类型差异
+        （包括 Const 形状）均成为 static-variant，不能用于分支外运算。
         TStaticIf 同时保留两分支，特化期由 Const 数值定值。
         """
         self.tk.notes.append(f"line {s.loc.line}: static-if on Const "
@@ -564,10 +564,9 @@ class Checker:
         return self._terminated_join(s, then_term, else_term)
 
     def _merge_static_branches(self, loc, before, a, b, condition):
-        """static-if 分支合并（放宽版）。
+        """static-if 分支合并（保守类型保持）。
 
-        - 两侧同类型（_same_type）或"特化相容"（_static_same_type：
-          dtype/rank 相同且逐维 equal 或两侧均为纯 Const 符号式）→ 正常
+        - 两侧同类型（_same_type，包括逐维相等的 shape）→ 正常
           合并（谓词按条件选择保存、expr 仅 canon 相等保留，否则换保守
           代理符号——不携带区间事实，只支撑下游谓词直证）。
         - 两侧类型不相容 → static-variant：名字存在，使用点 TILA-TYPE-020。
@@ -578,9 +577,8 @@ class Checker:
         for name in sorted(set(before) | set(a) | set(b)):
             va, vb, v0 = a.get(name), b.get(name), before.get(name)
             if va is not None and vb is not None:
-                if self._same_type(va.vtype, vb.vtype) or \
-                        self._static_same_type(va.vtype, vb.vtype):
-                    m = va.clone()     # 代表类型取 then 侧（特化期分支唯一）
+                if self._same_type(va.vtype, vb.vtype):
+                    m = va.clone()
                     self._join_value_flags(m, va, vb)
                     m.predicate = P.select(condition, va.predicate, vb.predicate)
                     if va.expr is not None and vb.expr is not None:
@@ -596,11 +594,9 @@ class Checker:
                                 self.lane_axes[m.expr.name] = tuple(range(-len(shape_of(m)), 0))
                     else:
                         m.expr = None
-                    m.contiguous_span = (va.contiguous_span
-                                         if canon(va.contiguous_span) ==
-                                         canon(vb.contiguous_span)
-                                         else None) if va.contiguous_span \
-                        else None
+                    m.contiguous_span = va.contiguous_span if (
+                        va.contiguous_span is not None and vb.contiguous_span is not None
+                        and equal(va.contiguous_span, vb.contiguous_span)) else None
                     if not (type(va.lit) is type(vb.lit) and
                             va.lit == vb.lit):
                         m.lit = None       # 分支相关字面量不可作为已知值
@@ -618,8 +614,7 @@ class Checker:
                     m.maybe_undefined = True
                     out[name] = m
                 else:
-                    if self._same_type(v.vtype, v0.vtype) or \
-                            self._static_same_type(v.vtype, v0.vtype):
+                    if self._same_type(v.vtype, v0.vtype):
                         m = v0.clone()
                         m.expr, m.predicate, m.contiguous_span = None, P.unknown(shape=shape_of(m)), None
                         out[name] = m
@@ -632,32 +627,6 @@ class Checker:
             else:
                 out[name] = v0.clone()
         return out
-
-    def _static_same_type(self, a, b) -> bool:
-        """static-if 特化相容类型判定：dtype/元素与 rank 相同，且逐维
-        equal 或两侧维均为纯 Const 符号式（特化期各自 concrete，实际
-        执行的分支唯一——形状随 Const 特化而定，由后端在 trace/解释时
-        以具体形状强制）。运行期符号维（N 等）不享受放宽。"""
-        const_names = {c.name for c in self.tk.consts}
-        if isinstance(a, TY.BlockT) and isinstance(b, TY.BlockT):
-            if not self._same_type(a.elem, b.elem) or \
-                    len(a.dims) != len(b.dims):
-                return False
-            return all(self._dim_compat(x, y, const_names)
-                       for x, y in zip(a.dims, b.dims))
-        if isinstance(a, TY.MaskT) and isinstance(b, TY.MaskT):
-            return len(a.dims) == len(b.dims) and \
-                all(self._dim_compat(x, y, const_names)
-                    for x, y in zip(a.dims, b.dims))
-        if isinstance(a, TY.PtrT) and isinstance(b, TY.PtrT):
-            return self._same_type(a, b)
-        return type(a) is type(b) and TY.describe(a) == TY.describe(b)
-
-    @staticmethod
-    def _dim_compat(x, y, const_names) -> bool:
-        if equal(x, y):
-            return True
-        return free_syms(x) <= const_names and free_syms(y) <= const_names
 
     def _static_cond_syms(self, e):
         """static-deferred 条件判定。
@@ -1112,7 +1081,7 @@ class Checker:
                     [f"    variable '{e.id}'",
                      f"    then: {TY.describe(v.static_variant[0])}",
                      f"    else: {TY.describe(v.static_variant[1])}"],
-                    ["static-if 两分支给出了不同类型：对齐 dtype/rank，"
+                    ["static-if 两分支给出了不同类型：对齐 dtype/rank/shape，"
                      "或把对该名字的使用移进分支内"])
             if v.maybe_undefined:
                 raise TilaError(

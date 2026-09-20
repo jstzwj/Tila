@@ -4,11 +4,13 @@
 前置阅读：`refinements.md`（事实来源与传播）、`type-system.md` §9
 （Buffer/Ptr 访问形式）。
 
-边界检查是 Tila 的杀手级特性：**每个内存访问都必须被证明在界内**，
+默认 strict 模式要求每个未被 unsafe 豁免的内存访问获得边界证明，
 证明的输入是类型系统的 shape 声明与 refinement 事实。M2 采用
 [ADR-011](adr/011-smt-proof-and-trust.md) 的 SMT 默认引擎：数学整数与
 有限位宽整数分别编码。当前已使用不可变谓词 DAG、ProofResult 与来源集合，
 默认 Z3 配合区间/直接匹配/grid 小型捷径；实现边界见 [smt-prover.md](smt-prover.md)。
+结论依赖合法绑定及数值/地址启动门禁；不蕴含一般无竞争、所有权、同步正确或
+结果确定性。Safe 规则的明确前提和独立对照见[正确性审计](correctness-closure.md)。
 
 ---
 

@@ -380,9 +380,7 @@ class Interp:
         if isinstance(x, T.TPAdd):
             name, off = self._ptr_value(x.ptr, env, pids)
             add = self.o(x.offset, env, pids)
-            return ("ptr", name, np.asarray(off) + np.asarray(add)
-                    if isinstance(off, np.ndarray) or isinstance(add, np.ndarray)
-                    else off + add)
+            return ("ptr", name, numeric.pointer_add(off, add, self.buffers[name][0].itemsize))
         raise RuntimeError(f"?{x!r}")
 
     def _ptr_value(self, node, env, pids):

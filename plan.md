@@ -4,9 +4,22 @@
 
 后续：2026-09-20 f4add24 的托管 CPU CI 已通过 953 项；M4-01c/d 已从 TIR 派生
 控制流 effect 汇总、固定可选详细输出并验收绑定隔离；M4-02 已实现 where 独立效应检查。
-本地 CPU 1040/GPU 388 节点（532 案例）通过。最小 atomic_add CPU/GPU 已实现，不推进
-race/uniformity 实现，也不将 M3 标记完成。M4-03a 已冻结最小 atomic_add
+本地 CPU 1217 项通过；GPU 402 节点（546 案例）通过。最小 atomic_add CPU/GPU 已实现，
+uniformity 已有内部分析与可选输出，M3 仍未完成。M4-03a 已冻结最小 atomic_add
 设计（ADR-017）；M4-03b/c 已完成前端/IR/CPU 与固定 RTX 3090 GPU 验收。
+M4-03 已提交为 `eb0867f`（尚未推送）；M4-04b 已冻结 ADR-018 为 Accepted，
+M4-04c 已接入独立 Race 策略、启动门禁、同次 tile store lane 检查、稳定输出与绑定隔离。
+M4-04d 已完成 819 次小域枚举/变形分析及限定覆盖退出审计。
+M4-05b/c 已冻结 ADR-019，实现内部值/控制分析、可选输出及绑定隔离。
+2026-09-20 暂缓 M4-05d 及下一轮功能扩展，优先执行 [C0 正确性收口](docs/correctness-closure.md)：
+
+1. C0-01：修复负号规范化导致的错误 Safe、按实际 ABI 值检查入口精化；
+2. C0-02：冻结 ADR-020，收紧静态分支类型合并，统一 Ptr checked i64 地址语义；
+3. C0-03：逐条审计 Safe 规则，补独立枚举/SMT、CPU/GPU 对照及门禁测试；
+4. C0-04：全量回归、golden、固定 GPU 严格复验，登记证据与兼容性变化后再评审恢复扩展。
+
+C0-01..04 本地限定验收已完成；证据与剩余边界见上述审计。功能扩展保持暂停，
+恢复前先评审本次语义收紧和新增反例；当前修改尚无对应远端 CPU CI。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -53,7 +66,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前本地测试基线：1040 passed、零 skipped；f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 388 节点/532 案例通过，含 88 项 atomic；当前修改需单独取得远端 CI 证据。
+- 当前本地测试基线：1217 passed、零 skipped；含 88 项 Race、64 项 uniformity 及 26 项正确性专项，f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 402 节点/546 案例通过，含 7 项真实 CUDA Race 门禁和 7 项正确性对照；不作为 uniformity 同步证据；race=warn 允许明确 Unknown，不表示全部案例无竞争；当前修改需单独取得远端 CI 证据。
 
 ### 2.2 当前主要缺口
 
@@ -541,6 +554,12 @@ Buffer/Ptr 两种寻址，返回旧值，masked-off 返回同 dtype 零。重复
 
 ### M4.4 Race 分析
 
+[ADR-018](docs/adr/018-minimal-race-analysis.md) 已 Accepted，M4-04b/c 精确查询与启动门禁已实现。
+以 Effect IR 派生动态事件对，按实际字节区间及独立 alias 事实判断；SAT 只有在
+有效访问共同可达时才确认冲突。首版跨 program 仿射子集，同 program lane 覆盖
+单独列明，不能由跨 program 通过声称全局无竞争。同次 store 重复 lane 可确认；
+未知同 program 顺序保留 Unknown。独立 off/warn/error 默认 warn，确认冲突始终拒绝（off 不检查）。
+
 分三个等级：
 
 1. 可证明不相交：无诊断；
@@ -549,14 +568,16 @@ Buffer/Ptr 两种寻址，返回旧值，masked-off 返回同 dtype 零。重复
 
 第一版只分析 affine program-id 地址；不要为了覆盖复杂 pattern 而牺牲 soundness。
 兼容 atomic 之间允许同址更新，但 Atomic 与普通访存的冲突不能自动豁免；
-atomic 自身合法性始终检查，具体 race 算法另行设计。
+atomic 自身合法性始终检查；实施范围与 Unknown 边界见 [Race 分析](docs/race-analysis.md)。
 
 ### M4.5 Uniformity
 
-- 定义 Program/CTA/Warp/Varying lattice；
-- 先服务 barrier 和 future shared memory；
-- 条件分支中的 barrier 必须满足所需 uniformity；
-- 与 race 分析共享 program/lane 依赖信息，不再建立第二套表达式系统。
+- [ADR-019](docs/adr/019-minimal-uniformity.md) 已 Accepted；M4-05b 内部分析与 verifier 已实现，整体 Partial；
+- 首版区分 LaunchUniform/ProgramUniform/Varying/Unknown，逻辑元素不等同物理线程；
+- 分离值一致性与控制参与、共同迭代和提前退出；复用 ValueRef、Predicate DAG 和 Effect IR；
+- 先提供内部分析与可选审计，未知情况保守，不通过 assume/Race Safe 升级；
+- 未来同步消费者同时校验值/控制要求与 target 映射，不能用审计策略关闭硬性门禁；
+- barrier/shared memory、CTA/Warp 物理 scope 和优化消费另立契约，不在 M4-05a 内实现。
 
 ### M4 退出标准
 
@@ -900,6 +921,9 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | [ADR-015](docs/adr/015-rounded-typed-constants.md) | Accepted | 显式舍入常量 | M2-07d 已完成 | 目标 dtype、直接 RNE、规范位模式；拒绝非有限值及溢出 |
 | [ADR-016](docs/adr/016-instruction-effect-ir.md) | Accepted | 逐指令 Effect IR 与派生汇总 | M4-01b/c/d 已实现 | 局部元数据、派生 path/mask/loop、可选详细输出与隔离验收已落地；不涉及 atomic/race/uniformity 实现 |
 | [ADR-017](docs/adr/017-minimal-atomic-add.md) | Accepted | 最小 atomic_add | M4-03b/c 完成 | CPU 参考与固定 RTX 3090 GPU 并发验收分别取证，见 docs/atomic-gpu.md |
+| [ADR-018](docs/adr/018-minimal-race-analysis.md) | Accepted | 最小 Race 分析 | M4-04b/c 完成 | 精确子集、同次 store lane、启动策略、诊断与缓存隔离；未覆盖顺序/数据流保持 Unknown |
+| [ADR-019](docs/adr/019-minimal-uniformity.md) | Accepted | 最小 Uniformity | M4-05b/c 完成 | 值/控制分析与 verifier，可选详细输出/golden/隔离；同步消费未接入，不引入同步 API |
+| [ADR-020](docs/adr/020-correctness-closure.md) | Accepted | 正确性收口 | C0-01..04 完成 | 保真符号、实际 ABI 精化、保守 shape 合并、checked i64 指针域及 Safe 规则审计 |
 
 每份 ADR 至少回答：
 
@@ -962,6 +986,18 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-03a | DONE | 最小 Atomic 设计 ADR | M4-01/02 | ADR-017 Accepted；固定签名、旧值/mask/重复地址、dtype/order/scope、AtomicInfo、explain v2 迁移及 CPU/GPU 验收契约；无运行时实现 |
 | M4-03b | DONE | Atomic 前端、Effect IR 与 CPU 参考 | ADR-017 | enum/签名、TAtomicAdd/AtomicInfo、verifier/bounds/summary/where、explain v2、36 项 CPU 专项及 golden；GPU 路径以 TARGET-012 明确拒绝；见 docs/atomic-cpu.md |
 | M4-03c | DONE | Atomic GPU lowering 与严格验收 | M4-03b | 固定 RTX 3090、88 项 atomic 专项；重复地址/旧值、f32 合法历史/FTZ/误差界、短路/嵌套求值、门禁与缓存、source golden 和重放；CPU 1040、GPU 388 节点/532 案例通过；不等于完成 M3 持续 GPU CI |
+| M4-04a | DONE | 最小 Race 分析设计 ADR | M4-01..03 | ADR-018 Proposed；明确跨 program/同 program 覆盖、字节重叠、alias/路径共同可达性、策略/预算及反例；不含运行时实现 |
+| M4-04b | DONE | Race 精确子集与成对查询 | ADR-018 Accepted | 内部 analyze_races；字节地址/动态身份、跨 program/固定循环、共同可达 witness、预算与 Unknown；39 项专项、CPU 1079；无缓存，不接 launch 策略；见 docs/race-analysis.md |
+| M4-04c | DONE | Race 诊断与绑定隔离 | M4-04b | 同次 store lane、off/warn/error、RACE-001..003、race-details.v1、绑定/缓存隔离及3份 golden；新增31 CPU/7 GPU专项，CPU1110、GPU395/539通过；详见 docs/race-launch-audit.md |
+| M4-04d | DONE | Race 差异审计 | M4-04b/c | 新增18项专项、747个不同输入/819次分析；修复布尔 mask 取反编码，故障注入/单输入重放；CPU1128、GPU395/539通过；docs/race-exit-audit.md 限定覆盖收口，不代替 uniformity 或持续 GPU CI |
+| M4-05a | DONE | 最小 Uniformity 设计 ADR | M4-01/04、ADR-019 Proposed | 四层级、值/控制分离、定义边复用、传播规则与正反例、消费/诊断边界；仅文档，无运行时功能 |
+| M4-05b | DONE | Uniformity 评审冻结与内部分析 | ADR-019 Accepted | 内部值/控制摘要、定义入边、固定点/预算、重算 verifier；43 项专项、CPU1170通过；见 docs/uniformity-analysis.md；无同步 API/公共策略 |
+| M4-05c | DONE | Uniformity 详细输出与隔离 | M4-05b | show-uniformity、details.v1、3份golden、21项专项、CPU1191通过；Const/预算/历史launch/缓存隔离；逻辑消费fixture不等于同步API；见 docs/uniformity-audit.md |
+| M4-05d | TODO | Uniformity 小域与退出审计（暂缓） | C0 评审、M4-05b/c | 枚举/变形、故障注入；区分内部分析与真实 target 消费证据，不代替整个 M4 或 M3 验收 |
+| C0-01 | DONE | 错误 Safe 与入口精化 | 已确认反例 | 保真符号规范键；实际 ABI 舍入后检查精化；保留 numpy.float64 宿主兼容 |
+| C0-02 | DONE | 静态类型与地址语义 | ADR-020 Accepted | 保守 shape 合并、嵌套 variant 传播、checked i64 指针位移及每步启动门禁 |
+| C0-03 | DONE | Safe 规则与跨层审计 | C0-01/02 | 8 类出口清单；715 表达式/57,915 次求值、450 组直接/区间枚举、独立 SMT 蕴含、缓存隔离 |
+| C0-04 | DONE | 限定收口验收 | C0-03 | CPU1217、GPU402节点/546案例全部通过且零跳过；新增 explain golden；详见 docs/correctness-closure.md，不代表完整编译器形式化证明 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

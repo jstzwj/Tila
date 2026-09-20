@@ -6,10 +6,22 @@
 
 对应版本：`0.3.0.dev0` 开发基线（未发布正式 0.3.0；不回移 Const bool 至 0.2.x）
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 1040 passed、零 skipped
+2026-09-20 优先事项改为 [C0 正确性收口](correctness-closure.md)，暂缓功能扩展。
+已知错误 Safe、实际 ABI 精化、静态分支 shape 合并与 Ptr 位移域按 ADR-020 修复；
+本轮完整验收以该审计的新记录为准；旧里程碑数量仅记录历史覆盖。
+
+验证基线：`PYTHONPATH=src python -m pytest -q` = 1217 passed、零 skipped
+（C0 新增 26 项正确性专项；Safe 规则审计和实际 CPU/GPU 对照通过）。
+
+M4-04d [Race 退出审计](race-exit-audit.md)已完成：88 项 Race 专项，新增小域枚举、
+变形、故障注入和重放；限定子集验收完成，整体 Race 仍 Partial。
+M4-05b 已冻结 [ADR-019](adr/019-minimal-uniformity.md) 为 Accepted，并实现
+[内部 uniformity 分析](uniformity-analysis.md)：值/控制分离、定义边/循环固定点、
+独立预算与 verifier。M4-05c 已增加[可选详细输出](uniformity-audit.md)、golden 与绑定隔离，
+无策略 env、活动 UNIFORM 错误码或同步消费。
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
-当前覆盖 388 个 GPU 测试节点/532 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 402 个 GPU 测试节点/546 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
 M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)已完成：
@@ -23,7 +35,7 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 [ADR-016](adr/016-instruction-effect-ir.md)已 Accepted，[M4-01b](effect-ir.md)已有
 逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
 上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
-已实现可选详细输出与缓存／绑定隔离验收，并发检查尚未实现。
+已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
 前置提交 f4add24 的托管 CPU CI 已通过 953 项并核实附件；当前修改仍需独立远端验收。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
@@ -363,8 +375,9 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | `where` eager memory diagnostics | `Implemented` | Check / Specialize / Launch | M4-02：Effect IR/定义引用驱动、独立 off/warn/error、site/源位置及修复建议；静态提示不声称必然访存 |
 | alias 声明/运行时 alias 检查 | `Designed` | — | `tila.alias`、`--check-alias` 尚不存在 |
 | atomic_add | `Implemented` | Check / CPU / Triton / Launch | M4-03b/c：Global i32/u32/f32、Relaxed/GPU、标量/一维 tile；Effect IR/verifier/summary/where/explain v2；GPU 仅固定 RTX 3090，见 atomic-gpu.md |
-| inter-program race analysis | `Designed` | — | 尚未实现 |
-| uniformity/barrier | `Designed` | — | 尚未实现 |
+| race analysis | `Partial` | CLI / Launch | M4-04b/c：跨 program 与同次 store 重复 lane、独立策略/启动拒绝、详细输出及绑定隔离；未覆盖顺序/数据流保持 Unknown，默认 warn；见 race-launch-audit.md |
+| uniformity analysis | `Partial` | Internal TIR / CLI | M4-05b/c ADR-019 Accepted；内部分析/verifier、可选详细输出与隔离已实现；同步消费未接入 |
+| barrier/shared memory | `Designed` | — | 无 API 或物理参与者映射；不能将逻辑一致性当作同步保证 |
 | shared-memory typestate | `Deferred` | — | 长期研究项 |
 
 ---
@@ -377,13 +390,14 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | 统一诊断渲染 | `Implemented` | CLI / Runtime | error/launch error/warning 均输出 code、location、phase、details 和 fix；未知内部异常仅在 `TILA_DEBUG=1` 暴露 traceback |
 | `TILA-SYN/TYPE/SHAPE/CONST/MEM/BOUNDS/EFFECT` | `Implemented` | Check / Launch | 当前错误码目录见 `docs/diagnostics.md`；兼容性变更必须同步 registry 与测试 |
 | `TILA-TARGET` 完整诊断族 | `Partial` | Launch | 缺 triton/CUDA tensor 有诊断；完整硬件 capability 尚无实现 |
-| `TILA-RACE/UNIFORM` | `Designed` | — | 错误码只存在于设计文档 |
+| `TILA-RACE` | `Implemented` | Host / Specialize / Launch | 001 确认冲突、002 Unknown、003 非法配置；三个 golden 与真实 CUDA 未启动验证 |
+| `TILA-UNIFORM` | `Designed` | — | 错误码只存在于设计文档 |
 | `explain` 类型/事实/effect/obligation | `Implemented` | CLI | audit explain v1 固定章节/状态字段；CLI/诊断 golden、只读与跨 hash seed 回归 |
 | proof trace | `Partial` | CLI | fast/SMT 路线与信任来源统一展示，原始查询可选重放；非完整 Z3 proof/minimal core |
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 388 节点/532 案例，含 88 项 atomic；逐 intrinsic 证据见 gpu-capabilities.json，隔离 GPU CI 待建立，未覆盖组合不作承诺 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 402 节点/546 案例，含 88 项 atomic、7 项 Race 门禁、7 项正确性对照；race=warn 允许明确 Unknown，未宣称所有案例无竞争；隔离 GPU CI 待建立 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

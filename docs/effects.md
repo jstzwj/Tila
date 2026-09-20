@@ -6,7 +6,8 @@ Read/Write 汇总及 where 急切读取检查，并发检查尚未完成。
 [M4-01b](effect-ir.md)实现局部访问身份、Read/Write/RegionId、定义引用与 verifier。
 [M4-01c](effect-summary.md)已实现 mask/path/loop 与 kernel summary 派生。
 [M4-02 / ADR-010](adr/010-effect-diagnostic-policy.md)已实现独立 effects 策略。
-M4-03b/c 已实现 atomic_add 的 CPU 参考、AtomicInfo 与限定 GPU lowering；race、uniformity 尚未实现。
+M4-03b/c 已实现 atomic_add；M4-04b/c 已接入 Race 精确子集与启动门禁；
+M4-05b/c 已实现内部 uniformity 分析与可选详细输出，尚无同步消费。
 前置阅读：`design-principles.md` §2（第四支柱）、`type-system.md` §8–§9
 （Region 概念）。
 
@@ -120,7 +121,13 @@ Python 示例：`TILA_EFFECTS=error python example.py`；CLI 示例：
 
 ---
 
-## 4. Inter-program 竞争检测（v1）
+## 4. Race 检查（精确子集与启动门禁已实现）
+
+详细契约见 [ADR-018](adr/018-minimal-race-analysis.md)（Accepted）；M4-04b/c 已实现
+[精确子集和启动门禁](race-launch-audit.md)。`TILA_RACE`/`--race` 独立控制策略，
+默认 warn；`--show-races` 展示稳定详细输出，模型/查询/缓存遥测另行显式开启。
+分析必须覆盖 Read/Write 与 Atomic/普通访问对，包括单 site 自配对；不同 RegionId
+不代表 NoAlias。跨 program 通过不等于同 program 多 lane 已无竞争。
 
 SPMD 语义下，不同 program instance 并发执行同一 kernel。对每个
 `Write[R] / Atomic[R]` 效应，检查其地址表达式在 program 维度上的
@@ -129,7 +136,7 @@ SPMD 语义下，不同 program instance 并发执行同一 kernel。对每个
 ```text
 write 地址 A(pid)：
     ∀ pid1 ≠ pid2:  A(pid1) ∩ A(pid2) = ∅        → 通过
-    ∃ 静态可证的重叠（如地址与 pid 无关）         → error TILA-RACE-001
+    ∃ 共同可达、有效且无排序的冲突访问对           → error TILA-RACE-001
     无法判定                                       → warning TILA-RACE-002
 ```
 
@@ -140,8 +147,8 @@ write 地址 A(pid)：
 tila.store(out, pid * BLOCK + arange(0, BLOCK), v)
 ```
 
-地址含 `pid * BLOCK` 偏移、跨度 BLOCK——仿射不相交判定通过
-（不同 pid 的区间 `[pid*B, pid*B+B)` 互斥）✓。
+在 BLOCK 为正、lane 范围正确、中间运算无溢出且布局受支持时，预期可证明
+不同 pid 的区间 `[pid*B, pid*B+B)` 互斥；M4-04b 内部分析覆盖上述一维精确子集。
 
 ### 4.2 可证冲突
 
@@ -150,16 +157,17 @@ error[TILA-RACE-001]:
 multiple program instances may write the same location
     write address:  out + 0
     depends on program_id:  no
-consider: atomic_store / index by pid
+consider: partition addresses by pid; use atomic_add only for additive updates
 ```
 
 ### 4.3 判定域与保守性
 
-判定 = 地址表达式对 pid 的仿射依赖 + 区间推理（同一套 IndexExpr
-设施，bounds-safety.md §2）。证不出 → warning，**不**拒绝——
-未知 race 保留保守提示，确认冲突的策略待独立 ADR；兼容的原子操作之间允许
-同址更新，但 Atomic 与普通访存混用不能自动豁免。mask 依赖 pid 的 store（如
-`pid == 0` 的单写者模式）按"条件含 pid 谓词"规约处理。
+复用整数/谓词编码与独立 alias 事实，比较实际字节区间。精确子集以外保持 Unknown；
+SMT sat 但共同可达性未确认时只是候选。ADR-018 默认 warn：确认冲突报错，
+Unknown 告警；error 模式也拒绝 Unknown，off 明确记录未检查。兼容原子之间允许
+同址更新，Atomic 与普通访存不能自动豁免。`pid == 0` 可形成单写者条件，但
+不同 program 上的互补分支不构成全局互斥。同次普通 store 的重复 lane 已检查；
+不同 site 或迭代的顺序无法确认时仍 Unknown，不从相同 lane 编号推出安全。
 
 ---
 
@@ -194,35 +202,28 @@ MemoryScope := CTA | GPU | Sys
 
 ---
 
-## 6. Uniformity 阶梯（v1 起逐步启用）
+## 6. 最小 Uniformity（Partial，内部分析）
 
-```text
-Uniform[Program]   所有 program 一致（kernel 入口条件、Const 条件）
-Uniform[CTA]       block 内全部线程一致
-Uniform[Warp]      warp 内一致
-Varying            逐线程变化
-```
+[ADR-019](adr/019-minimal-uniformity.md) 已在 M4-05b 冻结为 Accepted，替换本节原先
+混用 Program/CTA/Warp 的草案。首版比较逻辑 tile 元素，不推断物理 thread 布局。
+已有[内部派生分析与 verifier](uniformity-analysis.md) 和[可选详细输出](uniformity-audit.md)。
 
-推导：只依赖 `Const[int]` 的 staged bool 条件 → 保持当前级；`program_id` 比较 →
-Uniform[Program]；lane 依赖值 → 退化到 Varying。分支合并取两侧
-下确界。
+| 层级 | 保证/来源 |
+| --- | --- |
+| LaunchUniform | 同一 launch 一致：Const、宿主按值 scalar、num_programs |
+| ProgramUniform | 单个 program 内一致：program_id；不同 program 可不同 |
+| Varying | 允许逐逻辑元素变化：arange；不是已经证明分歧 |
+| Unknown | 尚无保证：首版 load/atomic 旧值、未知数据流/布局/预算耗尽 |
 
-v1 只落一条硬规则（divergent barrier）：
+纯逐元素操作取依赖 join；值一致性与控制参与/退出状态分开记录。归约得到单一值
+也不能证明所有参与者到达归约点。分支 merge 必须包含 selector，循环出口保留
+零次路径，return 不得丢失剩余参与域；assume/Race Safe 不能升级一致性。
 
-<!-- tila-example: future; milestone=M4 -->
-```python
-if lane_id == 0:
-    tila.barrier()
-```
-
-```text
-error[TILA-UNIFORM-001]:
-barrier requires CTA-uniform control flow
-    condition:  lane_id == 0   → Uniformity = Varying
-    required:   Uniform[CTA]
-```
-
-完整阶梯（warp specialization、shared memory 一致性）属 v2+。
+未来同步消费者必须同时满足所需值和控制保证，并有 target 参与者映射契约；
+不能仅凭 ProgramUniform 就批准 CTA barrier。V/Unknown 不满足硬性门禁时拒绝，
+可选审计的 off/warn/error 不得绕过合法性检查。本阶段没有 barrier/shared memory
+API 或 UNIFORM 活动错误码；CLI 只提供 `--show-uniformity`，无策略 env。
+规则、正反例及实施拆分以 ADR-019 为准。
 
 ---
 
@@ -231,9 +232,10 @@ barrier requires CTA-uniform control flow
 | 码 | 场景 | 阶段 |
 |---|---|---|
 | TILA-EFFECT-007 | where 分支内内存效应 | v1（默认 warning） |
-| TILA-RACE-001 | 可证 inter-program 写冲突 | v1 |
-| TILA-RACE-002 | 证不出写不相交 | v1（warning） |
-| TILA-UNIFORM-001 | divergent barrier | v1 |
+| TILA-RACE-001 | 共同可达的无排序冲突访问对 | M4-04c 已实现 |
+| TILA-RACE-002 | 无法证明访问对无冲突 | M4-04c 已实现，按 race 策略 warning/error |
+| TILA-RACE-003 | 非法 race 策略/访问对预算 | M4-04c 已实现 |
+| TILA-UNIFORM-001/002/003 | 所需保证不满足/Unknown/未来配置非法 | ADR-019 仅设计，未注册 |
 | TILA-TYPE-030 | atomic 值类型不精确匹配 | v0（随 atomic 一起落） |
 
 ## 8. M4-02 本地验收（2026-09-20）

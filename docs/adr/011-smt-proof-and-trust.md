@@ -34,6 +34,11 @@ M2-03 已固定 `z3-solver==4.16.0.0` 并更新锁文件；预算、基准与实
 
 ## 查询与结果
 
+2026-09-20 [ADR-020](020-correctness-closure.md)补充统一 Safe 证明责任；逐条
+快速/SMT/缓存规则的前提与测试见[正确性审计](../correctness-closure.md)。
+精确 BitVec/BV2Int 可表示回绕后的值；只有将机器运算等同于普通数学运算时，
+才需要无溢出依据。规范化和事实构造属于可信基，不能因接入 Z3 而免于验证。
+
 对每个访问查询：`facts ∧ path ∧ mask ∧ ¬in_bounds`。
 
 | 求解结果 | Tila 解释 |
