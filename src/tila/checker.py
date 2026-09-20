@@ -287,6 +287,9 @@ class Checker:
         self.tk.sym_lo = dict(self.facts.sym_lo)
         from .effect_ir import bind_effects
         bind_effects(self.tk)
+        from .effect_policy import where_warnings, diagnostics
+        self.tk.warnings.extend(where_warnings(self.tk))
+        diagnostics(self.tk, enforce=True)
         return self.tk
 
     def stmts(self, stmts, out) -> bool:
@@ -1815,29 +1818,10 @@ class Checker:
                             "where operand shapes"),
             shape_of(b), e.loc, "where operand shapes")
         vt = TY.ScalarT(da) if sh == () and da else TY.BlockT(TY.ScalarT(da), sh)
-        # where 分支内的内存效应（effects.md §3，v0 记录为 warning）
-        for side, v in (("then", a), ("else", b)):
-            if self._contains_memop(v.tir):
-                self.tk.warnings.append(Warning_(
-                    "TILA-EFFECT-007",
-                    f"memory operation inside where '{side}' branch — "
-                    "both branches are evaluated", e.loc,
-                    [], ["改用相同谓词的 masked load/store，或 other= 缺省值"]))
         return VarInfo(vtype=vt, tir=T.TWhere(
             vt, self._operand_of(m, e.args[0], out),
             self._operand_of(a, e.args[1], out),
-            self._operand_of(b, e.args[2], out)))
-
-    def _contains_memop(self, node) -> bool:
-        if node is None:
-            return False
-        if isinstance(node, (T.TLoad, T.TStore)):
-            return True
-        for f in ("left", "right", "operand", "a", "b", "acc", "cond",
-                  "ptr", "offset"):
-            if self._contains_memop(getattr(node, f, None)):
-                return True
-        return False
+            self._operand_of(b, e.args[2], out), line=e.loc.line))
 
     def _in_dot(self, e, out):
         if len(e.args) != 2:

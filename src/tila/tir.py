@@ -192,6 +192,7 @@ class TWhere(TExpr):
     cond: TOperand
     a: TOperand
     b: TOperand
+    line: int = 0
 
 
 @dataclass

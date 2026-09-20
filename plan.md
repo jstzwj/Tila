@@ -3,7 +3,8 @@
 状态：执行计划 v2；2026-09-19 M3-06 审计与限定矩阵补测完成，CPU 托管首个 run 已通过；隔离 GPU CI 缺失，M3 仍 NOT READY
 
 后续：2026-09-20 f4add24 的托管 CPU CI 已通过 953 项；M4-01c/d 已从 TIR 派生
-控制流 effect 汇总、固定可选详细输出并验收绑定隔离，本地 CPU 984/GPU 300 节点通过。不推进
+控制流 effect 汇总、固定可选详细输出并验收绑定隔离；M4-02 已实现 where 独立效应检查。
+本地 CPU 1002/GPU 300 节点通过。不推进
 atomic/race/uniformity 实现，也不将 M3 标记完成。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
@@ -51,7 +52,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前本地测试基线：984 passed、零 skipped；f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 300 节点/444 案例通过，当前修改需单独取得远端 CI 证据。
+- 当前本地测试基线：1002 passed、零 skipped；f4add24 的 CPU 托管 run 为前置 953 项证据。GPU 严格验收 300 节点/444 案例通过，当前修改需单独取得远端 CI 证据。
 
 ### 2.2 当前主要缺口
 
@@ -514,6 +515,10 @@ SafeUnderContract 保留显示兼容；unsafe 不再伪装成 ProvenSafe。
 
 ### M4.2 `where` eager-effect 检查
 
+M4-02 已实现：[ADR-010](docs/adr/010-effect-diagnostic-policy.md) Accepted。
+检查只遍历值操作数中的实际读取节点，不追溯已计算值的定义；嵌套 where 按最近
+值分支归属，附 site/源位置与互补 mask 改写建议。静态提示不作可达性消除。
+
 - `where` 两侧含内存操作时默认 warning；
 - 独立的 `--effects {off,warn,error}`，不复用 bounds safety 开关；
 - 诊断提供 masked load/store 改写建议；
@@ -878,7 +883,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | [ADR-007](docs/adr/007-integer-semantics.md) | Accepted | 整数溢出与除法语义 | M2-01 已完成 | runtime 回绕、floor 商余数、显式转换、定义域及索引门禁；基础 CPU/GPU 对照 |
 | ADR-008 | Accepted | reduction 精度 | M2-08 已实现 | 输入、累加、返回 dtype 与 NaN 策略明确建模 |
 | ADR-009 | Accepted | 本地 target 验收基线 | M2-08 已验证 | 固定 RTX 3090 + Triton/PyTorch/CUDA；正式支持和 CI 仍归 M3 |
-| ADR-010 | Proposed | effect/race 严格度 | M4 开始前 | bounds、effects、race 使用独立策略开关 |
+| [ADR-010](docs/adr/010-effect-diagnostic-policy.md) | Accepted | where effect 严格度 | M4-02 已实现 | effects 独立 off/warn/error；race 仍待独立设计 |
 | [ADR-011](docs/adr/011-smt-proof-and-trust.md) | Accepted | 默认 SMT 与信任来源 | M2 证明迁移前 | Z3 + 布尔 DAG + 小型快速路径；Int/BitVec 分离、Exempted、预算及反例可达性 |
 | [ADR-012](docs/adr/012-boolean-tile-mask.md) | Accepted | 布尔 tile 与 Mask | M2-07a 已完成 | 受限消费者适配，保留类型与未知谓词身份 |
 | [ADR-013](docs/adr/013-const-bool-domain.md) | Accepted | Const bool | M2-07b 已完成 | 自 0.3.0.dev0 开放 exact bool、独立参数域、带类型标签的缓存键 |
@@ -943,6 +948,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-01b | DONE | 节点 effect、定义引用与 verifier | ADR-016 已接受 | 局部不可变元数据、词法定义点引用、穷尽遍历与独立重算校验；16 项专项，CPU 953/GPU 300 节点通过；边界见 docs/effect-ir.md |
 | M4-01c | DONE | 控制流上下文与 TIR 派生汇总 | M4-01b | mask/path/loop 分栏，早退/Const/零次循环保守；移除 checker 平行列表；19 项专项，CPU 972/GPU 300 节点通过；fused-attention explain 删除默认特化中不可达的两条 Read |
 | M4-01d | DONE | effect 输出与缓存迁移验收 | M4-01c | `--show-effects` / `tila.effect-details.v1`，12 项专项；修复失败/空启动残留 alias/alignment；CPU 984、GPU 300 节点/444 案例通过；不含 atomic/race/uniformity |
+| M4-02 | DONE | where 急切求值 effect 检查 | M4-01、ADR-010 | 独立 off/warn/error、已验证 TIR 的嵌套读取与定义复用区分、最近值分支归属、互补 mask 修复建议；18 项专项与诊断 golden；CPU 1002、GPU 300 节点/444 案例通过 |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

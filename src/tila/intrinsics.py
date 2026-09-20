@@ -17,7 +17,7 @@ from typing import Iterable, Mapping
 
 
 INTRINSIC_REGISTRY_SCHEMA_VERSION = 1
-INTRINSIC_REGISTRY_SEMANTIC_REVISION = 10  # ADR-016 derived control-flow effect summaries
+INTRINSIC_REGISTRY_SEMANTIC_REVISION = 11  # ADR-010 where source locations and effect diagnostics
 
 
 class SurfaceForm(str, Enum):

@@ -193,10 +193,13 @@ _DIAGNOSTICS = {
     **_specs("BOUNDS", (DiagnosticPhase.LAUNCH,), {
         "010": "assume_launch contract failed",
     }, default_fix=_BOUNDS_FIX),
-    **_specs("EFFECT", (DiagnosticPhase.CHECK,), {
+    **_specs("EFFECT", (DiagnosticPhase.CHECK, DiagnosticPhase.SPECIALIZE, DiagnosticPhase.LAUNCH), {
         "007": "where eagerly evaluates a memory effect",
-    }, severity=DiagnosticSeverity.WARNING,
-       default_fix="改用具有相同谓词的 masked load/store"),
+    }, severity=DiagnosticSeverity.ERROR_OR_WARNING,
+       default_fix="分别使用条件及其补集的 masked load，并保留 bounds mask"),
+    **_specs("EFFECT", (DiagnosticPhase.CHECK,), {
+        "008": "invalid effects policy",
+    }, default_fix="Use effects=off|warn|error"),
     **_specs("TARGET", (DiagnosticPhase.TARGET,), {
         "004": "required backend package is unavailable",
         "005": "backend compilation or execution failed",

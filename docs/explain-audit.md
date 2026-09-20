@@ -29,6 +29,11 @@ path/mask 不使用 Python 对象地址或 Z3 内部变量名；不同未知布�
 
 ## 稳定边界与可选附件
 
+M4-02 的 where 诊断沿用 warnings 节：`effects=off` 隐藏该类诊断，warn 展示
+warning，error 对已有 kernel 的 report/explain 展示 error；装饰、特化、启动
+入口则拒绝。每条记录带 where site、读取 site/RegionId、源片段行号和修复建议。
+独立策略不改变 bounds 结论，见 [ADR-010](adr/010-effect-diagnostic-policy.md)。
+
 M4-01d 增加 `--show-effects` / `show_effects=True`，在 effects 后附加
 `tila.effect-details.v1` JSON；默认输出不变。字段、谓词 DAG 引用、Const 特化
 和运行时绑定隔离契约见 [Effect 明细审计](effect-audit.md)。

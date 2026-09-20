@@ -1,12 +1,12 @@
 # Tila 效应系统、竞争检测与 Uniformity
 
 状态：设计基线与后续方向；当前已有局部 effect 元数据、TIR 派生的 kernel
-Read/Write 汇总及局部 where warning，并发检查尚未完成。
+Read/Write 汇总及 where 急切读取检查，并发检查尚未完成。
 2026-09-19 [ADR-016](adr/016-instruction-effect-ir.md)已 Accepted；
 [M4-01b](effect-ir.md)实现局部访问身份、Read/Write/RegionId、定义引用与 verifier。
 [M4-01c](effect-summary.md)已实现 mask/path/loop 与 kernel summary 派生。
-atomic、race、uniformity 和新策略
-开关尚未实现。
+[M4-02 / ADR-010](adr/010-effect-diagnostic-policy.md)已实现独立 effects 策略。
+atomic、race、uniformity 尚未实现。
 前置阅读：`design-principles.md` §2（第四支柱）、`type-system.md` §8–§9
 （Region 概念）。
 
@@ -90,22 +90,33 @@ Tila 规则：
 
 - **值侧**：`where` 是纯函数（三分广播，签名见 intrinsics.md §3），
   dtype 必须两侧同型（无隐式提升）；
-- **当前效应侧**：直接嵌套内存操作产生 `warning[TILA-EFFECT-007]`。
-  独立 effects 策略与升格 error 仍待 ADR-010/M4 后续设计，不等同于当前 bounds strict；
-  完整的逐值 effect 追踪和 Atomic 也尚未实现。以下为诊断方向示意：
+- **当前效应侧**：遍历已验证 TIR 的值操作数，内联读取（含 unsafe、深层表达式、
+  load 的 coords/mask/other）产生 `TILA-EFFECT-007`。已计算值的定义引用不重新
+  执行 load；变量复用、重绑定、分支合并和循环携带引用不会因此误报。
+- 条件操作数的读取不单独告警；嵌套 where 的读取只归属最近的值分支，避免重复。
+- 这是静态急切求值提示，不是越界或必然访存结论。false mask、Const 未选路径
+  不消除结构提示；每条 load 仍受其自己的 mask 约束。
+- `TILA_EFFECTS=off|warn|error`，默认 warn；CLI `--effects` 覆盖环境配置。
+  off 不关闭 bounds/verifier；warn 在 report/explain 展示；error 在装饰、特化和
+  每次启动前拒绝，包含缓存命中与零 grid。与 `TILA_SAFETY` 完全独立。
 
 ```text
-warning[TILA-EFFECT-007]:
-    memory operation inside tila.where branch
-both branches are evaluated—this load always executes:
-    tila.load(b)
-instead of:
-    tila.where(mask, tila.load(a, mask=m), tila.load(b, mask=m))
-consider masked loads with the same predicate
+warning[TILA-EFFECT-007]: eager read in where 'then' operand
+    at: line 3
+    phase: check, launch, specialize
+    where site: body/0/value
+    Both value operands are evaluated; each load retains its own mask.
+    Read site=body/0/value/a region=BufferRegion[0:x] line=3
 ```
 
-修复模板在错误信息中直接给出（mask 相同的 masked load，或
-`other=` 缺省值路径）。
+修复按意图区分两侧：`load(a, mask=cond, other=pure_value)` 和
+`load(b, mask=~cond, other=pure_value)`；标量 bool 用 `not cond`。仅在形状兼容
+时组合原有 bounds mask；other 中放 load 仍会急切读取。不会自动改写用户代码。
+
+Python 示例：`TILA_EFFECTS=error python example.py`；CLI 示例：
+`tila check example.py --effects error`。策略不进入编译缓存键，因为不改变生成代码，
+但入口会逐次重算诊断。原始候选保留在 `tk.warnings`；report/explain 按当前策略
+展示。详细设计与边界见 ADR-010，专项及 golden 在 `tests/test_where_effects.py`。
 
 ---
 
@@ -217,3 +228,15 @@ barrier requires CTA-uniform control flow
 | TILA-RACE-002 | 证不出写不相交 | v1（warning） |
 | TILA-UNIFORM-001 | divergent barrier | v1 |
 | TILA-TYPE-030 | atomic 值类型不精确匹配 | v0（随 atomic 一起落） |
+
+## 8. M4-02 本地验收（2026-09-20）
+
+18 项专项覆盖求值位置、定义复用/重绑定/合并/循环携带、深层读取、条件读取、
+嵌套 where 去重、false mask 与 other、静态不可达告警、策略切换、缓存及空启动
+门禁、bounds 独立性、元数据损坏、CLI 环境继承与覆盖。warning/error 使用同一
+稳定诊断 golden；官方示例的既有 TIR/Triton/explain golden 未改变。
+
+完整 CPU **1002 passed**，本地 RTX 3090 严格 GPU **300 节点／444 案例通过**，
+均零跳过。产物：`artifacts/cpu/m4-02-results.xml` 与
+`artifacts/ci-gpu/20260919T165747Z-de6zmzkp/report.json`（本地忽略目录）。
+当前工作区尚无独立远端 CPU CI 记录；无隔离 GPU 持续验收，M3 仍未完成。

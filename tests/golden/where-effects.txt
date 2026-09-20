@@ -1,0 +1,21 @@
+warning[TILA-EFFECT-007]: eager read in where 'then' operand
+    at: line 3
+    phase: check, launch, specialize
+    where site: body/0/value
+    Both value operands are evaluated; each load retains its own mask.
+    Read site=body/0/value/a region=BufferRegion[0:x] line=3
+    fix:
+      Use load(a, mask=cond, other=pure_value) and load(b, mask=~cond, other=pure_value);
+      for scalar bool use not cond; combine with existing bounds masks when shapes permit.
+      A load nested in other= is still evaluated.
+
+warning[TILA-EFFECT-007]: eager read in where 'else' operand
+    at: line 3
+    phase: check, launch, specialize
+    where site: body/0/value
+    Both value operands are evaluated; each load retains its own mask.
+    Read site=body/0/value/b region=BufferRegion[0:x] line=3
+    fix:
+      Use load(a, mask=cond, other=pure_value) and load(b, mask=~cond, other=pure_value);
+      for scalar bool use not cond; combine with existing bounds masks when shapes permit.
+      A load nested in other= is still evaluated.

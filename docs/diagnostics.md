@@ -62,7 +62,7 @@ CLI 默认只渲染结构化诊断，不输出 Python traceback。设置 `TILA_D
 | `TILA-NUM` | 001–002 | 001 为整数定义域/索引/ABI；002 为显式浮点常量非有限/溢出 |
 | `TILA-MEM` | 001–006 | memory capability/offset/alignment |
 | `TILA-BOUNDS` | 001–003、010 | proof 与 launch contract |
-| `TILA-EFFECT` | 007 | effect warning |
+| `TILA-EFFECT` | 007、008 | where 急切读取（独立 off/warn/error）；非法 effects 策略 |
 | `TILA-TARGET` | 004–011 | backend/target、launch options、device/TIR 门禁、编译/加载失败与硬资源超限 |
 | `TILA-INTERNAL` | 001 | CLI 内部故障封装 |
 

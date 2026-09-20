@@ -178,6 +178,8 @@ class JITFunction:
 
     def materialize(self, consts: dict | None = None):
         """无 launch 的特化（check/build）：解 Const、复查延迟约束与义务。"""
+        from .effect_policy import diagnostics
+        diagnostics(self.tk, enforce=True)
         cenv = self._resolve_consts(consts)
         self._check_consts(cenv)
         self._check_deferred(cenv)
@@ -217,7 +219,8 @@ class JITFunction:
         out.append(f"  obligations: {len(tk.obligations)}")
         for ob in tk.obligations:
             out.append(f"    {ob.describe()}")
-        for w in tk.warnings:
+        from .effect_policy import report_diagnostics
+        for w in report_diagnostics(tk):
             out.append("  " + w.render().replace("\n", "\n  "))
         for n in tk.notes:
             out.append(f"  note: {n}")
@@ -366,8 +369,10 @@ class JITFunction:
 
         L.extend(auxiliary)
         L.append("warnings:")
-        if tk.warnings:
-            for w in tk.warnings:
+        from .effect_policy import report_diagnostics
+        warnings = report_diagnostics(tk)
+        if warnings:
+            for w in warnings:
                 L.append("  " + w.render().replace("\n", "\n  "))
         else:
             L.append("  (none)")
@@ -699,6 +704,8 @@ class _Launcher:
 
     def _call(self, *args, **kwargs):
         jf = self.jf
+        from .effect_policy import diagnostics
+        diagnostics(jf.tk, enforce=True)
         jf.last_backend_resources = None
         jf.last_alignment_facts = ()
         jf.tk.runtime_alignments = {}

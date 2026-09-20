@@ -251,6 +251,8 @@ zeros/reshape 与 add 多 dtype；自动 GPU CI 已撤下，隔离 GPU 持续验
 2. 有独立 GPU 资源后建立隔离 GPU CI；目前没有 runner，不连接开发者机器补位；
 3. [M4-01c](docs/effect-summary.md)已从 TIR 派生 path/mask/loop 与只读 effect 汇总；
    [M4-01d](docs/effect-audit.md)已固定可选详细输出与缓存／绑定隔离验收。
+   [M4-02](docs/adr/010-effect-diagnostic-policy.md)已实现 where 急切读取检查与独立
+   `TILA_EFFECTS=off|warn|error`／`--effects` 策略（默认 warn）。
    atomic/race/uniformity 暂缓，M3 仍未完成。
 
 实施进度以 [plan.md](plan.md) 的任务台账为准。

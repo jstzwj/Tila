@@ -13,7 +13,7 @@ f16 dot 舍入回归与全部 15 个官方示例 golden。本轮 ADR 文档不�
 
 后续 M4-01b 提交 `f4add240605366a6da2e8ae3bb9253a9a438cc67` 的
 [托管运行](https://github.com/jstzwj/Tila/actions/runs/35454545217)通过 **953 项、零跳过**，
-JUnit 附件已下载核实。M4-01d 工作区本地 984 项通过，另见 [详细审计](effect-audit.md)，
+JUnit 附件已下载核实。M4-02 工作区本地 1002 项通过，另见 [效应检查](effects.md)，
 不将旧提交的 run 视为当前修改的远端验收。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方

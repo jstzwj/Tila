@@ -99,6 +99,8 @@ def main(argv=None):
     ap.add_argument("--show-witness", action="store_true", help="explain: show solver-selected witness bindings")
     ap.add_argument("--show-cache", action="store_true", help="explain: show per-call cache telemetry")
     ap.add_argument("--show-effects", action="store_true", help="explain: show versioned per-access effect details")
+    ap.add_argument("--effects", choices=["off", "warn", "error"], default=None,
+                    help="independent eager-effect policy (default: TILA_EFFECTS or warn)")
     ap.add_argument("--safety", choices=["strict", "warn"], default="strict",
                     help="bounds 义务严格度：strict（默认）Unknown → error；"
                          "warn → warning 后继续（refinements.md §5.3；"
@@ -108,6 +110,10 @@ def main(argv=None):
     os.environ["TILA_SAFETY"] = args.safety   # runtime 义务求值共享同一开关
 
     try:
+        if args.effects is not None:
+            os.environ["TILA_EFFECTS"] = args.effects
+        from .effect_policy import mode
+        mode()
         mod = _load(args.path)
         kerns = _jit_functions(mod)
         if not kerns:

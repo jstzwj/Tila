@@ -62,8 +62,8 @@ M5 的 target capability 和真实 GPU 验证完成后开放。
 | 层次 | 当前状态 | 归属 |
 |---|---|---|
 | kernel 级 `Read/Write[region]` 汇总 | `Implemented` | M0 基线事实 |
-| `where` eager memory warning（`TILA-EFFECT-007`） | `Implemented` | M0 基线事实 |
-| per-instruction effect IR、独立 effects 策略 | `Designed` | **M4** |
+| `where` eager memory diagnostics（`TILA-EFFECT-007`） | `Implemented` | M4-02：TIR/定义引用驱动，独立严格度及诊断 golden |
+| per-instruction effect IR、独立 effects 策略 | `Implemented` | M4-01/02；不包含 race/atomic/uniformity |
 | atomic、inter-program race、uniformity/barrier | `Designed` | **M4** |
 
 当前实现不是“完全不检查 effect”，也不是“完整 effect system”：它具有汇总和
