@@ -11,6 +11,8 @@
 后续 [C1 独立边界复核](c1-correctness-review.md)修复权限/cast 遗漏并收紧 GPU return 支持；
 2026-09-21 [C2 退出审计](c2-correctness-exit-audit.md)补充有界组合、独立参考、
 故障注入与 CPU/GPU 对照；当前完整验收以 C2 记录为准，旧数量仅记录历史覆盖。
+2026-09-22 C2 对应提交的托管 CPU CI 已通过；[M4-05d 恢复评审](m4-05d-resumption-review.md)
+通过，可启动内部小域/退出审计，尚未实施；其他功能扩展仍暂停。
 
 验证基线：`PYTHONPATH=src python -m pytest -q` = 1412 passed、零 skipped
 （C2 新增 148 项，包含 140 个模板的 1120 组绑定；包含全部既有 golden）。
@@ -38,8 +40,8 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
 上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
-C1 后续提交 0906bc6 的托管 CPU CI 已通过 1264 项并核实附件；C2 新增测试尚需
-对应提交的远端记录，见 [CPU CI 记录](cpu-ci.md)。
+C2 提交 `7edd591` 的托管 CPU CI 已通过 1412 项，JUnit/golden、完整 1120 组
+C2 绑定与 Race 枚举附件已核实，见 [CPU CI 记录](cpu-ci.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。

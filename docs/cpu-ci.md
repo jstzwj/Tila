@@ -39,7 +39,13 @@ job 的 labels 为 `ubuntu-24.04`、runner group 为 GitHub Actions，确认为�
 
 [C2 退出审计](c2-correctness-exit-audit.md)新增的组合测试属于普通 CPU pytest，
 工作流增加 `artifacts/cpu/c2-summary.json` 和 `artifacts/c2-audit/` 附件路径。
-C2 尚未取得其提交的托管 run；前述 1264 项记录不能替代新增测试的远端验收。
+提交 `7edd591` 的[托管 run](https://github.com/jstzwj/Tila/actions/runs/35686086849)
+已于 2026-09-22 成功：**1412 项、零失败/错误/跳过**。下载 `cpu-test-report` 后核对
+JUnit、59 项名称/类名含 golden 的记录、819 次 Race 观察与 C2 摘要；C2 为
+140 模板/1120 绑定、complete=true、status=passed，67 个实际越界绑定均检查了
+执行前门禁。远端独立查询为 675 Safe/445 Unknown，Unknown 未被算作 Safe。
+runner labels=`ubuntu-24.04`、group=GitHub Actions；附件副本在
+`artifacts/cpu/hosted-7edd591/`。成功 run 未产生失败重放目录，不视为附件缺失。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为

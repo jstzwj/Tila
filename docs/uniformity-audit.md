@@ -80,3 +80,7 @@ PYTHONPATH=src python -m pytest -q tests/test_uniformity.py tests/test_uniformit
 本轮没有新的 GPU 同步证据或远端 CPU CI 记录。既有 RTX 3090 数值/atomic/Race
 验收不替代 uniformity 同步验收。下一步 M4-05d 做小域/变形、故障注入和退出审计；
 整个 M4 及缺少隔离 GPU 持续验收的 M3 均不能因本阶段通过而宣称完成。
+
+2026-09-22 的 [M4-05d 恢复评审](m4-05d-resumption-review.md)补充 C0/C1/C2 后的
+实施边界与退出要求：优先独立观察值/控制保证，再做变形、故障注入及可重放审计。
+现有重算 verifier 不构成独立 oracle；M4-05d 尚未实施，真实同步消费者仍未安装。

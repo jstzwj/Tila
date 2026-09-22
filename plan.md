@@ -24,8 +24,11 @@ C0-01..04 本地限定验收已完成；证据与剩余边界见上述审计。�
 C1 后续提交 0906bc6 的托管 CPU CI 已通过 1264 项并核对附件。
 2026-09-21 推进 [C2 正确性收口退出验收](docs/c2-correctness-exit-audit.md)：固定兼容性
 迁移，增加 140 个程序模板/1120 组绑定、独立参考与故障注入，补充 84 项 GPU 对照/门禁，
-修复 GPU 重放入口漏掉 C0/C1 专项。限定退出后可评审恢复 M4-05d，本轮不自动启动。
-C2 的远端 CPU 证据须在提交后另行取得；隔离 GPU CI 缺口不因本轮通过而关闭。
+修复 GPU 重放入口漏掉 C0/C1 专项。2026-09-22，C2 提交 `7edd591` 的托管 CPU CI
+通过 1412 项，JUnit/golden、完整 C2 与 Race 摘要已下载核实，见 [CPU CI](docs/cpu-ci.md)。
+[M4-05d 恢复评审](docs/m4-05d-resumption-review.md)通过，状态改为可启动但尚未实施；
+先做独立值/控制观察，再做变形、故障注入和退出记录。其他功能扩展保持暂停，
+不新增同步 API；隔离 GPU CI 缺口不因本轮通过而关闭。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -999,13 +1002,13 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-05a | DONE | 最小 Uniformity 设计 ADR | M4-01/04、ADR-019 Proposed | 四层级、值/控制分离、定义边复用、传播规则与正反例、消费/诊断边界；仅文档，无运行时功能 |
 | M4-05b | DONE | Uniformity 评审冻结与内部分析 | ADR-019 Accepted | 内部值/控制摘要、定义入边、固定点/预算、重算 verifier；43 项专项、CPU1170通过；见 docs/uniformity-analysis.md；无同步 API/公共策略 |
 | M4-05c | DONE | Uniformity 详细输出与隔离 | M4-05b | show-uniformity、details.v1、3份golden、21项专项、CPU1191通过；Const/预算/历史launch/缓存隔离；逻辑消费fixture不等于同步API；见 docs/uniformity-audit.md |
-| M4-05d | TODO | Uniformity 小域与退出审计（待评审恢复） | C0/C1/C2 限定退出评审、M4-05b/c | 枚举/变形、故障注入；区分内部分析与真实 target 消费证据，不代替整个 M4 或 M3 验收 |
+| M4-05d | TODO | Uniformity 小域与退出审计（恢复评审通过，可启动） | C0/C1/C2 限定退出及托管 CPU 验收、M4-05b/c | 独立值/参与观察、枚举/变形、故障注入与重放；见 docs/m4-05d-resumption-review.md；尚未实施，无真实同步消费，不代替整个 M4 或 M3 验收 |
 | C0-01 | DONE | 错误 Safe 与入口精化 | 已确认反例 | 保真符号规范键；实际 ABI 舍入后检查精化；保留 numpy.float64 宿主兼容 |
 | C0-02 | DONE | 静态类型与地址语义 | ADR-020 Accepted | 保守 shape 合并、嵌套 variant 传播、checked i64 指针位移及每步启动门禁 |
 | C0-03 | DONE | Safe 规则与跨层审计 | C0-01/02 | 8 类出口清单；715 表达式/57,915 次求值、450 组直接/区间枚举、独立 SMT 蕴含、缓存隔离 |
 | C0-04 | DONE | 限定收口验收 | C0-03 | CPU1217、GPU402节点/546案例全部通过且零跳过；新增 explain golden；详见 docs/correctness-closure.md，不代表完整编译器形式化证明 |
 | C1 | DONE | 独立边界复核与修复 | C0-01..04 | WriteOnly/Mask cast 双层拒绝、合法 cast 保形、Const return lowering；runtime/loop return GPU 门禁；CPU1264、GPU417节点/561案例通过，见 docs/c1-correctness-review.md |
-| C2 | DONE | 正确性收口退出验收（本地限定） | C0/C1 | 140 模板/1120 绑定，无错误 Safe；67 个实际越界绑定拒绝，443 个独立 Unknown 保留；CPU1412、GPU501节点/645案例通过；C2 托管验收待提交后取得，见 docs/c2-correctness-exit-audit.md |
+| C2 | DONE | 正确性收口退出验收（限定） | C0/C1 | 140 模板/1120 绑定，未发现错误 Safe；67 个实际越界绑定拒绝；本地443/托管445个独立 Unknown 保留；CPU1412、GPU501节点/645案例通过，GPU仅本地；7edd591 托管 CPU 与附件已验收，见 docs/c2-correctness-exit-audit.md |
 
 后续每完成一个 Batch，就在此台账追加下一批工作，不提前维护数百个可能变化的微任务。
 

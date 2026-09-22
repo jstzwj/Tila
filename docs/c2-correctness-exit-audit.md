@@ -1,8 +1,9 @@
 # C2：正确性收口退出验收
 
 日期：2026-09-21。范围：C0/C1 后的有界组合验证，不增加语言功能或同步 API。
-状态：**PASS（本地限定退出）**。C2 尚未提交，托管 CPU 验收须单独取得；
-不将单个子集成功或前置提交的 CI 当作本轮完整退出证据。
+状态：**PASS（限定退出，托管 CPU 已复验）**。2026-09-22，提交 `7edd591` 的
+[托管 CPU run](https://github.com/jstzwj/Tila/actions/runs/35686086849)已通过；
+GPU 证据仍仅为下述本地固定环境验收，不将它称为持续 GPU CI。
 
 ## 固定的兼容性边界与迁移
 
@@ -118,6 +119,14 @@ CPU 汇总为 `artifacts/cpu/c2-summary.json`，含 complete、结论计数、�
 前置提交 `0906bc6` 的 [CPU 托管验收](https://github.com/jstzwj/Tila/actions/runs/35521460584)
 已通过 1264 项，golden、JUnit 与 Race 枚举附件已核对；不把该旧提交的结果当作 C2 的托管验收。
 
+2026-09-22，C2 提交 `7edd591` 的上述托管 run 通过 **1412 项、零失败/错误/跳过**。
+job labels 为 `ubuntu-24.04`、runner group 为 GitHub Actions。下载的 `cpu-test-report`
+已核对 JUnit、59 项名称/类名含 golden 的记录、Race 摘要与 C2 完整摘要，副本在
+`artifacts/cpu/hosted-7edd591/`。远端 C2 为 140 模板/1120 绑定、complete=true、
+status=passed：675 ProvenSafe、445 Unknown（409 canceled、36 未确认可达候选），
+672 次正常启动；67 个实际越界绑定全部在执行前拒绝。远端与本地的预算内结论
+计数不同，均未把 Unknown 当作 Safe；这些计数不是必须逐次相等的 golden。
+
 ## 退出边界
 
 本轮退出要求：约定域内无错误 Safe/已确认 Unsafe，CPU trace 与独立参考一致，
@@ -127,4 +136,5 @@ Unknown 不作为 Safe，也不要求消灭所有 Unknown。
 不覆盖一般加载内容参与控制流、任意循环、全部 shape/dtype、别名/并发执行或
 全编译器形式化正确性。runtime/loop return 的 GPU 限制仍保留。测试只在本地
 固定 RTX 3090/SM86 环境提供 GPU 证据，独立 GPU CI 缺失，M3 继续 NOT READY。
-通过本轮限定验收后可评审恢复 M4-05d；本轮没有自动启动该阶段。
+2026-09-22 的 [恢复评审](m4-05d-resumption-review.md)已通过，M4-05d 可启动，
+范围仅为内部值/控制分析的小域与退出审计；本轮没有实施该阶段或恢复其他功能扩展。
