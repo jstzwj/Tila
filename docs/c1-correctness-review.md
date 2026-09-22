@@ -65,7 +65,9 @@ CPU 全量：**1264 passed、99 warnings、零 skipped**，包含全部既有 go
 `artifacts/cpu/hosted-26d0f45-failed/`。仅将该性质测试模块的审计时间预算调为
 10 秒/查询、30 秒/session，rlimit 仍 2,000,000；确定结论断言、零预算反例和
 生产默认预算均保留。另补 M2 失败 JSON/SMT 的 CI 上传路径，结论差异记录带预算。
-这不是将 Unknown 视为通过或隐藏失败；补丁对应的 Actions run 必须重新验收。
+修正提交 `0906bc6` 的[托管复验](https://github.com/jstzwj/Tila/actions/runs/35521460584)
+已通过 1264 项且零跳过，附件已核对；没有把 Unknown 视为通过或隐藏失败。
+后续组合覆盖与兼容性迁移见 [C2 退出审计](c2-correctness-exit-audit.md)。
 
 ## 结论边界
 

@@ -9,10 +9,11 @@
 2026-09-20 优先事项改为 [C0 正确性收口](correctness-closure.md)，暂缓功能扩展。
 已知错误 Safe、实际 ABI 精化、静态分支 shape 合并与 Ptr 位移域按 ADR-020 修复；
 后续 [C1 独立边界复核](c1-correctness-review.md)修复权限/cast 遗漏并收紧 GPU return 支持；
-当前完整验收以 C1 记录为准；旧里程碑数量仅记录历史覆盖。
+2026-09-21 [C2 退出审计](c2-correctness-exit-audit.md)补充有界组合、独立参考、
+故障注入与 CPU/GPU 对照；当前完整验收以 C2 记录为准，旧数量仅记录历史覆盖。
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 1264 passed、零 skipped
-（C0 新增 26 项，C1 新增 47 项；包含 Safe 规则审计、边界反例和既有 golden）。
+验证基线：`PYTHONPATH=src python -m pytest -q` = 1412 passed、零 skipped
+（C2 新增 148 项，包含 140 个模板的 1120 组绑定；包含全部既有 golden）。
 
 M4-04d [Race 退出审计](race-exit-audit.md)已完成：88 项 Race 专项，新增小域枚举、
 变形、故障注入和重放；限定子集验收完成，整体 Race 仍 Partial。
@@ -22,7 +23,7 @@ M4-05b 已冻结 [ADR-019](adr/019-minimal-uniformity.md) 为 Accepted，并实�
 无策略 env、活动 UNIFORM 错误码或同步消费。
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
-当前覆盖 417 个 GPU 测试节点/561 个语义案例，初始支持仅 RTX 3090/SM86。
+当前覆盖 501 个 GPU 测试节点/645 个语义案例，初始支持仅 RTX 3090/SM86。
 公开仓库不连接开发者本地机器；操作与验证范围见 [GPU 支持](gpu-support.md)。
 
 M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)已完成：
@@ -37,7 +38,8 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 逐访问元数据、定义引用与 verifier；[M4-01c](effect-summary.md)已派生 path/mask/loop
 上下文与只读 kernel summary，移除 checker 平行列表；[M4-01d](effect-audit.md)
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
-C1 提交 785df52 的托管 CPU CI 已通过 1264 项并核实附件，见 [CPU CI 记录](cpu-ci.md)。
+C1 后续提交 0906bc6 的托管 CPU CI 已通过 1264 项并核实附件；C2 新增测试尚需
+对应提交的远端记录，见 [CPU CI 记录](cpu-ci.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
@@ -398,7 +400,7 @@ checker handler、effect/bounds、可达 TIR、backend expectation、target 与�
 | add TIR/Triton golden | `Implemented` | Test | 逐字节比较 |
 | matmul/attention/fused-attention golden | `Designed` | — | 示例有 CPU smoke，但尚无 TIR/Triton/explain golden |
 | 官方示例 CPU smoke | `Implemented` | CPU | 五个示例以 subprocess 运行，Windows cp1252 场景有回归 |
-| GPU differential | `Partial` | CPU / Triton | 固定环境 417 节点/561 案例，含 88 项 atomic、7 项 Race 门禁、22 项 C0/C1 正确性对照及负测试；race=warn 允许明确 Unknown，未宣称所有案例无竞争；隔离 GPU CI 待建立 |
+| GPU differential | `Partial` | CPU / Triton | 固定环境 501 节点/645 案例；C2 新增 84 项生成程序对照及负测试，单 program 专项 race=off；其他专项默认 warn 允许明确 Unknown，未宣称所有案例无竞争；隔离 GPU CI 待建立 |
 | property/fuzz tests | `Implemented` | Test | M2-05 小位宽有界穷举、固定种子变形/执行对照和缓存/预算隔离；不是全输入空间证明 |
 
 ---

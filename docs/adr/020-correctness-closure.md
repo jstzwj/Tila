@@ -69,6 +69,8 @@ C1 复核补充：按 ADR-012 拒绝 Mask cast，合法 Block cast 必须保形�
 return 的 lowering 将后续操作保留在活跃分支；runtime if/循环内 return 在固定
 GPU target 尚不支持，提前 TARGET-009 拒绝，CPU 保留原语义。证据见
 [C1 复核](../c1-correctness-review.md)。这不是新增 Mask API 或完整 GPU 退出转换。
+后续 [C2 退出审计](../c2-correctness-exit-audit.md)固定迁移方法，并用有界组合、
+独立参考、故障注入及 CPU/GPU 对照验收上述契约，不扩大语言和 target 支持范围。
 
 固定反例、规范化小域性质、逐条 Safe 蕴含、缓存/来源隔离、CPU 全量与固定 RTX 3090
 严格审计共同验收。旧 golden 的成功不是语义正确性的替代证据；不得仅刷新快照

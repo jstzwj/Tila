@@ -16,6 +16,7 @@ Tila 的 checker、CPU reference interpreter 与 GPU 后端仍持续接受正确
 当前暂缓功能扩展，优先[正确性收口](docs/correctness-closure.md)：修复已确认的
 错误 Safe 与跨层语义差异。边界结论依赖记录的前提及启动门禁，不代表一般无竞争、
 同步正确或结果确定性；静态分支不同 shape 的分支外使用已保守拒绝。
+组合验证范围、兼容性迁移和剩余 Unknown 见 [C2 退出审计](docs/c2-correctness-exit-audit.md)。
 
 > 类型不只描述“值是什么”，还描述 tile shape、编译期常量、读写能力和
 > 内存访问成立的条件。

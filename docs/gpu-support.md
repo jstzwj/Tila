@@ -58,10 +58,12 @@ hint 开关对照；M3-02 再增加 8 项 launch/cache 负测试，当前共
 388 节点/532 案例；M4-04c 增加 7 项 Race 门禁达到 395 节点/539 案例。
 C0 再增加 7 项实际 ABI、地址域与执行前拒绝检查，达到 402 节点/546 案例；
 C1 增加 15 项布尔 tile cast、view/负偏移、Const return 与不支持 return 的启动门禁，
-当前 **417 节点/561 案例通过**，见[独立边界复核](c1-correctness-review.md)。
-CPU 基线为 **1264 passed**，均零 skipped；uniformity 为 CPU 分析与可选审计，
+达到 417 节点/561 案例；C2 增加 84 项有界生成程序对照与启动门禁，
+当前 **501 节点/645 案例通过**，见 [C2 退出审计](c2-correctness-exit-audit.md)。
+CPU 基线为 **1412 passed**，均零 skipped；uniformity 为 CPU 分析与可选审计，
 不作为 GPU 同步验收。Race 使用默认 warn，未覆盖域有明确
 Unknown 告警，不据此宣称所有案例无竞争；详见 [Race 启动验收](race-launch-audit.md)。
+C2 的单 program 组合测试显式 race=off，只提供语义与 bounds 门禁证据。
 M3-02/03/04/05 及矩阵补测已在本地固定环境通过；
 [launch/target 规则与边界](launch-target.md)详述前置门禁范围。
 逐 intrinsic 的 dtype/shape 与证据见 [操作审计](gpu-operation-audit.md)，不是全组合认证。

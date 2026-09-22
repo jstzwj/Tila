@@ -27,6 +27,7 @@ def main():
                TILA_RACE_MAX_PAIRS="4096",
                PYTEST_ADDOPTS="", PYTEST_DISABLE_PLUGIN_AUTOLOAD="1",
                TILA_GPU_KERNELS=str(run / "kernels"), TMPDIR=str(run / "tmp"),
+               TILA_C2_FAILURE_DIR=str(run / "c2-failures"),
                TILA_BACKEND_ARTIFACTS=str(run / "backend"))
     argv = [str(source / "ci/gpu/.venv/bin/python"), "-m", "pytest",
             "tests/gpu_semantics.py", "tests/gpu_examples.py", "tests/gpu_launch.py", "tests/gpu_backend.py", "tests/gpu_capabilities.py", "tests/gpu_alignment.py", "-v", "--tb=long", "--showlocals",
@@ -38,6 +39,9 @@ def main():
         argv.append("tests/gpu_atomic.py")
     if (source / "tests/gpu_race.py").is_file():
         argv.append("tests/gpu_race.py")
+    for filename in ('gpu_soundness.py', 'gpu_c2.py'):
+        if (source / 'tests' / filename).is_file():
+            argv.append('tests/' + filename)
     if args.case:
         argv += ["-k", args.case]
     # Replay is diagnostic. Only gpu_audit.py can mark baseline acceptance.
