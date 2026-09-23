@@ -4,7 +4,7 @@
 
 后续：2026-09-20 f4add24 的托管 CPU CI 已通过 953 项；M4-01c/d 已从 TIR 派生
 控制流 effect 汇总、固定可选详细输出并验收绑定隔离；M4-02 已实现 where 独立效应检查。
-本地 CPU 1412 项通过；GPU 501 节点（645 案例）通过。最小 atomic_add CPU/GPU 已实现，
+本地 CPU 1500 项通过；GPU 501 节点（645 案例）通过。最小 atomic_add CPU/GPU 已实现，
 uniformity 已有内部分析与可选输出，M3 仍未完成。M4-03a 已冻结最小 atomic_add
 设计（ADR-017）；M4-03b/c 已完成前端/IR/CPU 与固定 RTX 3090 GPU 验收。
 M4-03 已提交为 `eb0867f` 并推送；M4-04b 已冻结 ADR-018 为 Accepted，
@@ -29,6 +29,10 @@ C1 后续提交 0906bc6 的托管 CPU CI 已通过 1264 项并核对附件。
 [M4-05d 恢复评审](docs/m4-05d-resumption-review.md)通过，状态改为可启动但尚未实施；
 先做独立值/控制观察，再做变形、故障注入和退出记录。其他功能扩展保持暂停，
 不新增同步 API；隔离 GPU CI 缺口不因本轮通过而关闭。
+2026-09-23 [M4-05d 限定退出审计](docs/uniformity-exit-audit.md)已完成：
+17 类模板/68 绑定、1570 条执行事件、十一类错误强保证注入与单案例重放；
+修复缺失入口定义的循环出口合并引用错误 Full。CPU 本地全量 1500 项通过；
+本提交托管 CPU CI 待提交后核实。真实同步消费者未安装，M4 仍 Partial。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -75,7 +79,7 @@ Tila 的目标是一门以 Python 语法承载、面向 GPU kernel、编译到 T
 - `assume`、`unsafe_load/store`、launch contract 与 `launch_auto`；
 - Triton 源码生成、NumPy reference interpreter、CLI；
 - add、matmul、self-attention、fused-attention 示例；
-- 当前本地测试基线：1412 passed、零 skipped；含 88 项 Race、64 项 uniformity 及 C0/C1/C2 正确性专项。GPU 严格验收 501 节点/645 案例通过，C2 单 program 专项 race=off；其他专项默认 warn 允许明确 Unknown，不表示全部案例无竞争，也不作为 uniformity 同步证据。托管 CI 记录见 docs/cpu-ci.md，各提交单独验收。
+- 当前本地测试基线：1500 passed、零 skipped；含 88 项 Race、M4-05b/c/d 共 152 项 uniformity 及 C0/C1/C2 正确性专项。GPU 严格验收 501 节点/645 案例通过，C2 单 program 专项 race=off；其他专项默认 warn 允许明确 Unknown，不表示全部案例无竞争，也不作为 uniformity 同步证据。托管 CI 记录见 docs/cpu-ci.md，各提交单独验收。
 
 ### 2.2 当前主要缺口
 
@@ -1002,7 +1006,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-05a | DONE | 最小 Uniformity 设计 ADR | M4-01/04、ADR-019 Proposed | 四层级、值/控制分离、定义边复用、传播规则与正反例、消费/诊断边界；仅文档，无运行时功能 |
 | M4-05b | DONE | Uniformity 评审冻结与内部分析 | ADR-019 Accepted | 内部值/控制摘要、定义入边、固定点/预算、重算 verifier；43 项专项、CPU1170通过；见 docs/uniformity-analysis.md；无同步 API/公共策略 |
 | M4-05c | DONE | Uniformity 详细输出与隔离 | M4-05b | show-uniformity、details.v1、3份golden、21项专项、CPU1191通过；Const/预算/历史launch/缓存隔离；逻辑消费fixture不等于同步API；见 docs/uniformity-audit.md |
-| M4-05d | TODO | Uniformity 小域与退出审计（恢复评审通过，可启动） | C0/C1/C2 限定退出及托管 CPU 验收、M4-05b/c | 独立值/参与观察、枚举/变形、故障注入与重放；见 docs/m4-05d-resumption-review.md；尚未实施，无真实同步消费，不代替整个 M4 或 M3 验收 |
+| M4-05d | DONE | Uniformity 小域与限定退出审计 | C0/C1/C2 限定退出及托管 CPU 验收、M4-05b/c | 17 类模板/68 绑定、1570 事件、十一类过强保证注入、单案例重放；修正缺失入边的合并引用控制；本地 CPU1500通过，托管 CPU 待本提交核验；见 docs/uniformity-exit-audit.md。无真实同步消费，不代替整个 M4 或 M3 验收 |
 | C0-01 | DONE | 错误 Safe 与入口精化 | 已确认反例 | 保真符号规范键；实际 ABI 舍入后检查精化；保留 numpy.float64 宿主兼容 |
 | C0-02 | DONE | 静态类型与地址语义 | ADR-020 Accepted | 保守 shape 合并、嵌套 variant 传播、checked i64 指针位移及每步启动门禁 |
 | C0-03 | DONE | Safe 规则与跨层审计 | C0-01/02 | 8 类出口清单；715 表达式/57,915 次求值、450 组直接/区间枚举、独立 SMT 蕴含、缓存隔离 |

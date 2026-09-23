@@ -84,3 +84,7 @@ PYTHONPATH=src python -m pytest -q tests/test_uniformity.py tests/test_uniformit
 2026-09-22 的 [M4-05d 恢复评审](m4-05d-resumption-review.md)补充 C0/C1/C2 后的
 实施边界与退出要求：优先独立观察值/控制保证，再做变形、故障注入及可重放审计。
 现有重算 verifier 不构成独立 oracle；M4-05d 尚未实施，真实同步消费者仍未安装。
+
+后续 [M4-05d 限定退出审计](uniformity-exit-audit.md)已增加独立 Python 参考、
+具体执行观察、变形和故障注入，修正缺失入边的合并引用控制事实。
+该审计不改变 `consumers=not-installed` 或物理同步支持边界。

@@ -47,6 +47,11 @@ JUnit、59 项名称/类名含 golden 的记录、819 次 Race 观察与 C2 摘�
 runner labels=`ubuntu-24.04`、group=GitHub Actions；附件副本在
 `artifacts/cpu/hosted-7edd591/`。成功 run 未产生失败重放目录，不视为附件缺失。
 
+M4-05d 已将完整的 68 组 Uniformity 小域摘要加入回归门禁，并上传
+`artifacts/cpu/m4-05d-uniformity-summary.json` 及实际产生的失败重放目录。
+本地全量 1500 项通过；该代码提交的托管 run 须在提交后取得，不能使用 C2 的
+1412 项记录代替。
+
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为
 contents:read，checkout 不保留凭据；第三方 action 固定到 commit。PR 使用普通

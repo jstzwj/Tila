@@ -9,6 +9,7 @@ trash/
 artifacts/m2-proof-audit/
 artifacts/race-audit/
 artifacts/c2-audit/
+artifacts/uniformity-audit/
 artifacts/m2-gpu-audit/
 artifacts/ci-gpu/
 artifacts/correctness-gpu/

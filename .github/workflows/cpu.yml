@@ -51,6 +51,10 @@ jobs:
           if not cases or any(c.find(tag) is not None for c in cases
                               for tag in ('skipped', 'failure', 'error')):
               raise SystemExit('CPU acceptance requires nonempty tests with no skips/failures/errors')
+          import json
+          uniformity = json.load(open('artifacts/cpu/m4-05d-uniformity-summary.json'))
+          if not uniformity['complete'] or uniformity['status'] != 'passed' or uniformity['cases'] != 68:
+              raise SystemExit('M4-05d acceptance requires all 68 fixed cases')
           print(f'CPU acceptance: {len(cases)} passed, zero skipped')
           PY
       - name: Save hosted CPU test report
@@ -62,7 +66,9 @@ jobs:
             artifacts/cpu/results.xml
             artifacts/cpu/m4-04d-race-summary.json
             artifacts/cpu/c2-summary.json
+            artifacts/cpu/m4-05d-uniformity-summary.json
             artifacts/c2-audit/
+            artifacts/uniformity-audit/
             artifacts/m2-proof-audit/
             artifacts/race-audit/
           if-no-files-found: warn

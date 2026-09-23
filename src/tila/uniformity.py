@@ -269,8 +269,12 @@ class _Analysis:
             inputs = tuple(_key(r) for r in chosen if r is not None)
             # Missing incoming definitions are never a uniformity fact.
             fixed = U if any(r is None for r in chosen) else None
+            # A synthetic merge has no dynamic value on a predecessor without
+            # a definition. Its control cannot certify Full participation for
+            # a consumer at this ValueRef, even if the block exit reconverges.
+            fact_flow = replace(flow, uncertain=True) if fixed == U else flow
             self.put(_key(ref), inputs + (() if selected is not None else tuple(selector)),
-                     'selected-definition' if selected is not None else kind + '-join', flow, ref, line, fixed=fixed)
+                     'selected-definition' if selected is not None else kind + '-join', fact_flow, ref, line, fixed=fixed)
             if selected is not None and chosen[0] is not None:
                 self.constants[_key(ref)] = self.constants.get(_key(chosen[0]))
             result[name] = ref

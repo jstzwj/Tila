@@ -12,10 +12,11 @@
 2026-09-21 [C2 退出审计](c2-correctness-exit-audit.md)补充有界组合、独立参考、
 故障注入与 CPU/GPU 对照；当前完整验收以 C2 记录为准，旧数量仅记录历史覆盖。
 2026-09-22 C2 对应提交的托管 CPU CI 已通过；[M4-05d 恢复评审](m4-05d-resumption-review.md)
-通过，可启动内部小域/退出审计，尚未实施；其他功能扩展仍暂停。
+通过；随后 [M4-05d 限定退出审计](uniformity-exit-audit.md)已完成内部小域观察、
+变形与故障注入。真实同步消费者仍未安装，其他功能扩展仍暂停。
 
-验证基线：`PYTHONPATH=src python -m pytest -q` = 1412 passed、零 skipped
-（C2 新增 148 项，包含 140 个模板的 1120 组绑定；包含全部既有 golden）。
+验证基线：`PYTHONPATH=src python -m pytest -q` = 1500 passed、零 skipped
+（M4-05d 新增 88 项，含 68 组固定绑定；包含全部既有 golden）。
 
 M4-04d [Race 退出审计](race-exit-audit.md)已完成：88 项 Race 专项，新增小域枚举、
 变形、故障注入和重放；限定子集验收完成，整体 Race 仍 Partial。
@@ -23,6 +24,8 @@ M4-05b 已冻结 [ADR-019](adr/019-minimal-uniformity.md) 为 Accepted，并实�
 [内部 uniformity 分析](uniformity-analysis.md)：值/控制分离、定义边/循环固定点、
 独立预算与 verifier。M4-05c 已增加[可选详细输出](uniformity-audit.md)、golden 与绑定隔离，
 无策略 env、活动 UNIFORM 错误码或同步消费。
+M4-05d 在逻辑定义点对照 68 组绑定/1570 条具体事件，并修正缺失入边的合并引用
+控制保证；证据与边界见[退出审计](uniformity-exit-audit.md)。Uniformity 仍 Partial。
 
 M3-01 固定环境已从 `ci/gpu/uv.lock` 重建；自动 GPU CI 已撤下，保留本地验收，
 当前覆盖 501 个 GPU 测试节点/645 个语义案例，初始支持仅 RTX 3090/SM86。
@@ -42,6 +45,7 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
 C2 提交 `7edd591` 的托管 CPU CI 已通过 1412 项，JUnit/golden、完整 1120 组
 C2 绑定与 Race 枚举附件已核实，见 [CPU CI 记录](cpu-ci.md)。
+M4-05d 的 1500 项本地回归已通过；对应提交的托管 CPU 证据仍须单独取得。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。
