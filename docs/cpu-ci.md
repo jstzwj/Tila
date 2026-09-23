@@ -49,8 +49,12 @@ runner labels=`ubuntu-24.04`、group=GitHub Actions；附件副本在
 
 M4-05d 已将完整的 68 组 Uniformity 小域摘要加入回归门禁，并上传
 `artifacts/cpu/m4-05d-uniformity-summary.json` 及实际产生的失败重放目录。
-本地全量 1500 项通过；该代码提交的托管 run 须在提交后取得，不能使用 C2 的
-1412 项记录代替。
+提交 `02ce822` 的[托管 run](https://github.com/jstzwj/Tila/actions/runs/35858343205)
+已于 2026-09-23 成功：**1500 项、零失败/错误/跳过**。下载的 `cpu-test-report`
+核对 JUnit、59 项名称/类名含 golden 的记录、完整 68 组 Uniformity 摘要
+（1570 事件/36 次读取）、完整 1120 组 C2 摘要和 819 次 Race 观察。
+runner labels=`ubuntu-24.04`、group=GitHub Actions；副本在
+`artifacts/cpu/hosted-02ce822/`。成功 run 没有失败重放目录，不视为附件缺失。
 
 工作流不连接开发者机器，不需要 GPU、仓库 secret 或 Triton。PyTorch 使用官方
 CPU-only wheel `2.10.0+cpu`，用于 tensor view/bf16 写回和宿主转换拒绝测试。仓库权限为

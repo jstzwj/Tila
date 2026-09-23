@@ -45,7 +45,8 @@ M3-06 [退出审计](m3-exit-audit.md)及[矩阵补测](m3-matrix-followup.md)�
 已实现可选详细输出与缓存／绑定隔离验收；后续 M4-03/04 已实现 atomic/Race 限定子集。
 C2 提交 `7edd591` 的托管 CPU CI 已通过 1412 项，JUnit/golden、完整 1120 组
 C2 绑定与 Race 枚举附件已核实，见 [CPU CI 记录](cpu-ci.md)。
-M4-05d 的 1500 项本地回归已通过；对应提交的托管 CPU 证据仍须单独取得。
+M4-05d 提交 `02ce822` 的本地与托管 CPU 回归均通过 1500 项；JUnit/golden、
+Uniformity/C2/Race 附件已核实，见 [CPU CI 记录](cpu-ci.md)。
 
 M3-02 已完成 grid/零启动门禁、集中 target policy、lowering 前结构 verifier、
 源码/ABI/布局缓存指纹和 hint/alignment 负测试，见 [Launch 与 target](launch-target.md)。

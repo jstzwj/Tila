@@ -32,7 +32,8 @@ C1 后续提交 0906bc6 的托管 CPU CI 已通过 1264 项并核对附件。
 2026-09-23 [M4-05d 限定退出审计](docs/uniformity-exit-audit.md)已完成：
 17 类模板/68 绑定、1570 条执行事件、十一类错误强保证注入与单案例重放；
 修复缺失入口定义的循环出口合并引用错误 Full。CPU 本地全量 1500 项通过；
-本提交托管 CPU CI 待提交后核实。真实同步消费者未安装，M4 仍 Partial。
+提交 `02ce822` 的托管 CPU CI 通过 1500 项，JUnit/golden、Uniformity/C2/Race
+附件已核实。真实同步消费者未安装，M4 仍 Partial。
 
 基线日期：2026-09-19（M0/M1/M2 已完成，M3 进行中）
 
@@ -1006,7 +1007,7 @@ M3-01 已有固定组合支持矩阵和本地证据；隔离 GPU 持续验收仍
 | M4-05a | DONE | 最小 Uniformity 设计 ADR | M4-01/04、ADR-019 Proposed | 四层级、值/控制分离、定义边复用、传播规则与正反例、消费/诊断边界；仅文档，无运行时功能 |
 | M4-05b | DONE | Uniformity 评审冻结与内部分析 | ADR-019 Accepted | 内部值/控制摘要、定义入边、固定点/预算、重算 verifier；43 项专项、CPU1170通过；见 docs/uniformity-analysis.md；无同步 API/公共策略 |
 | M4-05c | DONE | Uniformity 详细输出与隔离 | M4-05b | show-uniformity、details.v1、3份golden、21项专项、CPU1191通过；Const/预算/历史launch/缓存隔离；逻辑消费fixture不等于同步API；见 docs/uniformity-audit.md |
-| M4-05d | DONE | Uniformity 小域与限定退出审计 | C0/C1/C2 限定退出及托管 CPU 验收、M4-05b/c | 17 类模板/68 绑定、1570 事件、十一类过强保证注入、单案例重放；修正缺失入边的合并引用控制；本地 CPU1500通过，托管 CPU 待本提交核验；见 docs/uniformity-exit-audit.md。无真实同步消费，不代替整个 M4 或 M3 验收 |
+| M4-05d | DONE | Uniformity 小域与限定退出审计 | C0/C1/C2 限定退出及托管 CPU 验收、M4-05b/c | 17 类模板/68 绑定、1570 事件、十一类过强保证注入、单案例重放；修正缺失入边的合并引用控制；02ce822 本地/托管 CPU1500及附件通过，见 docs/uniformity-exit-audit.md。无真实同步消费，不代替整个 M4 或 M3 验收 |
 | C0-01 | DONE | 错误 Safe 与入口精化 | 已确认反例 | 保真符号规范键；实际 ABI 舍入后检查精化；保留 numpy.float64 宿主兼容 |
 | C0-02 | DONE | 静态类型与地址语义 | ADR-020 Accepted | 保守 shape 合并、嵌套 variant 传播、checked i64 指针位移及每步启动门禁 |
 | C0-03 | DONE | Safe 规则与跨层审计 | C0-01/02 | 8 类出口清单；715 表达式/57,915 次求值、450 组直接/区间枚举、独立 SMT 蕴含、缓存隔离 |

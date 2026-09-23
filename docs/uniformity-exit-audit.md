@@ -86,8 +86,13 @@ Launch Unknown=12、Program Full=424、Program Unknown=12。计数取自当前�
 
 全量本地 CPU 回归及 golden：**1500 passed、99 warnings、零失败/错误/跳过**；
 JUnit 为 `artifacts/cpu/m4-05d-full-results.xml`，59 项测试名称/类名含 golden。
-本提交的 GitHub 托管 CPU CI/JUnit/审计摘要：**待提交后取得**；旧 C2 run
-只作为前置条件，不替代本轮验收。
+提交 `02ce822` 的 [GitHub 托管 CPU run](https://github.com/jstzwj/Tila/actions/runs/35858343205)
+已于 2026-09-23 成功：**1500 passed、零失败/错误/跳过**，runner labels 为
+`ubuntu-24.04`、group 为 GitHub Actions。下载的 `cpu-test-report` 已核对
+JUnit、59 项名称/类名含 golden 的记录、Uniformity 摘要、C2 摘要与 Race 摘要；
+Uniformity 为 complete=true、status=passed、68 case、1570 事件、36 次读取，
+C2 为完整 1120 组、Race 为 819 次观察。附件副本在
+`artifacts/cpu/hosted-02ce822/`。成功 run 没有失败重放目录，不视为附件缺失。
 
 ## 退出边界
 
